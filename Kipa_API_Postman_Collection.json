@@ -1,0 +1,2243 @@
+{
+	"info": {
+		"_postman_id": "kipa-api-collection",
+		"name": "Kipa Platform API",
+		"description": "Complete API collection for Kipa - Escrow + Logistics Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header.\nGet the token by calling `/auth/otp/send` and `/auth/otp/verify`.\n\n## Payment Flow\n1. Create payment request (seller)\n2. Configure fulfillment to generate payment link\n3. Initialize payment (buyer) - gets Paystack URL\n4. Complete payment on Paystack\n5. Verify payment to confirm and create escrow\n\n## Variables\nSet these variables in your Postman environment:\n- `base_url`: Your API base URL (e.g., http://localhost:8080)\n- `access_token`: Your JWT access token (obtained from login)\n- `refresh_token`: Your JWT refresh token\n- `payment_code`: Payment code for testing (e.g., KIP-ABC123)\n- `user_id`: Current authenticated user ID\n- `escrow_id`: Test escrow ID\n- `payment_request_id`: Test payment request ID\n- `purchase_id`: Test purchase ID\n- `order_id`: Test order ID\n- `paystack_url`: Paystack payment URL\n- `paystack_reference`: Paystack transaction reference",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Check if the API is running"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Send OTP",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    console.log('OTP sent successfully');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"+2348012345678\",\n  \"delivery_method\": \"sms\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/otp/send",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "otp", "send"]
+						},
+						"description": "Send OTP to user's phone number. \n\ndelivery_method can be:\n- `sms` - Send via SMS\n- `voice` - Send via voice call"
+					},
+					"response": []
+				},
+				{
+					"name": "Verify OTP",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('access_token', jsonData.data.access_token);",
+									"    pm.environment.set('refresh_token', jsonData.data.refresh_token);",
+									"    pm.environment.set('user_id', jsonData.data.user.id);",
+									"    console.log('Tokens saved to environment');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"+2348012345678\",\n  \"otp\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/otp/verify",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "otp", "verify"]
+						},
+						"description": "Verify OTP and get authentication tokens"
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('access_token', jsonData.data.access_token);",
+									"    pm.environment.set('refresh_token', jsonData.data.refresh_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/token/refresh",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "token", "refresh"]
+						},
+						"description": "Refresh access token using refresh token"
+					},
+					"response": []
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/logout",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "logout"]
+						},
+						"description": "Logout and invalidate session"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Current User (Me)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/me",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "me"]
+						},
+						"description": "Get authenticated user's profile"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"email\": \"john@example.com\",\n  \"profile_photo_url\": \"https://example.com/photo.jpg\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "profile"]
+						},
+						"description": "Update user profile (all fields optional)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Payment Requests (Seller)",
+			"item": [
+				{
+					"name": "Create Draft Payment Request",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('payment_request_id', jsonData.data.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"item_name\": \"iPhone 15 Pro Max\",\n  \"item_description\": \"Brand new, sealed in box\",\n  \"item_price\": 8500.00,\n  \"item_images\": [\"https://example.com/image1.jpg\"],\n  \"processing_time_hours\": 24,\n  \"is_reusable\": false,\n  \"max_uses\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/payment-requests",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "payment-requests"]
+						},
+						"description": "Create a new draft payment request (Step 1)"
+					},
+					"response": []
+				},
+				{
+					"name": "List My Payment Requests",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/payment-requests",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "payment-requests"]
+						},
+						"description": "List all payment requests for the authenticated seller"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Payment Request by ID",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/payment-requests/{{payment_request_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "payment-requests", "{{payment_request_id}}"]
+						},
+						"description": "Get specific payment request details"
+					},
+					"response": []
+				},
+				{
+					"name": "Configure Fulfillment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('payment_code', jsonData.data.payment_request.payment_code);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"delivery_type\": \"intra_state\",\n  \"pickup_address\": \"123 Lagos Street, Victoria Island\",\n  \"pickup_lat\": 6.4281,\n  \"pickup_lng\": 3.4219,\n  \"dropoff_address\": \"456 Ikeja Avenue, Ikeja\",\n  \"dropoff_lat\": 6.6018,\n  \"dropoff_lng\": 3.3515,\n  \"vehicle_type\": \"motorcycle\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/payment-requests/{{payment_request_id}}/fulfillment",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "payment-requests", "{{payment_request_id}}", "fulfillment"]
+						},
+						"description": "Configure fulfillment and generate payment link (Step 2)\n\nDelivery types: intra_state, inter_state, pickup\n\nVehicle types: motorcycle, car"
+					},
+					"response": []
+				},
+				{
+					"name": "Mark Ready for Pickup",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/payment-requests/{{payment_request_id}}/ready-for-pickup",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "payment-requests", "{{payment_request_id}}", "ready-for-pickup"]
+						},
+						"description": "Mark order as ready for pickup and trigger rider search for intra-state deliveries.\n\n**No request body required** - vehicle type is already set during fulfillment configuration.\n\n**Note:** Only riders with matching vehicle type (set during fulfillment) will see and can accept this job."
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Payment Request",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/payment-requests/{{payment_request_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "payment-requests", "{{payment_request_id}}"]
+						},
+						"description": "Cancel a payment request (only if not paid)"
+					},
+					"response": []
+				},
+				{
+					"name": "Edit Payment Request",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"item_name\": \"Updated Item Name\",\n  \"item_description\": \"Updated description\",\n  \"item_price\": 9500.00,\n  \"item_images\": [\"https://example.com/new-image.jpg\"],\n  \"processing_time_hours\": 48\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/payment-requests/{{payment_request_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "payment-requests", "{{payment_request_id}}"]
+						},
+						"description": "Edit a payment request (only works for draft or link_active status). All fields are optional."
+					},
+					"response": []
+				},
+				{
+					"name": "List Payment Request History",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/payment-requests/history",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "payment-requests", "history"]
+						},
+						"description": "List expired, cancelled, completed, and refunded payment requests"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Uploads",
+			"item": [
+				{
+					"name": "Upload Profile Picture",
+					"request": {
+						"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]},
+						"method": "POST",
+						"header": [],
+						"body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": ""}]},
+						"url": {"raw": "{{base_url}}/api/v1/uploads/profile-picture", "host": ["{{base_url}}"], "path": ["api", "v1", "uploads", "profile-picture"]},
+						"description": "Upload profile picture (max 5MB, JPEG/PNG/WebP/GIF)"
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Item Image",
+					"request": {
+						"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]},
+						"method": "POST",
+						"header": [],
+						"body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": ""}]},
+						"url": {"raw": "{{base_url}}/api/v1/uploads/item-image", "host": ["{{base_url}}"], "path": ["api", "v1", "uploads", "item-image"]},
+						"description": "Upload item image for payment requests"
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Rider Document",
+					"request": {
+						"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]},
+						"method": "POST",
+						"header": [],
+						"body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": ""}]},
+						"url": {"raw": "{{base_url}}/api/v1/uploads/rider/license", "host": ["{{base_url}}"], "path": ["api", "v1", "uploads", "rider", "license"]},
+						"description": "Upload rider document. Types: license, nin, face, vehicle"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Sales & Earnings (Seller)",
+			"item": [
+				{
+					"name": "List My Sales",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/sales?limit=20&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "sales"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "List all orders on seller's payment requests with pagination"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Sale by ID",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/sales/{{order_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "sales", "{{order_id}}"]
+						},
+						"description": "Get specific sale with escrow details and buyer information"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Sale Timeline",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/sales/{{order_id}}/timeline",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "sales", "{{order_id}}", "timeline"]
+						},
+						"description": "Get transaction timeline showing: link_created → payment_received → ready_for_pickup → rider_assigned → picked_up → delivered → payment_released. Returns pickup_code for seller to verify rider."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Earnings Summary",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/earnings",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "earnings"]
+						},
+						"description": "Get earnings summary showing pending vs released amounts"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Buyer / Purchases",
+			"item": [
+				{
+					"name": "View Payment Page (Public)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/pay/{{payment_code}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pay", "{{payment_code}}"]
+						},
+						"description": "View payment page data (no auth required)"
+					},
+					"response": []
+				},
+				{
+					"name": "Initialize Payment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('order_id', jsonData.data.order_id);",
+									"    pm.environment.set('paystack_url', jsonData.data.paystack_url);",
+									"    console.log('Payment initialized. Paystack URL: ' + jsonData.data.paystack_url);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"payment_method\": \"card\",\n  \"callback_url\": \"https://yourapp.com/payment/callback\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/pay/{{payment_code}}/initialize",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pay", "{{payment_code}}", "initialize"]
+						},
+						"description": "Initialize payment and get Paystack URL for card payment"
+					},
+					"response": []
+				},
+				{
+					"name": "Verify Payment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('escrow_id', jsonData.data.escrow_id);",
+									"    console.log('Payment verified successfully');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/pay/{{payment_code}}/verify?reference={{paystack_reference}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "pay", "{{payment_code}}", "verify"],
+							"query": [
+								{
+									"key": "reference",
+									"value": "{{paystack_reference}}",
+									"description": "Paystack transaction reference"
+								}
+							]
+						},
+						"description": "Verify payment after Paystack callback"
+					},
+					"response": []
+				},
+				{
+					"name": "List My Purchases",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases"]
+						},
+						"description": "List all purchases for authenticated buyer"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Purchase Details",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/{{purchase_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "{{purchase_id}}"]
+						},
+						"description": "Get specific purchase details including delivery info (dropoff_code) when rider is assigned"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Purchase Timeline",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/{{purchase_id}}/timeline",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "{{purchase_id}}", "timeline"]
+						},
+						"description": "Get transaction timeline showing: link_created → payment_received → awaiting_rider → rider_assigned → picked_up → in_transit → delivered"
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Delivery",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/{{purchase_id}}/confirm",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "{{purchase_id}}", "confirm"]
+						},
+						"description": "Confirm delivery early (releases escrow to seller)"
+					},
+					"response": []
+				},
+				{
+					"name": "Dispute Purchase",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Item received was damaged\",\n  \"evidence\": [\"https://example.com/photo1.jpg\", \"https://example.com/photo2.jpg\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/{{purchase_id}}/dispute",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "{{purchase_id}}", "dispute"]
+						},
+						"description": "Open a dispute on a purchase"
+					},
+					"response": []
+				},
+				{
+					"name": "List Orders",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.data.orders && jsonData.data.orders.length > 0) {",
+									"        pm.environment.set('order_id', jsonData.data.orders[0].id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/orders",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "orders"]
+						},
+						"description": "List buyer's orders"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Order by ID",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/orders/{{order_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "orders", "{{order_id}}"]
+						},
+						"description": "Get specific order details"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Rider",
+			"item": [
+				{
+					"name": "Get Rider Profile",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "profile"]
+						},
+						"description": "Get rider profile"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Rider Profile",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"license_number\": \"LIC-12345678\",\n  \"nin_number\": \"12345678901\",\n  \"license_photo_url\": \"https://example.com/license.jpg\",\n  \"nin_photo_url\": \"https://example.com/nin.jpg\",\n  \"face_verification_url\": \"https://example.com/face.jpg\",\n  \"vehicle_type\": \"motorcycle\",\n  \"vehicle_plate\": \"ABC-123-XY\",\n  \"vehicle_photo_url\": \"https://example.com/vehicle.jpg\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "profile"]
+						},
+						"description": "Create new rider profile.\n\n**Vehicle Types:**\n- `motorcycle` - For bike/okada riders\n- `car` - For car/van drivers\n\n**Note:** Your vehicle type determines which delivery jobs you can see and accept. Sellers choose the vehicle type when marking orders ready for delivery."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Rider Profile",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"vehicle_type\": \"car\",\n  \"vehicle_plate\": \"NEW-456-AB\",\n  \"vehicle_photo_url\": \"https://example.com/new-vehicle.jpg\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "profile"]
+						},
+						"description": "Update rider profile"
+					},
+					"response": []
+				},
+				{
+					"name": "Go Online",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/go-online",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "go-online"]
+						},
+						"description": "Set rider as online and available for deliveries"
+					},
+					"response": []
+				},
+				{
+					"name": "Go Offline",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/go-offline",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "go-offline"]
+						},
+						"description": "Set rider as offline"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Location",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"latitude\": 6.5244,\n  \"longitude\": 3.3792\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/location",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "location"]
+						},
+						"description": "Update rider's current location"
+					},
+					"response": []
+				},
+				{
+					"name": "Toggle Location Sharing",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/location-sharing",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "location-sharing"]
+						},
+						"description": "Toggle location sharing for privacy. When disabled, location won't be broadcast."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Available Jobs",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/available-jobs",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "available-jobs"]
+						},
+						"description": "Get available delivery jobs matching rider's vehicle type.\n\n**Vehicle Type Filtering:**\nJobs are filtered based on the rider's registered vehicle type (motorcycle or car). Only jobs that match your vehicle type will be shown.\n\n**Response includes:**\n- `required_vehicle_type`: The vehicle type required for this job\n- `fee_breakdown`: Shows your earnings breakdown:\n  - `delivery_fee`: Full fee from buyer\n  - `platform_commission`: 15% platform fee\n  - `your_take`: What you keep (85%)\n\n**Direct Payment Model:**\nBuyer pays you the full delivery fee directly (cash/transfer). You owe the platform 15% commission."
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Job",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/jobs/{{job_id}}/accept",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "jobs", "{{job_id}}", "accept"]
+						},
+						"description": "Accept a delivery job.\n\n**Commission Block:**\nIf you have 5+ unpaid commissions, you'll be blocked from accepting jobs with `COMMISSION_BLOCKED` error. Use `/rider/commission/pay` to clear your outstanding commission.\n\n**Vehicle Type Validation:**\nYour registered vehicle type must match the job's required vehicle type. If there's a mismatch, you'll receive a `VEHICLE_TYPE_MISMATCH` error.\n\n**On Success:**\n- Job status changes to `accepted`\n- Pickup and dropoff codes are generated\n- You become the assigned rider"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Active Job",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/jobs/active",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "jobs", "active"]
+						},
+						"description": "Get current active job"
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Pickup",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/jobs/{{job_id}}/pickup",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "jobs", "{{job_id}}", "pickup"]
+						},
+						"description": "Confirm pickup with code from seller"
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Delivery",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"789012\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/jobs/{{job_id}}/deliver",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "jobs", "{{job_id}}", "deliver"]
+						},
+						"description": "Confirm delivery with code from buyer"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job History",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/jobs/history",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "jobs", "history"]
+						},
+						"description": "Get delivery job history"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Earnings",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/earnings",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "earnings"]
+						},
+						"description": "Get earnings summary"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Commission Summary",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/commission",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "commission"]
+						},
+						"description": "Get commission summary showing:\n- `total_owed`: Total outstanding commission amount\n- `unpaid_ride_count`: Number of unpaid rides\n- `is_blocked`: Whether rider is blocked from accepting jobs\n- `rides_until_blocked`: How many more unpaid rides before blocking (grace period = 5)\n- `grace_period_rides`: Maximum unpaid rides allowed (5)\n- `commission_rate`: Platform commission rate (0.15 = 15%)\n\n**Direct Payment Model:**\nBuyers pay riders directly for delivery fees. Riders owe the platform 15% commission per delivery."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Pending Commissions",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/commission/pending",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "commission", "pending"]
+						},
+						"description": "Get list of all pending commission records.\n\n**Response includes:**\n- List of commission records with delivery_fee, commission_rate, commission_amount\n- Total owed amount\n- Count of pending commissions"
+					},
+					"response": []
+				},
+				{
+					"name": "Pay Commission",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/commission/pay",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "commission", "pay"]
+						},
+						"description": "Pay ALL pending commissions from wallet balance.\n\n**IMPORTANT:** Partial payments are NOT allowed. The full outstanding amount will be deducted from your wallet.\n\n**Success Response:**\n- `amount_paid`: Total amount deducted\n- `commissions_paid`: Number of commission records cleared\n- `new_wallet_balance`: Your new wallet balance\n- `is_now_unblocked`: Whether you can now accept jobs\n\n**Possible Errors:**\n- `INSUFFICIENT_BALANCE`: Not enough wallet balance\n- `NO_COMMISSION_OWED`: No outstanding commission to pay"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Errands",
+			"item": [
+				{
+					"name": "Create Errand",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('errand_id', jsonData.data.errand.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickup_address\": \"123 Market Street, Victoria Island\",\n  \"pickup_lat\": 6.4281,\n  \"pickup_lng\": 3.4219,\n  \"pickup_instructions\": \"Ask for the package at the reception\",\n  \"dropoff_address\": \"456 Residential Ave, Ikeja\",\n  \"dropoff_lat\": 6.6018,\n  \"dropoff_lng\": 3.3515,\n  \"package_description\": \"Documents in brown envelope\",\n  \"package_weight_kg\": 0.5,\n  \"vehicle_type\": \"motorcycle\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/errands",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "errands"]
+						},
+						"description": "Create a new errand request. Response includes calculated delivery_fee and fee_breakdown."
+					},
+					"response": []
+				},
+				{
+					"name": "List Errands",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/errands",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "errands"]
+						},
+						"description": "List all your errands"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Active Errands",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/errands/active",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "errands", "active"]
+						},
+						"description": "Get currently active errands"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Errand by ID",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/errands/{{errand_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "errands", "{{errand_id}}"]
+						},
+						"description": "Get errand details by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Errand",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/errands/{{errand_id}}/confirm",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "errands", "{{errand_id}}", "confirm"]
+						},
+						"description": "Confirm errand and start rider search. Returns dropoff_code."
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Errand",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/errands/{{errand_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "errands", "{{errand_id}}"]
+						},
+						"description": "Cancel errand (only if draft, searching, or accepted)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Tracking",
+			"item": [
+				{
+					"name": "Get Job Location",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tracking/jobs/{{job_id}}/location",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tracking", "jobs", "{{job_id}}", "location"]
+						},
+						"description": "Get latest rider location for a delivery job. Returns lat, lng, heading, speed, eta_minutes."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job Location History",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tracking/jobs/{{job_id}}/location/history",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tracking", "jobs", "{{job_id}}", "location", "history"]
+						},
+						"description": "Get location history for trip replay (last 100 points)."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Errand Location",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/tracking/errands/{{errand_id}}/location",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "tracking", "errands", "{{errand_id}}", "location"]
+						},
+						"description": "Get latest rider location for an errand."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "WebSocket",
+			"item": [
+				{
+					"name": "WebSocket Connection Info",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "ws://{{base_url}}/api/v1/ws?token={{access_token}}&role=user&job_id={{job_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "ws"]
+						},
+						"description": "WebSocket endpoint for real-time updates.\n\n**URL:** ws://host/api/v1/ws?token=JWT&role=user|rider&job_id=xxx\n\n**Users:** Receive rider_location and job_status messages\n**Riders:** Send location_update, receive new_job_available"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Wallet",
+			"item": [
+				{
+					"name": "Get Wallet Balance",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet"]
+						},
+						"description": "Get wallet balance"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Transaction History",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/transactions",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "transactions"]
+						},
+						"description": "Get transaction history"
+					},
+					"response": []
+				},
+				{
+					"name": "Request Withdrawal (Legacy)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 50000.00,\n  \"bank_account_id\": \"uuid\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/withdraw",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "withdraw"]
+						},
+						"description": "Request withdrawal (legacy endpoint)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Wallet Funding",
+			"item": [
+				{
+					"name": "Initialize Top-Up",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 10000.00\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/top-up",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "top-up"]
+						},
+						"description": "Initialize card top-up via Paystack"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Top-Up History",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/top-up/history",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "top-up", "history"]
+						},
+						"description": "Get top-up history"
+					},
+					"response": []
+				},
+				{
+					"name": "Verify Top-Up",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reference\": \"PAYSTACK-REF-123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/top-up/verify",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "top-up", "verify"]
+						},
+						"description": "Verify top-up payment"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Virtual Account",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/virtual-account",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "virtual-account"]
+						},
+						"description": "Get virtual account details"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Virtual Account (DVA)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/virtual-account",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "virtual-account"]
+						},
+						"description": "Create Dedicated Virtual Account (DVA) for automatic funding"
+					},
+					"response": []
+				},
+				{
+					"name": "Request Withdrawal v2",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 50000.00,\n  \"bank_account_id\": \"uuid\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/withdraw/v2",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "withdraw", "v2"]
+						},
+						"description": "Request withdrawal to bank account"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Withdrawal History",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/withdrawals",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "withdrawals"]
+						},
+						"description": "Get withdrawal history"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Withdrawal by ID",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/withdrawals/{{withdrawal_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "withdrawals", "{{withdrawal_id}}"]
+						},
+						"description": "Get specific withdrawal details"
+					},
+					"response": []
+				},
+				{
+					"name": "List Bank Accounts",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/bank-accounts",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "bank-accounts"]
+						},
+						"description": "List saved bank accounts"
+					},
+					"response": []
+				},
+				{
+					"name": "Add Bank Account",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bank_code\": \"058\",\n  \"account_number\": \"0123456789\",\n  \"account_name\": \"John Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/bank-accounts",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "bank-accounts"]
+						},
+						"description": "Add a new bank account"
+					},
+					"response": []
+				},
+				{
+					"name": "Set Default Bank Account",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/bank-accounts/{{bank_account_id}}/default",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "bank-accounts", "{{bank_account_id}}", "default"]
+						},
+						"description": "Set a bank account as default for withdrawals"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Bank Account",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/bank-accounts/{{bank_account_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "bank-accounts", "{{bank_account_id}}"]
+						},
+						"description": "Delete a saved bank account"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Banks",
+			"item": [
+				{
+					"name": "List Available Banks",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/banks",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "banks"]
+						},
+						"description": "Get list of available banks for Nigeria"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Webhooks",
+			"item": [
+				{
+					"name": "Paystack Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "X-Paystack-Signature",
+								"value": "{{paystack_signature}}",
+								"description": "HMAC-SHA512 signature"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"event\": \"charge.success\",\n  \"data\": {\n    \"reference\": \"PAYSTACK-REF-123456\",\n    \"amount\": 10000000,\n    \"status\": \"success\",\n    \"metadata\": {\n      \"custom_fields\": []\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/webhooks/paystack",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "webhooks", "paystack"]
+						},
+						"description": "Handle Paystack webhook events (verified via HMAC-SHA512)"
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "payment_code",
+			"value": "KIP-ABC123",
+			"type": "string"
+		},
+		{
+			"key": "payment_request_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "purchase_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "escrow_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "job_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "bank_account_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "withdrawal_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "paystack_signature",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "order_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "paystack_url",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "paystack_reference",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "errand_id",
+			"value": "",
+			"type": "string"
+		}
+
+	]
+}
