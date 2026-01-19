@@ -16,8 +16,6 @@ import (
 
 	"kipa/internal/config"
 )
-
-// Client handles Paystack API operations
 type Client struct {
 	httpClient *http.Client
 	secretKey  string
@@ -25,8 +23,6 @@ type Client struct {
 	baseURL    string
 	logger     *zap.Logger
 }
-
-// NewClient creates a new Paystack client
 func NewClient(cfg *config.PaystackConfig, logger *zap.Logger) *Client {
 	return &Client{
 		httpClient: &http.Client{
@@ -38,8 +34,6 @@ func NewClient(cfg *config.PaystackConfig, logger *zap.Logger) *Client {
 		logger:    logger,
 	}
 }
-
-// TransactionStatus represents the status of a Paystack transaction
 type TransactionStatus string
 
 const (
@@ -48,15 +42,11 @@ const (
 	TransactionStatusAbandoned TransactionStatus = "abandoned"
 	TransactionStatusPending   TransactionStatus = "pending"
 )
-
-// VerifyTransactionResponse represents the response from Paystack verify endpoint
 type VerifyTransactionResponse struct {
 	Status  bool             `json:"status"`
 	Message string           `json:"message"`
 	Data    *TransactionData `json:"data"`
 }
-
-// TransactionData contains transaction details
 type TransactionData struct {
 	ID              int64             `json:"id"`
 	Domain          string            `json:"domain"`
@@ -73,8 +63,6 @@ type TransactionData struct {
 	Customer        CustomerData      `json:"customer"`
 	Authorization   AuthorizationData `json:"authorization"`
 }
-
-// CustomerData contains customer information
 type CustomerData struct {
 	ID           int64  `json:"id"`
 	FirstName    string `json:"first_name"`
@@ -83,8 +71,6 @@ type CustomerData struct {
 	CustomerCode string `json:"customer_code"`
 	Phone        string `json:"phone"`
 }
-
-// AuthorizationData contains payment authorization details
 type AuthorizationData struct {
 	AuthorizationCode string `json:"authorization_code"`
 	Bin               string `json:"bin"`
@@ -100,8 +86,6 @@ type AuthorizationData struct {
 	Signature         string `json:"signature"`
 	AccountName       string `json:"account_name"`
 }
-
-// InitializeTransactionRequest represents a request to initialize a transaction
 type InitializeTransactionRequest struct {
 	Email       string                 `json:"email"`
 	Amount      int64                  `json:"amount"` // Amount in kobo
@@ -110,28 +94,20 @@ type InitializeTransactionRequest struct {
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 	Channels    []string               `json:"channels,omitempty"`
 }
-
-// InitializeTransactionResponse represents the response from initializing a transaction
 type InitializeTransactionResponse struct {
 	Status  bool            `json:"status"`
 	Message string          `json:"message"`
 	Data    *InitializeData `json:"data"`
 }
-
-// InitializeData contains initialization response data
 type InitializeData struct {
 	AuthorizationURL string `json:"authorization_url"`
 	AccessCode       string `json:"access_code"`
 	Reference        string `json:"reference"`
 }
-
-// WebhookEvent represents a Paystack webhook event
 type WebhookEvent struct {
 	Event string          `json:"event"`
 	Data  json.RawMessage `json:"data"`
 }
-
-// VerifyTransaction verifies a transaction using its reference
 func (c *Client) VerifyTransaction(ctx context.Context, reference string) (*VerifyTransactionResponse, error) {
 	url := fmt.Sprintf("%s/transaction/verify/%s", c.baseURL, reference)
 
@@ -171,8 +147,6 @@ func (c *Client) VerifyTransaction(ctx context.Context, reference string) (*Veri
 
 	return &result, nil
 }
-
-// InitializeTransaction initializes a new transaction
 func (c *Client) InitializeTransaction(ctx context.Context, req *InitializeTransactionRequest) (*InitializeTransactionResponse, error) {
 	url := fmt.Sprintf("%s/transaction/initialize", c.baseURL)
 
@@ -216,9 +190,6 @@ func (c *Client) InitializeTransaction(ctx context.Context, req *InitializeTrans
 
 	return &result, nil
 }
-
-// VerifyWebhookSignature verifies the signature of a webhook request using the secret key
-// Paystack signs webhooks with HMAC-SHA512 using your secret key
 func (c *Client) VerifyWebhookSignature(body []byte, signature string) bool {
 	if c.secretKey == "" {
 		c.logger.Warn("secret key not configured, skipping signature verification")
@@ -231,8 +202,6 @@ func (c *Client) VerifyWebhookSignature(body []byte, signature string) bool {
 
 	return hmac.Equal([]byte(expectedSignature), []byte(signature))
 }
-
-// ParseWebhookEvent parses a webhook event from the request body
 func (c *Client) ParseWebhookEvent(body []byte) (*WebhookEvent, error) {
 	var event WebhookEvent
 	if err := json.Unmarshal(body, &event); err != nil {
@@ -240,8 +209,6 @@ func (c *Client) ParseWebhookEvent(body []byte) (*WebhookEvent, error) {
 	}
 	return &event, nil
 }
-
-// GetTransactionDataFromEvent extracts transaction data from a webhook event
 func (c *Client) GetTransactionDataFromEvent(event *WebhookEvent) (*TransactionData, error) {
 	var data TransactionData
 	if err := json.Unmarshal(event.Data, &data); err != nil {
@@ -249,25 +216,15 @@ func (c *Client) GetTransactionDataFromEvent(event *WebhookEvent) (*TransactionD
 	}
 	return &data, nil
 }
-
-// AmountToKobo converts Naira amount to Kobo (multiplies by 100)
 func AmountToKobo(naira float64) int64 {
 	return int64(naira * 100)
 }
-
-// KoboToNaira converts Kobo amount to Naira (divides by 100)
 func KoboToNaira(kobo int64) float64 {
 	return float64(kobo) / 100
 }
-
-// GetPublicKey returns the public key for frontend use
 func (c *Client) GetPublicKey() string {
 	return c.publicKey
 }
-
-// ==================== Customer API ====================
-
-// CreateCustomerRequest represents a request to create a customer
 type CreateCustomerRequest struct {
 	Email     string                 `json:"email"`
 	FirstName string                 `json:"first_name,omitempty"`
@@ -275,15 +232,11 @@ type CreateCustomerRequest struct {
 	Phone     string                 `json:"phone,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
-
-// CreateCustomerResponse represents the response from creating a customer
 type CreateCustomerResponse struct {
 	Status  bool                `json:"status"`
 	Message string              `json:"message"`
 	Data    *CustomerDetailData `json:"data"`
 }
-
-// CustomerDetailData contains detailed customer information
 type CustomerDetailData struct {
 	ID                       int64       `json:"id"`
 	FirstName                string      `json:"first_name"`
@@ -295,8 +248,6 @@ type CustomerDetailData struct {
 	RiskAction               string      `json:"risk_action"`
 	InternationalFormatPhone string      `json:"international_format_phone"`
 }
-
-// CreateCustomer creates a new customer on Paystack
 func (c *Client) CreateCustomer(ctx context.Context, req *CreateCustomerRequest) (*CreateCustomerResponse, error) {
 	url := fmt.Sprintf("%s/customer", c.baseURL)
 
@@ -340,23 +291,15 @@ func (c *Client) CreateCustomer(ctx context.Context, req *CreateCustomerRequest)
 
 	return &result, nil
 }
-
-// ==================== Dedicated Virtual Account (DVA) API ====================
-
-// CreateDVARequest represents a request to create a dedicated virtual account
 type CreateDVARequest struct {
 	Customer      string `json:"customer"`                 // Customer ID or code
 	PreferredBank string `json:"preferred_bank,omitempty"` // "wema-bank", "titan-paystack", etc.
 }
-
-// CreateDVAResponse represents the response from creating a DVA
 type CreateDVAResponse struct {
 	Status  bool     `json:"status"`
 	Message string   `json:"message"`
 	Data    *DVAData `json:"data"`
 }
-
-// DVAData contains dedicated virtual account information
 type DVAData struct {
 	Bank            DVABankData     `json:"bank"`
 	AccountName     string          `json:"account_name"`
@@ -371,15 +314,11 @@ type DVAData struct {
 	Assignment      DVAAssignment   `json:"assignment"`
 	Customer        CustomerData    `json:"customer"`
 }
-
-// DVABankData contains bank information for DVA
 type DVABankData struct {
 	Name string `json:"name"`
 	ID   int64  `json:"id"`
 	Slug string `json:"slug"`
 }
-
-// DVAAssignment contains assignment details
 type DVAAssignment struct {
 	Integration  int64  `json:"integration"`
 	AssigneeID   int64  `json:"assignee_id"`
@@ -387,8 +326,6 @@ type DVAAssignment struct {
 	Expired      bool   `json:"expired"`
 	AccountType  string `json:"account_type"`
 }
-
-// CreateDedicatedVirtualAccount creates a dedicated virtual account for a customer
 func (c *Client) CreateDedicatedVirtualAccount(ctx context.Context, req *CreateDVARequest) (*CreateDVAResponse, error) {
 	url := fmt.Sprintf("%s/dedicated_account", c.baseURL)
 
@@ -432,17 +369,11 @@ func (c *Client) CreateDedicatedVirtualAccount(ctx context.Context, req *CreateD
 
 	return &result, nil
 }
-
-// ==================== Bank/Transfer API ====================
-
-// ListBanksResponse represents the response from listing banks
 type ListBanksResponse struct {
 	Status  bool       `json:"status"`
 	Message string     `json:"message"`
 	Data    []BankData `json:"data"`
 }
-
-// BankData contains bank information
 type BankData struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
@@ -456,8 +387,6 @@ type BankData struct {
 	Type      string `json:"type"`
 	IsDeleted bool   `json:"is_deleted"`
 }
-
-// ListBanks retrieves the list of banks
 func (c *Client) ListBanks(ctx context.Context, country string) (*ListBanksResponse, error) {
 	url := fmt.Sprintf("%s/bank?country=%s", c.baseURL, country)
 
@@ -486,28 +415,20 @@ func (c *Client) ListBanks(ctx context.Context, country string) (*ListBanksRespo
 
 	return &result, nil
 }
-
-// ResolveAccountRequest represents a request to resolve/verify a bank account
 type ResolveAccountRequest struct {
 	AccountNumber string `json:"account_number"`
 	BankCode      string `json:"bank_code"`
 }
-
-// ResolveAccountResponse represents the response from resolving an account
 type ResolveAccountResponse struct {
 	Status  bool               `json:"status"`
 	Message string             `json:"message"`
 	Data    *ResolvedAccountData `json:"data"`
 }
-
-// ResolvedAccountData contains resolved account information
 type ResolvedAccountData struct {
 	AccountNumber string `json:"account_number"`
 	AccountName   string `json:"account_name"`
 	BankID        int64  `json:"bank_id"`
 }
-
-// ResolveAccountNumber verifies a bank account and returns the account name
 func (c *Client) ResolveAccountNumber(ctx context.Context, accountNumber, bankCode string) (*ResolveAccountResponse, error) {
 	url := fmt.Sprintf("%s/bank/resolve?account_number=%s&bank_code=%s", c.baseURL, accountNumber, bankCode)
 
@@ -545,8 +466,6 @@ func (c *Client) ResolveAccountNumber(ctx context.Context, accountNumber, bankCo
 
 	return &result, nil
 }
-
-// CreateTransferRecipientRequest represents a request to create a transfer recipient
 type CreateTransferRecipientRequest struct {
 	Type          string                 `json:"type"`           // "nuban" for Nigerian banks
 	Name          string                 `json:"name"`           // Account name
@@ -555,15 +474,11 @@ type CreateTransferRecipientRequest struct {
 	Currency      string                 `json:"currency"`       // "NGN"
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
-
-// CreateTransferRecipientResponse represents the response from creating a recipient
 type CreateTransferRecipientResponse struct {
 	Status  bool           `json:"status"`
 	Message string         `json:"message"`
 	Data    *RecipientData `json:"data"`
 }
-
-// RecipientData contains transfer recipient information
 type RecipientData struct {
 	Active        bool        `json:"active"`
 	CreatedAt     time.Time   `json:"created_at"`
@@ -578,8 +493,6 @@ type RecipientData struct {
 	IsDeleted     bool        `json:"is_deleted"`
 	Details       BankDetails `json:"details"`
 }
-
-// BankDetails contains bank account details
 type BankDetails struct {
 	AuthorizationCode string `json:"authorization_code"`
 	AccountNumber     string `json:"account_number"`
@@ -587,8 +500,6 @@ type BankDetails struct {
 	BankCode          string `json:"bank_code"`
 	BankName          string `json:"bank_name"`
 }
-
-// CreateTransferRecipient creates a transfer recipient for payouts
 func (c *Client) CreateTransferRecipient(ctx context.Context, req *CreateTransferRecipientRequest) (*CreateTransferRecipientResponse, error) {
 	url := fmt.Sprintf("%s/transferrecipient", c.baseURL)
 
@@ -632,8 +543,6 @@ func (c *Client) CreateTransferRecipient(ctx context.Context, req *CreateTransfe
 
 	return &result, nil
 }
-
-// InitiateTransferRequest represents a request to initiate a transfer
 type InitiateTransferRequest struct {
 	Source    string `json:"source"`    // "balance"
 	Amount    int64  `json:"amount"`    // Amount in kobo
@@ -641,15 +550,11 @@ type InitiateTransferRequest struct {
 	Reason    string `json:"reason,omitempty"`
 	Reference string `json:"reference,omitempty"`
 }
-
-// InitiateTransferResponse represents the response from initiating a transfer
 type InitiateTransferResponse struct {
 	Status  bool          `json:"status"`
 	Message string        `json:"message"`
 	Data    *TransferData `json:"data"`
 }
-
-// TransferData contains transfer information
 type TransferData struct {
 	Integration   int64     `json:"integration"`
 	Domain        string    `json:"domain"`
@@ -665,8 +570,6 @@ type TransferData struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 	Reference     string    `json:"reference"`
 }
-
-// InitiateTransfer initiates a transfer to a recipient
 func (c *Client) InitiateTransfer(ctx context.Context, req *InitiateTransferRequest) (*InitiateTransferResponse, error) {
 	url := fmt.Sprintf("%s/transfer", c.baseURL)
 
@@ -710,8 +613,6 @@ func (c *Client) InitiateTransfer(ctx context.Context, req *InitiateTransferRequ
 
 	return &result, nil
 }
-
-// VerifyTransfer verifies a transfer status
 func (c *Client) VerifyTransfer(ctx context.Context, reference string) (*InitiateTransferResponse, error) {
 	url := fmt.Sprintf("%s/transfer/verify/%s", c.baseURL, reference)
 

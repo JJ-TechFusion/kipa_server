@@ -71,10 +71,7 @@ func NewEscrowService(
 		logger:        logger,
 	}
 }
-
-// CreateAndFund creates a new escrow and marks it as funded
 func (s *EscrowServiceImpl) CreateAndFund(ctx context.Context, req *CreateEscrowRequest) (*domain.Escrow, error) {
-	// Delivery fee is paid efficiently to rider on delivery
 	totalLocked := req.ItemAmount + req.BuyerFee
 
 	escrow := &domain.Escrow{
@@ -109,23 +106,15 @@ func (s *EscrowServiceImpl) CreateAndFund(ctx context.Context, req *CreateEscrow
 func (s *EscrowServiceImpl) GetByID(ctx context.Context, id uuid.UUID) (*domain.Escrow, error) {
 	return s.escrowRepo.GetByID(ctx, id)
 }
-
-// GetByPaymentRequestID gets an escrow by payment request ID
 func (s *EscrowServiceImpl) GetByPaymentRequestID(ctx context.Context, prID uuid.UUID) (*domain.Escrow, error) {
 	return s.escrowRepo.GetByPaymentRequestID(ctx, prID)
 }
-
-// GetByBuyerID gets all escrows for a buyer
 func (s *EscrowServiceImpl) GetByBuyerID(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.Escrow, error) {
 	return s.escrowRepo.GetByBuyerID(ctx, buyerID, limit, offset)
 }
-
-// GetBySellerID gets all escrows for a seller
 func (s *EscrowServiceImpl) GetBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.Escrow, error) {
 	return s.escrowRepo.GetBySellerID(ctx, sellerID, limit, offset)
 }
-
-// MarkDeliveryInProgress marks escrow as delivery in progress (rider picked up item)
 func (s *EscrowServiceImpl) MarkDeliveryInProgress(ctx context.Context, escrowID uuid.UUID) error {
 	escrow, err := s.escrowRepo.GetByID(ctx, escrowID)
 	if err != nil {
@@ -148,8 +137,6 @@ func (s *EscrowServiceImpl) MarkDeliveryInProgress(ctx context.Context, escrowID
 
 	return nil
 }
-
-// StartConfirmationWindow marks escrow as delivered and starts the 24h confirmation window
 func (s *EscrowServiceImpl) StartConfirmationWindow(ctx context.Context, escrowID uuid.UUID, actualDeliveryFee float64) error {
 	escrow, err := s.escrowRepo.GetByID(ctx, escrowID)
 	if err != nil {
@@ -168,8 +155,6 @@ func (s *EscrowServiceImpl) StartConfirmationWindow(ctx context.Context, escrowI
 	escrow.DeliveryConfirmedAt = &now
 	escrow.ConfirmationWindowEndsAt = &confirmationWindowEnds
 	escrow.Status = domain.EscrowStatusConfirmationWindow
-
-	// Pre-calculate payouts
 	settlement := s.feeCalculator.CalculateSettlement(escrow.ItemAmount, actualDeliveryFee)
 	escrow.SellerPayout = &settlement.SellerPayout
 	escrow.RiderPayout = &settlement.RiderPayout
@@ -186,8 +171,6 @@ func (s *EscrowServiceImpl) StartConfirmationWindow(ctx context.Context, escrowI
 
 	return nil
 }
-
-// Release releases the escrow funds to seller and rider
 func (s *EscrowServiceImpl) Release(ctx context.Context, escrowID uuid.UUID) error {
 	escrow, err := s.escrowRepo.GetByID(ctx, escrowID)
 	if err != nil {
@@ -197,8 +180,6 @@ func (s *EscrowServiceImpl) Release(ctx context.Context, escrowID uuid.UUID) err
 	if escrow.Status != domain.EscrowStatusConfirmationWindow {
 		return domain.ErrInvalidStatusTransition
 	}
-
-	// Credit seller wallet
 	if escrow.SellerPayout != nil && *escrow.SellerPayout > 0 {
 		idempotencyKey := fmt.Sprintf("escrow_release_seller_%s", escrowID.String())
 		_, err := s.walletService.Credit(
@@ -219,8 +200,6 @@ func (s *EscrowServiceImpl) Release(ctx context.Context, escrowID uuid.UUID) err
 			return fmt.Errorf("failed to credit seller: %w", err)
 		}
 	}
-
-	// Update escrow status
 	now := time.Now()
 	escrow.ReleasedAt = &now
 	escrow.Status = domain.EscrowStatusReleased
@@ -236,15 +215,11 @@ func (s *EscrowServiceImpl) Release(ctx context.Context, escrowID uuid.UUID) err
 
 	return nil
 }
-
-// Dispute marks the escrow as disputed
 func (s *EscrowServiceImpl) Dispute(ctx context.Context, escrowID uuid.UUID, reason string) error {
 	escrow, err := s.escrowRepo.GetByID(ctx, escrowID)
 	if err != nil {
 		return err
 	}
-
-	// Can only dispute during confirmation window or delivery phase
 	if escrow.Status != domain.EscrowStatusConfirmationWindow &&
 		escrow.Status != domain.EscrowStatusDelivered &&
 		escrow.Status != domain.EscrowStatusDeliveryInProgress {
@@ -264,15 +239,11 @@ func (s *EscrowServiceImpl) Dispute(ctx context.Context, escrowID uuid.UUID, rea
 
 	return nil
 }
-
-// Refund refunds the escrow to the buyer
 func (s *EscrowServiceImpl) Refund(ctx context.Context, escrowID uuid.UUID, reason string) error {
 	escrow, err := s.escrowRepo.GetByID(ctx, escrowID)
 	if err != nil {
 		return err
 	}
-
-	// Can only refund from certain states
 	validStates := []domain.EscrowStatus{
 		domain.EscrowStatusFunded,
 		domain.EscrowStatusDisputed,
@@ -288,8 +259,6 @@ func (s *EscrowServiceImpl) Refund(ctx context.Context, escrowID uuid.UUID, reas
 	if !validState {
 		return domain.ErrInvalidStatusTransition
 	}
-
-	// Credit buyer wallet with refund
 	idempotencyKey := fmt.Sprintf("escrow_refund_%s", escrowID.String())
 	_, err = s.walletService.Credit(
 		ctx,
@@ -319,8 +288,6 @@ func (s *EscrowServiceImpl) Refund(ctx context.Context, escrowID uuid.UUID, reas
 
 	return nil
 }
-
-// ProcessPendingConfirmationWindows processes all escrows past their confirmation window
 func (s *EscrowServiceImpl) ProcessPendingConfirmationWindows(ctx context.Context) error {
 	escrows, err := s.escrowRepo.GetPendingConfirmationWindow(ctx)
 	if err != nil {
@@ -345,12 +312,8 @@ func (s *EscrowServiceImpl) ProcessPendingConfirmationWindows(ctx context.Contex
 
 	return nil
 }
-
-// calculateAdjustment calculates the difference between estimated and actual delivery fee
 func (s *EscrowServiceImpl) calculateAdjustment(estimated, actual float64) *float64 {
 	adjustment := actual - estimated
 	return &adjustment
 }
-
-// Ensure EscrowServiceImpl implements EscrowService
 var _ EscrowService = (*EscrowServiceImpl)(nil)

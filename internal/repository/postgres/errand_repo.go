@@ -12,8 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
-
-// ErrandRepo implements repository.ErrandRepository
 type ErrandRepo struct {
 	db *sqlx.DB
 }

@@ -18,8 +18,6 @@ import (
 const (
 	termiiBaseURL = "https://api.ng.termii.com/api"
 )
-
-// TermiiClient implements SMSProvider using Termii
 type TermiiClient struct {
 	httpClient          *http.Client
 	apiKey              string
@@ -27,8 +25,6 @@ type TermiiClient struct {
 	logger              *zap.Logger
 	enableVoiceFallback bool
 }
-
-// NewTermiiClient creates a new Termii SMS client
 func NewTermiiClient(cfg *config.TermiiConfig, logger *zap.Logger) *TermiiClient {
 	return &TermiiClient{
 		httpClient: &http.Client{
@@ -40,8 +36,6 @@ func NewTermiiClient(cfg *config.TermiiConfig, logger *zap.Logger) *TermiiClient
 		enableVoiceFallback: cfg.EnableVoiceFallback,
 	}
 }
-
-// termiiSMSRequest represents the request body for sending SMS
 type termiiSMSRequest struct {
 	To      string `json:"to"`
 	From    string `json:"from"`
@@ -50,9 +44,6 @@ type termiiSMSRequest struct {
 	Channel string `json:"channel"`
 	APIKey  string `json:"api_key"`
 }
-
-// termiiVoiceTokenRequest represents the request body for Termii Voice Token API
-// Note: Termii generates the PIN itself for voice calls
 type termiiVoiceTokenRequest struct {
 	APIKey        string `json:"api_key"`
 	PhoneNumber   string `json:"phone_number"`
@@ -60,16 +51,12 @@ type termiiVoiceTokenRequest struct {
 	PinTimeToLive int    `json:"pin_time_to_live"`
 	PinLength     int    `json:"pin_length"`
 }
-
-// termiiVoiceTokenResponse represents the response from Termii Voice Token API
 type termiiVoiceTokenResponse struct {
 	PinID   string `json:"pinId"`
 	To      string `json:"to"`
 	Status  string `json:"status"`
 	Message string `json:"message"`
 }
-
-// termiiResponse represents the response from Termii API
 type termiiResponse struct {
 	MessageID   string `json:"message_id"`
 	Message     string `json:"message"`
@@ -78,8 +65,6 @@ type termiiResponse struct {
 	Code        string `json:"code"`
 	MessageIDStr string `json:"message_id_str"`
 }
-
-// SendSMS sends an SMS message via Termii
 func (c *TermiiClient) SendSMS(ctx context.Context, phoneNumber, message string) (*integration.SMSResult, error) {
 	reqBody := termiiSMSRequest{
 		To:      phoneNumber,
@@ -120,8 +105,6 @@ func (c *TermiiClient) SendSMS(ctx context.Context, phoneNumber, message string)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
-
-	// Log raw response for debugging
 	c.logger.Debug("Termii SMS raw response",
 		zap.Int("status_code", resp.StatusCode),
 		zap.String("body", string(body)),
@@ -140,9 +123,6 @@ func (c *TermiiClient) SendSMS(ctx context.Context, phoneNumber, message string)
 			Error:    fmt.Errorf("failed to parse response: %s", string(body)),
 		}, fmt.Errorf("termii error: %s", string(body))
 	}
-
-	// Check for success - Termii returns "ok" in the code field on success
-	// Also check HTTP status code
 	if resp.StatusCode != http.StatusOK || (result.Code != "" && result.Code != "ok") {
 		errMsg := result.Message
 		if errMsg == "" {
@@ -179,9 +159,6 @@ func (c *TermiiClient) SendSMS(ctx context.Context, phoneNumber, message string)
 		Provider:  "termii_sms",
 	}, nil
 }
-
-// SendVoiceOTP is not implemented for Termii
-// Termii's Voice Token API generates its own PIN which requires a different verification flow
 func (c *TermiiClient) SendVoiceOTP(ctx context.Context, phoneNumber, otp string) (*integration.SMSResult, error) {
 	return &integration.SMSResult{
 		Success:  false,
@@ -189,10 +166,6 @@ func (c *TermiiClient) SendVoiceOTP(ctx context.Context, phoneNumber, otp string
 		Error:    fmt.Errorf("voice OTP not supported with Termii - use SMS"),
 	}, fmt.Errorf("voice OTP not supported")
 }
-
-// SendWithFallback sends OTP via SMS
-// Note: Voice fallback is disabled because Termii's Voice Token API generates its own PIN
-// which would require a different verification flow
 func (c *TermiiClient) SendWithFallback(ctx context.Context, phoneNumber, otp string) (*integration.SMSResult, error) {
 	message := fmt.Sprintf("Your Kipa verification code is: %s", otp)
 

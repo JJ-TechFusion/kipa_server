@@ -102,9 +102,6 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 	if err := s.otpRepo.Create(ctx, otpRecord); err != nil {
 		return nil, fmt.Errorf("failed to store OTP: %w", err)
 	}
-
-	// Send OTP via SMS (with voice fallback)
-	// In development mode, log OTP and skip SMS sending if it fails
 	isDevelopment := s.config.Server.Environment == "development"
 	
 	if isDevelopment {
@@ -118,13 +115,11 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 	result, err := s.smsProvider.SendWithFallback(ctx, req.PhoneNumber, plainOTP)
 	if err != nil || !result.Success {
 		if isDevelopment {
-			// In development, log the error but don't fail the request
 			s.logger.Warn("SMS delivery failed (continuing in dev mode)",
 				zap.String("phone", req.PhoneNumber),
 				zap.Error(err),
 			)
 		} else {
-			// In production, fail the request if SMS fails
 			s.logger.Error("failed to send OTP",
 				zap.String("phone", req.PhoneNumber),
 				zap.Error(err),
@@ -476,6 +471,4 @@ func generateRequestHash(phoneNumber, verificationID, otpCode string) string {
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
 }
-
-// Ensure AuthServiceImpl implements AuthService
 var _ AuthService = (*AuthServiceImpl)(nil)

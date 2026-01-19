@@ -45,9 +45,6 @@ func (h *SellerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 		seller.GET("/earnings", h.GetEarnings)
 	}
 }
-
-// ListSales lists all sales (orders) for the authenticated seller
-// GET /seller/sales
 func (h *SellerHandler) ListSales(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -63,16 +60,12 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to fetch sales")
 		return
 	}
-
-	// Enrich with payment request data
 	responses := make([]SaleResponse, 0, len(orders))
 	for _, order := range orders {
 		pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
 		if err != nil {
 			continue
 		}
-
-		// Get escrow if exists
 		var escrowStatus string
 		if order.EscrowID != nil {
 			escrow, err := h.escrowService.GetByID(c.Request.Context(), *order.EscrowID)
@@ -89,9 +82,6 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 		"count": len(responses),
 	})
 }
-
-// GetSale gets a specific sale (order) for the seller
-// GET /seller/sales/:id
 func (h *SellerHandler) GetSale(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -110,21 +100,15 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 		util.Error(c, http.StatusNotFound, "NOT_FOUND", "Sale not found")
 		return
 	}
-
-	// Get payment request to verify ownership
 	pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
 	if err != nil {
 		util.Error(c, http.StatusNotFound, "NOT_FOUND", "Payment request not found")
 		return
 	}
-
-	// Verify ownership - the payment request must belong to this seller
 	if pr.SellerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this sale")
 		return
 	}
-
-	// Get escrow details if exists
 	var escrowStatus string
 	var escrowDetails *EscrowDetails
 	if order.EscrowID != nil {
@@ -150,17 +134,12 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, response)
 }
-
-// GetEarnings returns earnings summary for the seller
-// GET /seller/earnings
 func (h *SellerHandler) GetEarnings(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
 		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
 		return
 	}
-
-	// Get all orders for this seller
 	orders, err := h.orderService.GetOrdersBySellerID(c.Request.Context(), userID, 1000, 0)
 	if err != nil {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to fetch orders")
@@ -184,11 +163,9 @@ func (h *SellerHandler) GetEarnings(c *gin.Context) {
 
 		switch escrow.Status {
 		case domain.EscrowStatusFunded, domain.EscrowStatusDeliveryInProgress, domain.EscrowStatusDelivered, domain.EscrowStatusConfirmationWindow:
-			// Money still in escrow - pending
 			pendingAmount += escrow.ItemAmount // Seller gets item amount minus platform fee
 			pendingCount++
 		case domain.EscrowStatusReleased:
-			// Money released to seller
 			if escrow.SellerPayout != nil {
 				releasedAmount += *escrow.SellerPayout
 			} else {
@@ -210,8 +187,6 @@ func (h *SellerHandler) GetEarnings(c *gin.Context) {
 		"total_sales": len(orders),
 	})
 }
-
-// Response types
 
 type SaleResponse struct {
 	ID               uuid.UUID  `json:"id"`
@@ -273,9 +248,6 @@ func formatTimePtr(t *time.Time) *string {
 	formatted := t.Format("2006-01-02T15:04:05Z07:00")
 	return &formatted
 }
-
-// GetSaleTimeline returns a transaction timeline for the seller
-// GET /seller/sales/:id/timeline
 func (h *SellerHandler) GetSaleTimeline(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -305,8 +277,6 @@ func (h *SellerHandler) GetSaleTimeline(c *gin.Context) {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this sale")
 		return
 	}
-
-	// Get delivery job if exists
 	var job *domain.DeliveryJob
 	if pr.DeliveryType == domain.DeliveryTypeIntraState {
 		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)

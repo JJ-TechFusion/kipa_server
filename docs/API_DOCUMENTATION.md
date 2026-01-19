@@ -1900,7 +1900,6 @@ paystack:
 ### Frontend Integration Example (JavaScript)
 
 ```javascript
-// Initialize Paystack payment
 const paymentData = await fetch('/api/v1/pay/KIP-ABC123').then(r => r.json());
 
 const handler = PaystackPop.setup({
@@ -1910,7 +1909,6 @@ const handler = PaystackPop.setup({
   currency: 'NGN',
   ref: 'KIP-' + Date.now(), // Unique reference
   callback: function(response) {
-    // Send to backend for verification
     fetch('/api/v1/pay/KIP-ABC123/complete', {
       method: 'POST',
       headers: {

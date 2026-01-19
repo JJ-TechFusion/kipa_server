@@ -10,20 +10,14 @@ import (
 
 	"go.uber.org/zap"
 )
-
-// GoogleMapsClient handles Google Maps API calls
 type GoogleMapsClient struct {
 	apiKey     string
 	httpClient *http.Client
 	logger     *zap.Logger
 }
-
-// Config for Google Maps
 type Config struct {
 	APIKey string
 }
-
-// NewGoogleMapsClient creates a new client
 func NewGoogleMapsClient(cfg *Config, logger *zap.Logger) *GoogleMapsClient {
 	return &GoogleMapsClient{
 		apiKey: cfg.APIKey,
@@ -33,8 +27,6 @@ func NewGoogleMapsClient(cfg *Config, logger *zap.Logger) *GoogleMapsClient {
 		logger: logger,
 	}
 }
-
-// ETAResult contains ETA and distance info
 type ETAResult struct {
 	DurationSeconds int     `json:"duration_seconds"`
 	DurationMinutes int     `json:"duration_minutes"`
@@ -43,8 +35,6 @@ type ETAResult struct {
 	DurationText    string  `json:"duration_text"`
 	DistanceText    string  `json:"distance_text"`
 }
-
-// DistanceMatrixResponse from Google API
 type DistanceMatrixResponse struct {
 	Rows []struct {
 		Elements []struct {
@@ -65,8 +55,6 @@ type DistanceMatrixResponse struct {
 	} `json:"rows"`
 	Status string `json:"status"`
 }
-
-// GetETA calculates ETA from origin to destination
 func (c *GoogleMapsClient) GetETA(ctx context.Context, originLat, originLng, destLat, destLng float64) (*ETAResult, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("google maps API key not configured")
@@ -115,8 +103,6 @@ func (c *GoogleMapsClient) GetETA(ctx context.Context, originLat, originLng, des
 	if element.Status != "OK" {
 		return nil, fmt.Errorf("route not found: %s", element.Status)
 	}
-
-	// Prefer traffic-aware duration if available
 	durationSeconds := element.Duration.Value
 	durationText := element.Duration.Text
 	if element.DurationInTraffic.Value > 0 {

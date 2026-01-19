@@ -7,34 +7,19 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
-
-// Hub maintains active clients and broadcasts messages
 type Hub struct {
-	// Registered clients by user ID
 	clients map[uuid.UUID]map[*Client]bool
-
-	// Job rooms: jobID → clients watching
 	rooms map[string]map[*Client]bool
-
-	// Online riders (for job broadcast)
 	riders map[*Client]bool
-
-	// Connection limits
 	maxUserConns  int
 	maxRiderConns int
-
-	// Channels
 	register   chan *Client
 	unregister chan *Client
-
-	// Location handler (set externally)
 	locationHandler func(riderID uuid.UUID, jobID string, lat, lng, heading, speed float64)
 
 	mu     sync.RWMutex
 	logger *zap.Logger
 }
-
-// NewHub creates a new hub
 func NewHub(logger *zap.Logger) *Hub {
 	return &Hub{
 		clients:       make(map[uuid.UUID]map[*Client]bool),
@@ -47,13 +32,9 @@ func NewHub(logger *zap.Logger) *Hub {
 		logger:        logger,
 	}
 }
-
-// SetLocationHandler sets the callback for location updates
 func (h *Hub) SetLocationHandler(handler func(riderID uuid.UUID, jobID string, lat, lng, heading, speed float64)) {
 	h.locationHandler = handler
 }
-
-// Run starts the hub's main loop
 func (h *Hub) Run() {
 	for {
 		select {
@@ -69,8 +50,6 @@ func (h *Hub) Run() {
 func (h *Hub) registerClient(client *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
-	// Check connection limits
 	if conns, exists := h.clients[client.UserID]; exists {
 		maxConns := h.maxUserConns
 		if client.Role == RoleRider {
@@ -78,21 +57,16 @@ func (h *Hub) registerClient(client *Client) {
 		}
 
 		if len(conns) >= maxConns {
-			// Kick oldest connection
 			for oldest := range conns {
 				h.removeClientLocked(oldest)
 				break
 			}
 		}
 	}
-
-	// Add to clients map
 	if h.clients[client.UserID] == nil {
 		h.clients[client.UserID] = make(map[*Client]bool)
 	}
 	h.clients[client.UserID][client] = true
-
-	// If rider, add to riders set
 	if client.Role == RoleRider {
 		h.riders[client] = true
 	}
@@ -111,34 +85,23 @@ func (h *Hub) unregisterClient(client *Client) {
 }
 
 func (h *Hub) removeClientLocked(client *Client) {
-	// Remove from user's clients
 	if conns, ok := h.clients[client.UserID]; ok {
 		delete(conns, client)
 		if len(conns) == 0 {
 			delete(h.clients, client.UserID)
 		}
 	}
-
-	// Remove from riders
 	delete(h.riders, client)
-
-	// Remove from all rooms
 	for _, room := range h.rooms {
 		delete(room, client)
 	}
-
-	// Close send channel
 	close(client.send)
 
 	h.logger.Info("client unregistered", zap.String("client_id", client.ID))
 }
-
-// Register adds a client to the hub
 func (h *Hub) Register(client *Client) {
 	h.register <- client
 }
-
-// SubscribeToJob adds client to a job's room
 func (h *Hub) SubscribeToJob(client *Client, jobID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -153,8 +116,6 @@ func (h *Hub) SubscribeToJob(client *Client, jobID string) {
 		zap.String("job_id", jobID),
 	)
 }
-
-// UnsubscribeFromJob removes client from a job's room
 func (h *Hub) UnsubscribeFromJob(client *Client, jobID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -166,15 +127,10 @@ func (h *Hub) UnsubscribeFromJob(client *Client, jobID string) {
 		}
 	}
 }
-
-// HandleLocationUpdate processes a location update from a rider
 func (h *Hub) HandleLocationUpdate(client *Client, msg *LocationUpdate) {
-	// Call external handler (saves to DB, calculates ETA)
 	if h.locationHandler != nil {
 		go h.locationHandler(client.UserID, msg.JobID, msg.Lat, msg.Lng, msg.Heading, msg.Speed)
 	}
-
-	// Broadcast to users watching this job
 	h.BroadcastToJob(msg.JobID, &RiderLocation{
 		Type:      TypeRiderLocation,
 		JobID:     msg.JobID,
@@ -186,8 +142,6 @@ func (h *Hub) HandleLocationUpdate(client *Client, msg *LocationUpdate) {
 		Timestamp: time.Now().Unix(),
 	})
 }
-
-// BroadcastToJob sends a message to all clients watching a job
 func (h *Hub) BroadcastToJob(jobID string, msg interface{}) {
 	h.mu.RLock()
 	room := h.rooms[jobID]
@@ -197,8 +151,6 @@ func (h *Hub) BroadcastToJob(jobID string, msg interface{}) {
 		client.Send(msg)
 	}
 }
-
-// BroadcastJobStatus sends job status update to watchers
 func (h *Hub) BroadcastJobStatus(jobID, status string) {
 	h.BroadcastToJob(jobID, &JobStatusUpdate{
 		Type:   TypeJobStatus,
@@ -206,8 +158,6 @@ func (h *Hub) BroadcastJobStatus(jobID, status string) {
 		Status: status,
 	})
 }
-
-// BroadcastNewJob sends new job to all online riders
 func (h *Hub) BroadcastNewJob(job *NewJobAvailable) {
 	h.mu.RLock()
 	riders := make([]*Client, 0, len(h.riders))
@@ -225,8 +175,6 @@ func (h *Hub) BroadcastNewJob(job *NewJobAvailable) {
 		zap.Int("rider_count", len(riders)),
 	)
 }
-
-// GetOnlineRiderCount returns count of online riders
 func (h *Hub) GetOnlineRiderCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

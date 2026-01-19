@@ -10,31 +10,14 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// WalletService handles wallet operations with idempotency
 type WalletService interface {
-	// GetWallet gets or creates a wallet for a user
 	GetWallet(ctx context.Context, userID uuid.UUID) (*domain.Wallet, error)
-
-	// Credit adds funds to a wallet (idempotent)
 	Credit(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, description, idempotencyKey string) (*domain.WalletTransaction, error)
-
-	// Debit removes funds from available balance (idempotent)
 	Debit(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, description, idempotencyKey string) (*domain.WalletTransaction, error)
-
-	// Lock moves funds from available to locked balance
 	Lock(ctx context.Context, userID uuid.UUID, amount float64, idempotencyKey string) error
-
-	// Unlock moves funds from locked back to available balance
 	Unlock(ctx context.Context, userID uuid.UUID, amount float64, idempotencyKey string) error
-
-	// DeductLocked removes funds from locked balance (used for escrow release)
 	DeductLocked(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, description, idempotencyKey string) (*domain.WalletTransaction, error)
-
-	// GetTransactions gets wallet transactions with pagination
 	GetTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.WalletTransaction, error)
-
-	// GetBalance gets the current wallet balance
 	GetBalance(ctx context.Context, userID uuid.UUID) (*WalletBalance, error)
 }
 
@@ -62,15 +45,10 @@ func NewWalletService(
 		logger:     logger,
 	}
 }
-
-// GetWallet gets or creates a wallet for a user
 func (s *WalletServiceImpl) GetWallet(ctx context.Context, userID uuid.UUID) (*domain.Wallet, error) {
 	return s.walletRepo.GetOrCreate(ctx, userID)
 }
-
-// Credit adds funds to a wallet (idempotent)
 func (s *WalletServiceImpl) Credit(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, description, idempotencyKey string) (*domain.WalletTransaction, error) {
-	// Check idempotency key
 	if idempotencyKey != "" {
 		existingTx, err := s.txRepo.GetByIdempotencyKey(ctx, idempotencyKey)
 		if err != nil {
@@ -84,25 +62,17 @@ func (s *WalletServiceImpl) Credit(ctx context.Context, userID uuid.UUID, amount
 			return existingTx, nil
 		}
 	}
-
-	// Get or create wallet
 	wallet, err := s.walletRepo.GetOrCreate(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get wallet: %w", err)
 	}
-
-	// Credit the wallet
 	if err := s.walletRepo.Credit(ctx, wallet.ID, amount); err != nil {
 		return nil, fmt.Errorf("failed to credit wallet: %w", err)
 	}
-
-	// Get updated wallet for balance after
 	updatedWallet, err := s.walletRepo.GetByID(ctx, wallet.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get updated wallet: %w", err)
 	}
-
-	// Create transaction record
 	tx := &domain.WalletTransaction{
 		WalletID:       wallet.ID,
 		Type:           txType,
@@ -119,7 +89,6 @@ func (s *WalletServiceImpl) Credit(ctx context.Context, userID uuid.UUID, amount
 			zap.Error(err),
 			zap.String("idempotency_key", idempotencyKey),
 		)
-		// Note: the credit has already occurred, so we log the error but don't fail
 	}
 
 	s.logger.Info("wallet credited",
@@ -130,10 +99,7 @@ func (s *WalletServiceImpl) Credit(ctx context.Context, userID uuid.UUID, amount
 
 	return tx, nil
 }
-
-// Debit removes funds from available balance (idempotent)
 func (s *WalletServiceImpl) Debit(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, description, idempotencyKey string) (*domain.WalletTransaction, error) {
-	// Check idempotency key
 	if idempotencyKey != "" {
 		existingTx, err := s.txRepo.GetByIdempotencyKey(ctx, idempotencyKey)
 		if err != nil {
@@ -147,30 +113,20 @@ func (s *WalletServiceImpl) Debit(ctx context.Context, userID uuid.UUID, amount 
 			return existingTx, nil
 		}
 	}
-
-	// Get wallet
 	wallet, err := s.walletRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get wallet: %w", err)
 	}
-
-	// Check balance
 	if wallet.AvailableBalance < amount {
 		return nil, domain.ErrInsufficientBalance
 	}
-
-	// Debit the wallet
 	if err := s.walletRepo.Debit(ctx, wallet.ID, amount); err != nil {
 		return nil, fmt.Errorf("failed to debit wallet: %w", err)
 	}
-
-	// Get updated wallet for balance after
 	updatedWallet, err := s.walletRepo.GetByID(ctx, wallet.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get updated wallet: %w", err)
 	}
-
-	// Create transaction record
 	tx := &domain.WalletTransaction{
 		WalletID:       wallet.ID,
 		Type:           txType,
@@ -197,8 +153,6 @@ func (s *WalletServiceImpl) Debit(ctx context.Context, userID uuid.UUID, amount 
 
 	return tx, nil
 }
-
-// Lock moves funds from available to locked balance
 func (s *WalletServiceImpl) Lock(ctx context.Context, userID uuid.UUID, amount float64, idempotencyKey string) error {
 	wallet, err := s.walletRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -211,8 +165,6 @@ func (s *WalletServiceImpl) Lock(ctx context.Context, userID uuid.UUID, amount f
 
 	return s.walletRepo.Update(ctx, wallet)
 }
-
-// Unlock moves funds from locked back to available balance
 func (s *WalletServiceImpl) Unlock(ctx context.Context, userID uuid.UUID, amount float64, idempotencyKey string) error {
 	wallet, err := s.walletRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -225,10 +177,7 @@ func (s *WalletServiceImpl) Unlock(ctx context.Context, userID uuid.UUID, amount
 
 	return s.walletRepo.Update(ctx, wallet)
 }
-
-// DeductLocked removes funds from locked balance (used for escrow release)
 func (s *WalletServiceImpl) DeductLocked(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, description, idempotencyKey string) (*domain.WalletTransaction, error) {
-	// Check idempotency key
 	if idempotencyKey != "" {
 		existingTx, err := s.txRepo.GetByIdempotencyKey(ctx, idempotencyKey)
 		if err != nil {
@@ -251,8 +200,6 @@ func (s *WalletServiceImpl) DeductLocked(ctx context.Context, userID uuid.UUID, 
 	if err := s.walletRepo.Update(ctx, wallet); err != nil {
 		return nil, fmt.Errorf("failed to update wallet: %w", err)
 	}
-
-	// Create transaction record
 	tx := &domain.WalletTransaction{
 		WalletID:       wallet.ID,
 		Type:           txType,
@@ -270,8 +217,6 @@ func (s *WalletServiceImpl) DeductLocked(ctx context.Context, userID uuid.UUID, 
 
 	return tx, nil
 }
-
-// GetTransactions gets wallet transactions with pagination
 func (s *WalletServiceImpl) GetTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.WalletTransaction, error) {
 	wallet, err := s.walletRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -280,8 +225,6 @@ func (s *WalletServiceImpl) GetTransactions(ctx context.Context, userID uuid.UUI
 
 	return s.txRepo.GetByWalletID(ctx, wallet.ID, limit, offset)
 }
-
-// GetBalance gets the current wallet balance
 func (s *WalletServiceImpl) GetBalance(ctx context.Context, userID uuid.UUID) (*WalletBalance, error) {
 	wallet, err := s.walletRepo.GetOrCreate(ctx, userID)
 	if err != nil {
@@ -295,6 +238,4 @@ func (s *WalletServiceImpl) GetBalance(ctx context.Context, userID uuid.UUID) (*
 		TotalWithdrawn:   wallet.TotalWithdrawn,
 	}, nil
 }
-
-// Ensure WalletServiceImpl implements WalletService
 var _ WalletService = (*WalletServiceImpl)(nil)

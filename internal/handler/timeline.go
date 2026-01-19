@@ -37,8 +37,6 @@ func BuildTimeline(
 ) TimelineResponse {
 	steps := []TimelineStep{}
 	currentStep := ""
-
-	// Step 1: Link Created
 	linkDesc := "Seller created a payment request"
 	if viewType == TimelineViewSeller {
 		linkDesc = "You created a payment request"
@@ -50,8 +48,6 @@ func BuildTimeline(
 		Status:      "completed",
 		Timestamp:   pr.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
-
-	// Step 2: Payment Received
 	paymentDesc := "Your payment is secured in escrow"
 	if viewType == TimelineViewSeller {
 		paymentDesc = "Buyer's payment is secured in escrow"
@@ -231,7 +227,6 @@ func appendDeliverySteps(
 			}
 		}
 	} else if order.PaymentStatus == domain.OrderPaymentVerified {
-		// Payment done but no job yet
 		if viewType == TimelineViewSeller {
 			awaitingStep.Status = "current"
 			currentStep = "awaiting_rider"

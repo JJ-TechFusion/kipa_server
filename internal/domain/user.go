@@ -5,8 +5,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// User represents a platform user who can have multiple roles
 type User struct {
 	ID              uuid.UUID `db:"id" json:"id"`
 	PhoneNumber     string    `db:"phone_number" json:"phone_number"`
@@ -15,17 +13,11 @@ type User struct {
 	FirstName       *string   `db:"first_name" json:"first_name,omitempty"`
 	LastName        *string   `db:"last_name" json:"last_name,omitempty"`
 	ProfilePhotoURL *string   `db:"profile_photo_url" json:"profile_photo_url,omitempty"`
-
-	// Role flags (user can have multiple roles)
 	IsSeller bool `db:"is_seller" json:"is_seller"`
 	IsBuyer  bool `db:"is_buyer" json:"is_buyer"`
 	IsRider  bool `db:"is_rider" json:"is_rider"`
-
-	// Seller verification
 	SellerVerified   bool       `db:"seller_verified" json:"seller_verified"`
 	SellerVerifiedAt *time.Time `db:"seller_verified_at" json:"seller_verified_at,omitempty"`
-
-	// Status
 	IsSuspended      bool       `db:"is_suspended" json:"is_suspended"`
 	SuspensionReason *string    `db:"suspension_reason" json:"suspension_reason,omitempty"`
 	LastLoginAt      *time.Time `db:"last_login_at" json:"last_login_at,omitempty"`
@@ -33,8 +25,6 @@ type User struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
-
-// FullName returns the user's full name or an empty string if not set
 func (u *User) FullName() string {
 	if u.FirstName == nil && u.LastName == nil {
 		return ""
@@ -55,45 +45,29 @@ func (u *User) FullName() string {
 	}
 	return first + " " + last
 }
-
-// CanSell returns true if the user can create payment requests
 func (u *User) CanSell() bool {
 	return u.IsSeller && u.SellerVerified && !u.IsSuspended
 }
-
-// CanBuy returns true if the user can make purchases
 func (u *User) CanBuy() bool {
 	return !u.IsSuspended
 }
-
-// CanRide returns true if the user can accept delivery jobs
 func (u *User) CanRide() bool {
 	return u.IsRider && !u.IsSuspended
 }
-
-// SetAsSeller marks the user as a seller (does not verify)
 func (u *User) SetAsSeller() {
 	u.IsSeller = true
 }
-
-// VerifySeller verifies the seller status
 func (u *User) VerifySeller() {
 	u.SellerVerified = true
 	now := time.Now()
 	u.SellerVerifiedAt = &now
 }
-
-// SetAsBuyer marks the user as a buyer
 func (u *User) SetAsBuyer() {
 	u.IsBuyer = true
 }
-
-// SetAsRider marks the user as a rider
 func (u *User) SetAsRider() {
 	u.IsRider = true
 }
-
-// OTPPurpose represents the purpose of an OTP
 type OTPPurpose string
 
 const (
@@ -101,8 +75,6 @@ const (
 	OTPPurposeSignup OTPPurpose = "signup"
 	OTPPurposeVerify OTPPurpose = "verify"
 )
-
-// OTPVerification represents an OTP verification attempt
 type OTPVerification struct {
 	ID             uuid.UUID  `db:"id"`
 	PhoneNumber    string     `db:"phone_number"`
@@ -114,23 +86,15 @@ type OTPVerification struct {
 	VerifiedAt     *time.Time `db:"verified_at"`
 	CreatedAt      time.Time  `db:"created_at"`
 }
-
-// IsExpired returns true if the OTP has expired
 func (o *OTPVerification) IsExpired() bool {
 	return time.Now().After(o.ExpiresAt)
 }
-
-// IsVerified returns true if the OTP has been verified
 func (o *OTPVerification) IsVerified() bool {
 	return o.VerifiedAt != nil
 }
-
-// IncrementAttempts increments the verification attempts counter
 func (o *OTPVerification) IncrementAttempts() {
 	o.Attempts++
 }
-
-// IdempotencyKey represents an idempotency key for request deduplication
 type IdempotencyKey struct {
 	ID           uuid.UUID `db:"id"`
 	Key          string    `db:"key"`
@@ -139,8 +103,6 @@ type IdempotencyKey struct {
 	ResponseData []byte    `db:"response_data"` // JSONB
 	CreatedAt    time.Time `db:"created_at"`
 }
-
-// Session represents a user's authenticated session
 type Session struct {
 	UserID       uuid.UUID `json:"user_id"`
 	DeviceID     string    `json:"device_id"`
@@ -150,8 +112,6 @@ type Session struct {
 	CreatedAt    time.Time `json:"created_at"`
 	ExpiresAt    time.Time `json:"expires_at"`
 }
-
-// IsExpired returns true if the session has expired
 func (s *Session) IsExpired() bool {
 	return time.Now().After(s.ExpiresAt)
 }

@@ -11,8 +11,6 @@ import (
 	"kipa/internal/service"
 	"kipa/internal/util"
 )
-
-// RiderCommissionHandler handles rider commission API endpoints
 type RiderCommissionHandler struct {
 	commissionService service.RiderCommissionService
 }
@@ -22,8 +20,6 @@ func NewRiderCommissionHandler(commissionService service.RiderCommissionService)
 		commissionService: commissionService,
 	}
 }
-
-// RegisterRoutes registers commission routes
 func (h *RiderCommissionHandler) RegisterRoutes(rg *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware) {
 	commission := rg.Group("/rider/commission")
 	commission.Use(authMiddleware.RequireAuth())
@@ -33,9 +29,6 @@ func (h *RiderCommissionHandler) RegisterRoutes(rg *gin.RouterGroup, authMiddlew
 		commission.POST("/pay", h.PayCommission)
 	}
 }
-
-// GetCommissionSummary returns the rider's commission summary
-// GET /rider/commission
 func (h *RiderCommissionHandler) GetCommissionSummary(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -51,9 +44,6 @@ func (h *RiderCommissionHandler) GetCommissionSummary(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, summary)
 }
-
-// GetPendingCommissions returns the rider's pending commission records
-// GET /rider/commission/pending
 func (h *RiderCommissionHandler) GetPendingCommissions(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -66,8 +56,6 @@ func (h *RiderCommissionHandler) GetPendingCommissions(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Calculate total
 	var total float64
 	for _, comm := range commissions {
 		total += comm.CommissionAmount
@@ -79,9 +67,6 @@ func (h *RiderCommissionHandler) GetPendingCommissions(c *gin.Context) {
 		"count":       len(commissions),
 	})
 }
-
-// PayCommission pays all pending commissions from rider's wallet
-// POST /rider/commission/pay
 func (h *RiderCommissionHandler) PayCommission(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {

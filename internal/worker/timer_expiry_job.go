@@ -6,17 +6,9 @@ import (
 
 	"go.uber.org/zap"
 )
-
-// runTimerExpiryJob handles various time-sensitive expirations:
-// 1. Rider offer expiry - mark pending offers as expired after timeout
-// 2. Processing time reminders - notify sellers who haven't marked items as ready
-//
-// This job consolidates multiple small timer-based operations.
 func (p *JobProcessor) runTimerExpiryJob(ctx context.Context) {
 	ticker := time.NewTicker(p.config.TimerExpiryCheckInterval)
 	defer ticker.Stop()
-
-	// Run immediately on start, then on ticker
 	p.processTimerExpiries(ctx)
 
 	for {
@@ -32,10 +24,7 @@ func (p *JobProcessor) runTimerExpiryJob(ctx context.Context) {
 		}
 	}
 }
-
-// processTimerExpiries handles all timer-based expirations
 func (p *JobProcessor) processTimerExpiries(ctx context.Context) {
-	// Acquire distributed lock to prevent multiple instances processing same timers
 	release, proceed := p.acquireLock(ctx, "worker:timer_expiry", 2*time.Minute)
 	if !proceed {
 		return
@@ -45,18 +34,11 @@ func (p *JobProcessor) processTimerExpiries(ctx context.Context) {
 	}
 
 	p.logger.Debug("timer expiry job: processing timer expirations")
-
-	// 1. Expire stale rider offers
 	p.expireStaleRiderOffers(ctx)
-
-	// 2. Check for overdue processing orders and send reminders
 	p.processOverdueProcessingOrders(ctx)
 
 	p.logger.Debug("timer expiry job: completed")
 }
-
-// expireStaleRiderOffers marks pending rider offers as expired
-// if they've been pending longer than the configured timeout
 func (p *JobProcessor) expireStaleRiderOffers(ctx context.Context) {
 	if p.riderOfferRepo == nil {
 		return
@@ -77,16 +59,10 @@ func (p *JobProcessor) expireStaleRiderOffers(ctx context.Context) {
 		)
 	}
 }
-
-// processOverdueProcessingOrders finds orders where the seller hasn't
-// marked the item as ready within their specified processing time.
-// This sends reminder notifications to sellers with proper deduplication.
 func (p *JobProcessor) processOverdueProcessingOrders(ctx context.Context) {
 	if p.paymentRequestRepo == nil {
 		return
 	}
-
-	// Get overdue orders that haven't been reminded recently
 	overdueOrders, err := p.paymentRequestRepo.GetOverdueProcessingOrders(ctx, p.config.ReminderCooldownMins)
 	if err != nil {
 		p.logger.Error("timer expiry job: failed to get overdue processing orders",
@@ -105,7 +81,6 @@ func (p *JobProcessor) processOverdueProcessingOrders(ctx context.Context) {
 
 	remindedCount := 0
 	for _, order := range overdueOrders {
-		// Determine escalation level based on reminder count
 		escalationLevel := "gentle"
 		if order.ReminderCount >= 2 {
 			escalationLevel = "warning"
@@ -122,8 +97,6 @@ func (p *JobProcessor) processOverdueProcessingOrders(ctx context.Context) {
 			zap.Int("reminder_count", order.ReminderCount),
 			zap.String("escalation_level", escalationLevel),
 		)
-
-		// Mark reminder as sent (before actually sending to avoid duplicates on failure)
 		if err := p.paymentRequestRepo.UpdateReminderSent(ctx, order.ID); err != nil {
 			p.logger.Error("timer expiry job: failed to update reminder sent timestamp",
 				zap.String("payment_request_id", order.ID.String()),
@@ -133,21 +106,6 @@ func (p *JobProcessor) processOverdueProcessingOrders(ctx context.Context) {
 		}
 
 		remindedCount++
-
-		// TODO: Send notification to seller based on escalation level
-		// p.notificationService.SendToUser(ctx, order.SellerID, NotificationPayload{
-		//     Title: getEscalationTitle(escalationLevel),
-		//     Body:  getEscalationBody(escalationLevel, order.ItemName),
-		//     Type:  "processing_overdue",
-		//     Data:  map[string]interface{}{
-		//         "payment_request_id": order.ID,
-		//         "item_name":          order.ItemName,
-		//         "escalation_level":   escalationLevel,
-		//         "reminder_count":     order.ReminderCount + 1,
-		//     },
-		// })
-
-		// Consider auto-refund after many reminders (e.g., 6+ reminders = 6+ hours overdue)
 		if order.ReminderCount >= 6 {
 			p.logger.Error("timer expiry job: order severely overdue, consider auto-refund",
 				zap.String("payment_request_id", order.ID.String()),

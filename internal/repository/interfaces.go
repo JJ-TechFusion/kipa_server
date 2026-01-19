@@ -45,8 +45,6 @@ type SessionRepository interface {
 	GetRateLimitCount(ctx context.Context, phoneNumber string) (int, error)
 	IncrementRateLimitCount(ctx context.Context, phoneNumber string, window time.Duration) error
 }
-
-// PaymentRequestRepository handles payment request persistence
 type PaymentRequestRepository interface {
 	Create(ctx context.Context, pr *domain.PaymentRequest) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentRequest, error)
@@ -65,14 +63,10 @@ type PaymentRequestRepository interface {
 	PaymentCodeExists(ctx context.Context, code string) (bool, error)
 	IncrementCurrentUses(ctx context.Context, id uuid.UUID) error
 }
-
-// PaymentRequestEventRepository handles payment request audit events
 type PaymentRequestEventRepository interface {
 	Create(ctx context.Context, event *domain.PaymentRequestEvent) error
 	GetByPaymentRequestID(ctx context.Context, prID uuid.UUID) ([]*domain.PaymentRequestEvent, error)
 }
-
-// DeliveryJobRepository handles delivery job persistence
 type DeliveryJobRepository interface {
 	Create(ctx context.Context, job *domain.DeliveryJob) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.DeliveryJob, error)
@@ -88,8 +82,6 @@ type DeliveryJobRepository interface {
 	UpdateSearchRadius(ctx context.Context, id uuid.UUID, radiusKM int) error
 	AssignRider(ctx context.Context, jobID, riderID uuid.UUID) error
 }
-
-// RiderJobOfferRepository handles rider job offers
 type RiderJobOfferRepository interface {
 	Create(ctx context.Context, offer *domain.RiderJobOffer) error
 	GetByJobID(ctx context.Context, jobID uuid.UUID) ([]*domain.RiderJobOffer, error)
@@ -98,8 +90,6 @@ type RiderJobOfferRepository interface {
 	ExpirePendingOffers(ctx context.Context, jobID uuid.UUID) error
 	ExpireAllStaleOffers(ctx context.Context, olderThanMins int) (int64, error)
 }
-
-// EscrowRepository handles escrow persistence
 type EscrowRepository interface {
 	Create(ctx context.Context, escrow *domain.Escrow) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Escrow, error)
@@ -110,8 +100,6 @@ type EscrowRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.EscrowStatus) error
 	GetPendingConfirmationWindow(ctx context.Context) ([]*domain.Escrow, error)
 }
-
-// WalletRepository handles wallet persistence
 type WalletRepository interface {
 	Create(ctx context.Context, wallet *domain.Wallet) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Wallet, error)
@@ -121,16 +109,12 @@ type WalletRepository interface {
 	Credit(ctx context.Context, walletID uuid.UUID, amount float64) error
 	Debit(ctx context.Context, walletID uuid.UUID, amount float64) error
 }
-
-// WalletTransactionRepository handles wallet transaction persistence
 type WalletTransactionRepository interface {
 	Create(ctx context.Context, tx *domain.WalletTransaction) error
 	GetByWalletID(ctx context.Context, walletID uuid.UUID, limit, offset int) ([]*domain.WalletTransaction, error)
 	GetByIdempotencyKey(ctx context.Context, key string) (*domain.WalletTransaction, error)
 	IdempotencyKeyExists(ctx context.Context, key string) (bool, error)
 }
-
-// RiderProfileRepository handles rider profile persistence
 type RiderProfileRepository interface {
 	Create(ctx context.Context, profile *domain.RiderProfile) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.RiderProfile, error)
@@ -142,15 +126,11 @@ type RiderProfileRepository interface {
 	GetOnlineRidersInRadius(ctx context.Context, lat, lng float64, radiusKM int) ([]*domain.RiderProfile, error)
 	IncrementDeliveries(ctx context.Context, id uuid.UUID) error
 	AddEarnings(ctx context.Context, id uuid.UUID, amount float64) error
-
-	// Commission tracking methods
 	UpdateCommissionStats(ctx context.Context, id uuid.UUID, unpaidCommission float64, unpaidCount int) error
 	SetCommissionBlocked(ctx context.Context, id uuid.UUID, blocked bool) error
 	ClearCommissionDebt(ctx context.Context, id uuid.UUID) error
 	RecordCommissionPayment(ctx context.Context, id uuid.UUID) error
 }
-
-// RiderCommissionRepository handles rider commission persistence
 type RiderCommissionRepository interface {
 	Create(ctx context.Context, commission *domain.RiderCommission) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.RiderCommission, error)
@@ -161,14 +141,10 @@ type RiderCommissionRepository interface {
 	MarkAllPendingAsPaid(ctx context.Context, riderProfileID uuid.UUID, paidVia string) (int, error)
 	MarkAsWaived(ctx context.Context, riderProfileID uuid.UUID, paidVia string) (int, error)
 }
-
-// CommissionPaymentRepository handles commission payment records
 type CommissionPaymentRepository interface {
 	Create(ctx context.Context, payment *domain.CommissionPayment) error
 	GetByRiderID(ctx context.Context, riderProfileID uuid.UUID, limit, offset int) ([]*domain.CommissionPayment, error)
 }
-
-// DeliveryZoneRepository handles delivery zone persistence
 type DeliveryZoneRepository interface {
 	Create(ctx context.Context, zone *domain.DeliveryZone) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.DeliveryZone, error)
@@ -177,8 +153,6 @@ type DeliveryZoneRepository interface {
 	GetActive(ctx context.Context) ([]*domain.DeliveryZone, error)
 	Update(ctx context.Context, zone *domain.DeliveryZone) error
 }
-
-// BankAccountRepository handles bank account persistence
 type BankAccountRepository interface {
 	Create(ctx context.Context, account *domain.BankAccount) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.BankAccount, error)
@@ -189,8 +163,6 @@ type BankAccountRepository interface {
 	SetDefault(ctx context.Context, userID, accountID uuid.UUID) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
-
-// VirtualAccountRepository handles virtual account persistence
 type VirtualAccountRepository interface {
 	Create(ctx context.Context, account *domain.VirtualAccount) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.VirtualAccount, error)
@@ -199,8 +171,6 @@ type VirtualAccountRepository interface {
 	GetByCustomerCode(ctx context.Context, customerCode string) (*domain.VirtualAccount, error)
 	Update(ctx context.Context, account *domain.VirtualAccount) error
 }
-
-// WithdrawalRepository handles withdrawal persistence
 type WithdrawalRepository interface {
 	Create(ctx context.Context, withdrawal *domain.Withdrawal) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Withdrawal, error)
@@ -210,8 +180,6 @@ type WithdrawalRepository interface {
 	Update(ctx context.Context, withdrawal *domain.Withdrawal) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.WithdrawalStatus) error
 }
-
-// TopUpRepository handles wallet top-up persistence
 type TopUpRepository interface {
 	Create(ctx context.Context, topUp *domain.TopUp) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.TopUp, error)
@@ -220,8 +188,6 @@ type TopUpRepository interface {
 	Update(ctx context.Context, topUp *domain.TopUp) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.TopUpStatus) error
 }
-
-// OrderRepository handles order persistence
 type OrderRepository interface {
 	Create(ctx context.Context, order *domain.Order) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Order, error)
@@ -234,8 +200,6 @@ type OrderRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.OrderStatus) error
 	SetEscrowID(ctx context.Context, id uuid.UUID, escrowID uuid.UUID) error
 }
-
-// ErrandRepository handles errand persistence
 type ErrandRepository interface {
 	Create(ctx context.Context, errand *domain.Errand) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Errand, error)

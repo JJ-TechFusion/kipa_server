@@ -33,13 +33,8 @@ func NewBuyerHandler(prService service.PaymentRequestService, orderService servi
 }
 
 func (h *BuyerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware) {
-	// Public payment page route (no auth required to view)
 	router.GET("/pay/:code", h.GetPaymentPage)
-
-	// Public verify route (can be called from callback URL)
 	router.GET("/pay/:code/verify", h.VerifyPayment)
-
-	// Authenticated routes for completing payment and managing purchases
 	pay := router.Group("/pay")
 	pay.Use(authMiddleware.RequireAuth())
 	{
@@ -55,8 +50,6 @@ func (h *BuyerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		purchases.POST("/:id/confirm", h.ConfirmDelivery)
 		purchases.POST("/:id/dispute", h.DisputePurchase)
 	}
-
-	// Orders routes
 	orders := router.Group("/orders")
 	orders.Use(authMiddleware.RequireAuth())
 	{
@@ -64,9 +57,6 @@ func (h *BuyerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		orders.GET("/:id", h.GetOrder)
 	}
 }
-
-// GetPaymentPage returns the payment page data for a payment code
-// GET /pay/:code
 func (h *BuyerHandler) GetPaymentPage(c *gin.Context) {
 	code := c.Param("code")
 	if code == "" {
@@ -79,20 +69,14 @@ func (h *BuyerHandler) GetPaymentPage(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Check if link has expired
 	if pr.Status == domain.PRStatusExpired {
 		util.Error(c, http.StatusGone, "LINK_EXPIRED", "This payment link has expired")
 		return
 	}
-
-	// Check if already paid
 	if pr.Status.IsPaid() {
 		util.Error(c, http.StatusBadRequest, "ALREADY_PAID", "This payment request has already been paid")
 		return
 	}
-
-	// Check if cancelled
 	if pr.Status == domain.PRStatusCancelled {
 		util.Error(c, http.StatusGone, "CANCELLED", "This payment request has been cancelled")
 		return
@@ -100,9 +84,6 @@ func (h *BuyerHandler) GetPaymentPage(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, paymentPageToResponse(pr))
 }
-
-// InitializePayment initializes payment with Paystack (for card) or processes wallet payment directly
-// POST /pay/:code/initialize
 func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -124,26 +105,19 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 
 	switch req.PaymentMethod {
 	case "card":
-		// Get user profile to retrieve email
 		user, err := h.userRepo.GetByID(c.Request.Context(), userID)
 		if err != nil {
 			util.Error(c, http.StatusInternalServerError, "USER_NOT_FOUND", "Failed to retrieve user profile")
 			return
 		}
-		
-		// Get email - prefer request email, fall back to profile email
 		email := req.Email
 		if email == "" && user.Email != nil {
 			email = *user.Email
 		}
-		
-		// Validate email is available
 		if email == "" {
 			util.Error(c, http.StatusBadRequest, "EMAIL_REQUIRED", "Please update your profile with an email address to make card payments")
 			return
 		}
-		
-		// Initialize Paystack payment
 		initReq := &service.InitializePaymentRequest{
 			CallbackURL: req.CallbackURL,
 			Email:       email,
@@ -163,7 +137,6 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 		})
 
 	case "wallet":
-		// Process wallet payment directly
 		resp, err := h.orderService.ProcessWalletPayment(c.Request.Context(), userID, code)
 		if err != nil {
 			h.handleError(c, err)
@@ -182,9 +155,6 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 		util.Error(c, http.StatusBadRequest, "INVALID_PAYMENT_METHOD", "Payment method must be 'card' or 'wallet'")
 	}
 }
-
-// VerifyPayment verifies payment after Paystack redirect
-// GET /pay/:code/verify?reference=xxx
 func (h *BuyerHandler) VerifyPayment(c *gin.Context) {
 	reference := c.Query("reference")
 	if reference == "" {
@@ -206,9 +176,6 @@ func (h *BuyerHandler) VerifyPayment(c *gin.Context) {
 		"message":        "Payment verified successfully",
 	})
 }
-
-// ListPurchases lists all purchases (paid orders) for the authenticated buyer
-// GET /purchases
 func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -224,11 +191,8 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Filter to paid orders and enrich with payment request data
 	responses := make([]PurchaseResponse, 0)
 	for _, order := range orders {
-		// Only include verified/paid orders as purchases
 		if order.PaymentStatus != domain.OrderPaymentVerified {
 			continue
 		}
@@ -237,8 +201,6 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		if err != nil {
 			continue // Skip if can't fetch payment request
 		}
-
-		// Get delivery job if exists (for intra-state)
 		var job *domain.DeliveryJob
 		if pr.DeliveryType == domain.DeliveryTypeIntraState {
 			job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
@@ -252,9 +214,6 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		"count":     len(responses),
 	})
 }
-
-// GetPurchase gets a specific purchase (order)
-// GET /purchases/:id
 func (h *BuyerHandler) GetPurchase(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -273,21 +232,15 @@ func (h *BuyerHandler) GetPurchase(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Verify ownership
 	if order.BuyerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this purchase")
 		return
 	}
-
-	// Get payment request for item details
 	pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
 	if err != nil {
 		h.handleError(c, err)
 		return
 	}
-
-	// Get delivery job if exists (for intra-state)
 	var job *domain.DeliveryJob
 	if pr.DeliveryType == domain.DeliveryTypeIntraState {
 		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
@@ -295,9 +248,6 @@ func (h *BuyerHandler) GetPurchase(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, orderToPurchaseResponse(order, pr, job))
 }
-
-// ConfirmDelivery confirms delivery early (releases escrow)
-// POST /purchases/:id/confirm
 func (h *BuyerHandler) ConfirmDelivery(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -316,44 +266,29 @@ func (h *BuyerHandler) ConfirmDelivery(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Verify ownership
 	if order.BuyerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this purchase")
 		return
 	}
-
-	// Check if escrow exists
 	if order.EscrowID == nil {
 		util.Error(c, http.StatusBadRequest, "NO_ESCROW", "No escrow found for this purchase")
 		return
 	}
-
-	// Release the escrow
 	if err := h.escrowService.Release(c.Request.Context(), *order.EscrowID); err != nil {
 		h.handleError(c, err)
 		return
 	}
-
-	// Update order status to completed
 	if err := h.orderService.UpdateStatus(c.Request.Context(), order.ID, domain.OrderStatusCompleted); err != nil {
 		h.handleError(c, err)
 		return
 	}
-
-	// Get payment request to check if it's reusable
 	pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
 	if err == nil && !pr.IsReusable {
-		// Only mark payment request as completed for single-use links
 		_ = h.prService.MarkCompleted(c.Request.Context(), order.PaymentRequestID)
 	}
-	// For reusable links, the PaymentRequest stays active for other buyers
 
 	util.Success(c, http.StatusOK, gin.H{"message": "Delivery confirmed. Payment released to seller."})
 }
-
-// DisputePurchase opens a dispute on a purchase
-// POST /purchases/:id/dispute
 func (h *BuyerHandler) DisputePurchase(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -378,44 +313,29 @@ func (h *BuyerHandler) DisputePurchase(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Verify ownership
 	if order.BuyerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this purchase")
 		return
 	}
-
-	// Check if escrow exists
 	if order.EscrowID == nil {
 		util.Error(c, http.StatusBadRequest, "NO_ESCROW", "No escrow found for this purchase")
 		return
 	}
-
-	// Dispute the escrow
 	if err := h.escrowService.Dispute(c.Request.Context(), *order.EscrowID, req.Reason); err != nil {
 		h.handleError(c, err)
 		return
 	}
-
-	// Update order status to disputed
 	if err := h.orderService.UpdateStatus(c.Request.Context(), order.ID, domain.OrderStatusDisputed); err != nil {
 		h.handleError(c, err)
 		return
 	}
-
-	// Get payment request to check if it's reusable
 	pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
 	if err == nil && !pr.IsReusable {
-		// Only update payment request status for single-use links
 		_ = h.prService.UpdateStatus(c.Request.Context(), order.PaymentRequestID, domain.PRStatusDisputed)
 	}
-	// For reusable links, the PaymentRequest stays active - only this Order is disputed
 
 	util.Success(c, http.StatusOK, gin.H{"message": "Dispute opened. Our team will review your case."})
 }
-
-// ListOrders lists all orders for the authenticated buyer
-// GET /orders
 func (h *BuyerHandler) ListOrders(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -442,9 +362,6 @@ func (h *BuyerHandler) ListOrders(c *gin.Context) {
 		"count":  len(responses),
 	})
 }
-
-// GetOrder gets a specific order
-// GET /orders/:id
 func (h *BuyerHandler) GetOrder(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -600,15 +517,11 @@ func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job
 		paidAt := order.PaidAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.PaidAt = &paidAt
 	}
-
-	// Add delivery info if available
 	if job != nil {
 		deliveryInfo := &PurchaseDeliveryInfo{
 			Status:        string(job.Status),
 			RiderAssigned: job.RiderID != nil,
 		}
-
-		// Only show dropoff code once rider has accepted
 		if job.RiderID != nil && job.DropoffCode != nil {
 			deliveryInfo.DropoffCode = job.DropoffCode
 		}
@@ -665,9 +578,6 @@ func orderToResponse(order *domain.Order) OrderResponse {
 
 	return resp
 }
-
-// GetPurchaseTimeline returns a transaction timeline for the buyer
-// GET /purchases/:id/timeline
 func (h *BuyerHandler) GetPurchaseTimeline(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -697,8 +607,6 @@ func (h *BuyerHandler) GetPurchaseTimeline(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Get delivery job if exists
 	var job *domain.DeliveryJob
 	if pr.DeliveryType == domain.DeliveryTypeIntraState {
 		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)

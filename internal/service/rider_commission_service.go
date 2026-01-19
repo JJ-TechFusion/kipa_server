@@ -10,32 +10,15 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// RiderCommissionService handles rider commission operations
 type RiderCommissionService interface {
-	// RecordCommission creates a commission record when delivery is completed
 	RecordCommission(ctx context.Context, riderProfileID, deliveryJobID uuid.UUID, deliveryFee float64) error
-
-	// GetSummary returns the rider's commission summary
 	GetSummary(ctx context.Context, userID uuid.UUID) (*CommissionSummary, error)
-
-	// GetPendingCommissions returns all pending commission records for a rider
 	GetPendingCommissions(ctx context.Context, userID uuid.UUID) ([]*domain.RiderCommission, error)
-
-	// PayAllFromWallet pays all pending commissions from rider's wallet
 	PayAllFromWallet(ctx context.Context, userID uuid.UUID) (*CommissionPaymentResult, error)
-
-	// CheckAndUpdateBlockStatus checks if rider should be blocked and updates status
 	CheckAndUpdateBlockStatus(ctx context.Context, riderProfileID uuid.UUID) error
-
-	// WaiveCommissions waives all pending commissions (admin action)
 	WaiveCommissions(ctx context.Context, riderProfileID uuid.UUID, reason string) error
-
-	// GetFeeBreakdown calculates and returns the fee breakdown for a delivery
 	GetFeeBreakdown(deliveryFee float64) *domain.RiderFeeBreakdown
 }
-
-// CommissionSummary represents a rider's commission status
 type CommissionSummary struct {
 	TotalOwed         float64 `json:"total_owed"`
 	UnpaidRideCount   int     `json:"unpaid_ride_count"`
@@ -44,8 +27,6 @@ type CommissionSummary struct {
 	GracePeriodRides  int     `json:"grace_period_rides"`
 	CommissionRate    float64 `json:"commission_rate"`
 }
-
-// CommissionPaymentResult represents the result of paying commissions
 type CommissionPaymentResult struct {
 	AmountPaid       float64 `json:"amount_paid"`
 	CommissionsPaid  int     `json:"commissions_paid"`
@@ -76,21 +57,15 @@ func NewRiderCommissionService(
 		logger:         logger,
 	}
 }
-
-// RecordCommission creates a commission record when delivery is completed
 func (s *RiderCommissionServiceImpl) RecordCommission(ctx context.Context, riderProfileID, deliveryJobID uuid.UUID, deliveryFee float64) error {
-	// Create commission record
 	commission := domain.NewRiderCommission(riderProfileID, deliveryJobID, deliveryFee)
 
 	if err := s.commissionRepo.Create(ctx, commission); err != nil {
 		return fmt.Errorf("failed to create commission record: %w", err)
 	}
-
-	// Update rider's accumulated commission stats
 	totalOwed, count, err := s.commissionRepo.GetPendingTotals(ctx, riderProfileID)
 	if err != nil {
 		s.logger.Error("failed to get pending totals", zap.Error(err))
-		// Don't fail the operation, commission was recorded
 	} else {
 		if err := s.riderRepo.UpdateCommissionStats(ctx, riderProfileID, totalOwed, count); err != nil {
 			s.logger.Error("failed to update commission stats", zap.Error(err))
@@ -107,8 +82,6 @@ func (s *RiderCommissionServiceImpl) RecordCommission(ctx context.Context, rider
 
 	return nil
 }
-
-// GetSummary returns the rider's commission summary
 func (s *RiderCommissionServiceImpl) GetSummary(ctx context.Context, userID uuid.UUID) (*CommissionSummary, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -126,8 +99,6 @@ func (s *RiderCommissionServiceImpl) GetSummary(ctx context.Context, userID uuid
 		CommissionRate:    domain.RiderCommissionRate,
 	}, nil
 }
-
-// GetPendingCommissions returns all pending commission records for a rider
 func (s *RiderCommissionServiceImpl) GetPendingCommissions(ctx context.Context, userID uuid.UUID) ([]*domain.RiderCommission, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -136,15 +107,11 @@ func (s *RiderCommissionServiceImpl) GetPendingCommissions(ctx context.Context, 
 
 	return s.commissionRepo.GetPendingByRiderID(ctx, profile.ID)
 }
-
-// PayAllFromWallet pays all pending commissions from rider's wallet
 func (s *RiderCommissionServiceImpl) PayAllFromWallet(ctx context.Context, userID uuid.UUID) (*CommissionPaymentResult, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Get total owed
 	totalOwed, count, err := s.commissionRepo.GetPendingTotals(ctx, profile.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending totals: %w", err)
@@ -153,8 +120,6 @@ func (s *RiderCommissionServiceImpl) PayAllFromWallet(ctx context.Context, userI
 	if count == 0 {
 		return nil, domain.ErrNoCommissionOwed
 	}
-
-	// Check wallet balance
 	wallet, err := s.walletService.GetBalance(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get wallet balance: %w", err)
@@ -163,8 +128,6 @@ func (s *RiderCommissionServiceImpl) PayAllFromWallet(ctx context.Context, userI
 	if wallet.AvailableBalance < totalOwed {
 		return nil, domain.ErrInsufficientBalance
 	}
-
-	// Debit wallet
 	idempotencyKey := fmt.Sprintf("commission_payment_%s_%d", profile.ID.String(), count)
 	_, err = s.walletService.Debit(
 		ctx,
@@ -179,20 +142,13 @@ func (s *RiderCommissionServiceImpl) PayAllFromWallet(ctx context.Context, userI
 	if err != nil {
 		return nil, fmt.Errorf("failed to debit wallet: %w", err)
 	}
-
-	// Mark all commissions as paid
 	paidCount, err := s.commissionRepo.MarkAllPendingAsPaid(ctx, profile.ID, "wallet")
 	if err != nil {
 		s.logger.Error("failed to mark commissions as paid", zap.Error(err))
-		// Wallet was debited, but commission status update failed - needs manual intervention
 	}
-
-	// Clear commission debt on rider profile
 	if err := s.riderRepo.ClearCommissionDebt(ctx, profile.ID); err != nil {
 		s.logger.Error("failed to clear commission debt", zap.Error(err))
 	}
-
-	// Record payment
 	payment := &domain.CommissionPayment{
 		RiderProfileID:  profile.ID,
 		Amount:          totalOwed,
@@ -202,8 +158,6 @@ func (s *RiderCommissionServiceImpl) PayAllFromWallet(ctx context.Context, userI
 	if err := s.paymentRepo.Create(ctx, payment); err != nil {
 		s.logger.Error("failed to record commission payment", zap.Error(err))
 	}
-
-	// Get new wallet balance
 	newWallet, _ := s.walletService.GetBalance(ctx, userID)
 	newBalance := 0.0
 	if newWallet != nil {
@@ -223,8 +177,6 @@ func (s *RiderCommissionServiceImpl) PayAllFromWallet(ctx context.Context, userI
 		IsNowUnblocked:   true,
 	}, nil
 }
-
-// CheckAndUpdateBlockStatus checks if rider should be blocked and updates status
 func (s *RiderCommissionServiceImpl) CheckAndUpdateBlockStatus(ctx context.Context, riderProfileID uuid.UUID) error {
 	profile, err := s.riderRepo.GetByID(ctx, riderProfileID)
 	if err != nil {
@@ -232,8 +184,6 @@ func (s *RiderCommissionServiceImpl) CheckAndUpdateBlockStatus(ctx context.Conte
 	}
 
 	shouldBlock := profile.ShouldBlockForCommission()
-
-	// Only update if status is changing
 	if shouldBlock && !profile.IsCommissionBlocked {
 		if err := s.riderRepo.SetCommissionBlocked(ctx, riderProfileID, true); err != nil {
 			return fmt.Errorf("failed to block rider: %w", err)
@@ -254,8 +204,6 @@ func (s *RiderCommissionServiceImpl) CheckAndUpdateBlockStatus(ctx context.Conte
 
 	return nil
 }
-
-// WaiveCommissions waives all pending commissions (admin action)
 func (s *RiderCommissionServiceImpl) WaiveCommissions(ctx context.Context, riderProfileID uuid.UUID, reason string) error {
 	paidVia := fmt.Sprintf("admin_waive: %s", reason)
 
@@ -263,8 +211,6 @@ func (s *RiderCommissionServiceImpl) WaiveCommissions(ctx context.Context, rider
 	if err != nil {
 		return fmt.Errorf("failed to waive commissions: %w", err)
 	}
-
-	// Clear commission debt
 	if err := s.riderRepo.ClearCommissionDebt(ctx, riderProfileID); err != nil {
 		return fmt.Errorf("failed to clear commission debt: %w", err)
 	}
@@ -276,11 +222,7 @@ func (s *RiderCommissionServiceImpl) WaiveCommissions(ctx context.Context, rider
 
 	return nil
 }
-
-// GetFeeBreakdown calculates and returns the fee breakdown for a delivery
 func (s *RiderCommissionServiceImpl) GetFeeBreakdown(deliveryFee float64) *domain.RiderFeeBreakdown {
 	return domain.NewRiderFeeBreakdown(deliveryFee)
 }
-
-// Ensure RiderCommissionServiceImpl implements RiderCommissionService
 var _ RiderCommissionService = (*RiderCommissionServiceImpl)(nil)

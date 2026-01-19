@@ -5,8 +5,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// BankAccount represents a user's saved bank account for withdrawals
 type BankAccount struct {
 	ID              uuid.UUID  `db:"id" json:"id"`
 	UserID          uuid.UUID  `db:"user_id" json:"user_id"`
@@ -20,8 +18,6 @@ type BankAccount struct {
 	CreatedAt       time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt       time.Time  `db:"updated_at" json:"updated_at"`
 }
-
-// VirtualAccount represents a dedicated virtual account for wallet funding
 type VirtualAccount struct {
 	ID               uuid.UUID  `db:"id" json:"id"`
 	UserID           uuid.UUID  `db:"user_id" json:"user_id"`
@@ -35,8 +31,6 @@ type VirtualAccount struct {
 	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`
 }
-
-// WithdrawalStatus represents the status of a withdrawal request
 type WithdrawalStatus string
 
 const (
@@ -46,8 +40,6 @@ const (
 	WithdrawalStatusFailed     WithdrawalStatus = "failed"
 	WithdrawalStatusReversed   WithdrawalStatus = "reversed"
 )
-
-// Withdrawal represents a withdrawal request from wallet to bank
 type Withdrawal struct {
 	ID              uuid.UUID        `db:"id" json:"id"`
 	UserID          uuid.UUID        `db:"user_id" json:"user_id"`
@@ -64,8 +56,6 @@ type Withdrawal struct {
 	CreatedAt       time.Time        `db:"created_at" json:"created_at"`
 	UpdatedAt       time.Time        `db:"updated_at" json:"updated_at"`
 }
-
-// TopUpStatus represents the status of a wallet top-up
 type TopUpStatus string
 
 const (
@@ -74,8 +64,6 @@ const (
 	TopUpStatusFailed    TopUpStatus = "failed"
 	TopUpStatusAbandoned TopUpStatus = "abandoned"
 )
-
-// TopUp represents a wallet top-up/funding request
 type TopUp struct {
 	ID              uuid.UUID    `db:"id" json:"id"`
 	UserID          uuid.UUID    `db:"user_id" json:"user_id"`

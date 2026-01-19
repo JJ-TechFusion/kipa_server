@@ -14,8 +14,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 )
-
-// DeliveryJobRepo implements repository.DeliveryJobRepository
 type DeliveryJobRepo struct {
 	db *sqlx.DB
 }
@@ -109,7 +107,6 @@ func (r *DeliveryJobRepo) GetByRiderID(ctx context.Context, riderID uuid.UUID, s
 	args := []interface{}{riderID}
 
 	if len(statuses) > 0 {
-		// Convert statuses to string slice for pq.Array
 		statusStrings := make([]string, len(statuses))
 		for i, s := range statuses {
 			statusStrings[i] = string(s)
@@ -117,8 +114,6 @@ func (r *DeliveryJobRepo) GetByRiderID(ctx context.Context, riderID uuid.UUID, s
 		query += ` AND status = ANY($2)`
 		args = append(args, pq.Array(statusStrings))
 	}
-
-	// Use fmt.Sprintf to properly format the parameter numbers
 	query += fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
 	args = append(args, limit, offset)
 
@@ -314,14 +309,10 @@ func (r *DeliveryJobRepo) AssignRider(ctx context.Context, jobID, riderID uuid.U
 
 	return nil
 }
-
-// Coordinates represents a geographic point
 type Coordinates struct {
 	Lat float64
 	Lng float64
 }
-
-// GetDropoffCoordinates extracts lat/lng from PostGIS dropoff_location
 func (r *DeliveryJobRepo) GetDropoffCoordinates(ctx context.Context, jobID uuid.UUID) (*Coordinates, error) {
 	var coords Coordinates
 	query := `
@@ -341,8 +332,6 @@ func (r *DeliveryJobRepo) GetDropoffCoordinates(ctx context.Context, jobID uuid.
 
 	return &coords, nil
 }
-
-// RiderJobOfferRepo implements repository.RiderJobOfferRepository
 type RiderJobOfferRepo struct {
 	db *sqlx.DB
 }

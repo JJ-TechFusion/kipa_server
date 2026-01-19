@@ -11,8 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
-
-// PaymentRequestRepo implements repository.PaymentRequestRepository
 type PaymentRequestRepo struct {
 	db *sqlx.DB
 }
@@ -308,8 +306,6 @@ func (r *PaymentRequestRepo) IncrementCurrentUses(ctx context.Context, id uuid.U
 
 	return nil
 }
-
-// PaymentRequestEventRepo implements repository.PaymentRequestEventRepository
 type PaymentRequestEventRepo struct {
 	db *sqlx.DB
 }

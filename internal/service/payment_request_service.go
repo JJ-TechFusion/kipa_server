@@ -110,10 +110,7 @@ func NewPaymentRequestService(
 		logger:          logger,
 	}
 }
-
-// CreateDraft creates a new draft payment request (Step 1)
 func (s *PaymentRequestServiceImpl) CreateDraft(ctx context.Context, sellerID uuid.UUID, req *CreateDraftRequest) (*domain.PaymentRequest, error) {
-	// Convert item images to JSON bytes
 	var itemImagesJSON []byte
 	if len(req.ItemImages) > 0 {
 		var err error
@@ -122,8 +119,6 @@ func (s *PaymentRequestServiceImpl) CreateDraft(ctx context.Context, sellerID uu
 			return nil, fmt.Errorf("failed to marshal item images: %w", err)
 		}
 	}
-
-	// Convert description to pointer if not empty
 	var itemDescription *string
 	if req.ItemDescription != "" {
 		itemDescription = &req.ItemDescription
@@ -146,14 +141,9 @@ func (s *PaymentRequestServiceImpl) CreateDraft(ctx context.Context, sellerID uu
 	if err := s.prRepo.Create(ctx, pr); err != nil {
 		return nil, fmt.Errorf("failed to create payment request: %w", err)
 	}
-
-	// Mark user as seller (idempotent - doesn't fail if already a seller)
 	if err := s.userRepo.SetIsSeller(ctx, sellerID); err != nil {
 		s.logger.Warn("failed to set user as seller", zap.Error(err))
-		// Don't fail the request - this is a nice-to-have
 	}
-
-	// Record event
 	s.recordEvent(ctx, pr.ID, nil, domain.PRStatusDraft, "draft_created", nil)
 
 	s.logger.Info("payment request draft created",
@@ -163,25 +153,17 @@ func (s *PaymentRequestServiceImpl) CreateDraft(ctx context.Context, sellerID uu
 
 	return pr, nil
 }
-
-// ConfigureFulfillment configures fulfillment details and generates payment link (Step 2)
 func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID, req *ConfigureFulfillmentRequest) (*domain.PaymentRequest, error) {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Verify ownership
 	if pr.SellerID != sellerID {
 		return nil, domain.ErrUnauthorized
 	}
-
-	// Can only configure draft status
 	if pr.Status != domain.PRStatusDraft {
 		return nil, domain.ErrInvalidStatusTransition
 	}
-
-	// Update fulfillment details
 	pr.DeliveryType = req.DeliveryType
 
 	if req.PickupAddress != "" {
@@ -190,15 +172,11 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 	if req.DropoffAddress != "" {
 		pr.DropoffAddress = &req.DropoffAddress
 	}
-
-	// Calculate fees
 	if req.DeliveryType == domain.DeliveryTypeIntraState && req.PickupLat != nil && req.DropoffLat != nil {
-		// Determine vehicle type, default to motorcycle if not specified
 		vehicleType := req.VehicleType
 		if vehicleType == "" {
 			vehicleType = domain.VehicleTypeMotorcycle
 		}
-		// Store vehicle type on payment request for later use
 		pr.VehicleType = &vehicleType
 
 		estimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(ctx, *req.PickupLat, *req.PickupLng, *req.DropoffLat, *req.DropoffLng, vehicleType)
@@ -206,48 +184,32 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 			s.logger.Warn("failed to calculate delivery fee, using default",
 				zap.Error(err),
 			)
-			// Use a default estimate if zone lookup fails, apply vehicle multiplier
 			defaultFee := s.feeCalculator.ApplyVehicleTypeMultiplier(2500.0, vehicleType)
 			pr.EstimatedDeliveryFee = &defaultFee
 		} else {
 			pr.EstimatedDeliveryFee = &estimate.TotalFee
 		}
 	} else if req.DeliveryType == domain.DeliveryTypeInterState {
-		// For inter-state, seller provides their own delivery arrangement
 		defaultInterStateFee := 5000.0
 		pr.EstimatedDeliveryFee = &defaultInterStateFee
 	} else {
-		// Pickup - no delivery fee
 		zero := 0.0
 		pr.EstimatedDeliveryFee = &zero
 	}
-
-	// Calculate buyer and seller fees
 	buyerFee := s.feeCalculator.CalculateBuyerFee(pr.ItemPrice)
 	sellerFee := s.feeCalculator.CalculateSellerFee(pr.ItemPrice)
 	pr.BuyerServiceFee = &buyerFee
 	pr.SellerPlatformFee = &sellerFee
-
-	// Calculate estimated total
 	deliveryFee := 0.0
 	if pr.EstimatedDeliveryFee != nil {
 		deliveryFee = *pr.EstimatedDeliveryFee
 	}
 	estimatedTotal := s.feeCalculator.CalculateTotalForBuyer(pr.ItemPrice, deliveryFee)
 	pr.EstimatedTotal = &estimatedTotal
-
-	// Generate payment code
 	paymentCode := s.generatePaymentCode()
 	pr.PaymentCode = &paymentCode
-
-	// Set link expiry (e.g., 7 days)
 	linkExpiry := time.Now().Add(7 * 24 * time.Hour)
 	pr.LinkExpiresAt = &linkExpiry
-
-	// Note: IsReusable and MaxUses are set during draft creation (Step 1)
-	// CurrentUses is already 0 from draft creation
-
-	// Update status
 	oldStatus := pr.Status
 	pr.Status = domain.PRStatusLinkActive
 	now := time.Now()
@@ -256,8 +218,6 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return nil, fmt.Errorf("failed to update payment request: %w", err)
 	}
-
-	// Record event
 	s.recordEvent(ctx, pr.ID, &oldStatus, domain.PRStatusLinkActive, "link_generated", nil)
 
 	s.logger.Info("payment link generated",
@@ -267,23 +227,15 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 
 	return pr, nil
 }
-
-// GetByID gets a payment request by ID
 func (s *PaymentRequestServiceImpl) GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentRequest, error) {
 	return s.prRepo.GetByID(ctx, id)
 }
-
-// GetByPaymentCode gets a payment request by payment code
 func (s *PaymentRequestServiceImpl) GetByPaymentCode(ctx context.Context, code string) (*domain.PaymentRequest, error) {
 	return s.prRepo.GetByPaymentCode(ctx, code)
 }
-
-// GetBySellerID gets all payment requests for a seller
 func (s *PaymentRequestServiceImpl) GetBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error) {
 	return s.prRepo.GetBySellerID(ctx, sellerID, limit, offset)
 }
-
-// GetByBuyerID gets all purchases for a buyer
 func (s *PaymentRequestServiceImpl) GetByBuyerID(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error) {
 	return s.prRepo.GetByBuyerID(ctx, buyerID, limit, offset)
 }
@@ -339,37 +291,26 @@ func (s *PaymentRequestServiceImpl) Edit(ctx context.Context, prID uuid.UUID, se
 
 	return pr, nil
 }
-
-// MarkReadyForPickup marks a payment request as ready for pickup
 func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) (*domain.PaymentRequest, error) {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Verify ownership
 	if pr.SellerID != sellerID {
 		return nil, domain.ErrUnauthorized
 	}
-
-	// Can only mark ready from paid_awaiting_fulfillment
 	if pr.Status != domain.PRStatusPaidAwaitingFulfillment {
 		return nil, domain.ErrInvalidStatusTransition
 	}
-
-	// Update status based on delivery type
 	oldStatus := pr.Status
 	now := time.Now()
 	pr.ReadyForPickupAt = &now
 
 	if pr.DeliveryType == domain.DeliveryTypeIntraState {
-		// Validate that vehicle type was set during fulfillment
 		if pr.VehicleType == nil {
 			return nil, fmt.Errorf("vehicle type not set during fulfillment")
 		}
 		vehicleType := *pr.VehicleType
-
-		// Create a delivery job for rider matching
 		deliveryFee := 0.0
 		if pr.EstimatedDeliveryFee != nil {
 			deliveryFee = *pr.EstimatedDeliveryFee
@@ -390,8 +331,6 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 		if err := s.deliveryJobRepo.Create(ctx, job); err != nil {
 			return nil, fmt.Errorf("failed to create delivery job: %w", err)
 		}
-
-		// Link delivery job to payment request
 		if err := s.prRepo.SetDeliveryJobID(ctx, pr.ID, job.ID); err != nil {
 			s.logger.Warn("failed to set delivery job ID on payment request", zap.Error(err))
 		}
@@ -404,15 +343,12 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 
 		pr.Status = domain.PRStatusSearchingRider
 	} else {
-		// Inter-state or pickup - just mark ready
 		pr.Status = domain.PRStatusReadyForPickup
 	}
 
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return nil, fmt.Errorf("failed to update payment request: %w", err)
 	}
-
-	// Record event
 	s.recordEvent(ctx, pr.ID, &oldStatus, pr.Status, "marked_ready_for_pickup", nil)
 
 	s.logger.Info("payment request marked ready for pickup",
@@ -423,16 +359,12 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 
 	return pr, nil
 }
-
-// stringValue returns the value of a pointer or empty string if nil
 func stringValue(s *string) string {
 	if s == nil {
 		return ""
 	}
 	return *s
 }
-
-// UpdateStatus updates the status of a payment request
 func (s *PaymentRequestServiceImpl) UpdateStatus(ctx context.Context, prID uuid.UUID, status domain.PaymentRequestStatus) error {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -447,20 +379,14 @@ func (s *PaymentRequestServiceImpl) UpdateStatus(ctx context.Context, prID uuid.
 	s.recordEvent(ctx, prID, &oldStatus, status, "status_updated", nil)
 	return nil
 }
-
-// Cancel cancels a payment request
 func (s *PaymentRequestServiceImpl) Cancel(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) error {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
 		return err
 	}
-
-	// Verify ownership
 	if pr.SellerID != sellerID {
 		return domain.ErrUnauthorized
 	}
-
-	// Can only cancel if not paid
 	if pr.Status != domain.PRStatusDraft && pr.Status != domain.PRStatusLinkActive {
 		return domain.ErrCannotCancel
 	}
@@ -478,8 +404,6 @@ func (s *PaymentRequestServiceImpl) Cancel(ctx context.Context, prID uuid.UUID, 
 
 	return nil
 }
-
-// SetBuyer sets the buyer ID and marks as paid
 func (s *PaymentRequestServiceImpl) SetBuyer(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, escrowID uuid.UUID) error {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -501,8 +425,6 @@ func (s *PaymentRequestServiceImpl) SetBuyer(ctx context.Context, prID uuid.UUID
 
 	return nil
 }
-
-// MarkDelivered marks the payment request as delivered
 func (s *PaymentRequestServiceImpl) MarkDelivered(ctx context.Context, prID uuid.UUID) error {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -522,8 +444,6 @@ func (s *PaymentRequestServiceImpl) MarkDelivered(ctx context.Context, prID uuid
 
 	return nil
 }
-
-// MarkCompleted marks the payment request as completed
 func (s *PaymentRequestServiceImpl) MarkCompleted(ctx context.Context, prID uuid.UUID) error {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -543,16 +463,12 @@ func (s *PaymentRequestServiceImpl) MarkCompleted(ctx context.Context, prID uuid
 
 	return nil
 }
-
-// generatePaymentCode generates a unique payment code
 func (s *PaymentRequestServiceImpl) generatePaymentCode() string {
 	bytes := make([]byte, 4)
 	rand.Read(bytes)
 	code := strings.ToUpper(hex.EncodeToString(bytes))
 	return fmt.Sprintf("KIP-%s", code)
 }
-
-// recordEvent records a payment request event
 func (s *PaymentRequestServiceImpl) recordEvent(ctx context.Context, prID uuid.UUID, fromStatus *domain.PaymentRequestStatus, toStatus domain.PaymentRequestStatus, reason string, metadata map[string]interface{}) {
 	var metadataBytes []byte
 	if metadata != nil {
@@ -582,6 +498,4 @@ func (s *PaymentRequestServiceImpl) recordEvent(ctx context.Context, prID uuid.U
 		)
 	}
 }
-
-// Ensure PaymentRequestServiceImpl implements PaymentRequestService
 var _ PaymentRequestService = (*PaymentRequestServiceImpl)(nil)

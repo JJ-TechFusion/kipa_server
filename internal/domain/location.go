@@ -5,8 +5,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// LocationRecord stores rider location history
 type LocationRecord struct {
 	ID                  uuid.UUID  `db:"id"`
 	RiderID             uuid.UUID  `db:"rider_id"`

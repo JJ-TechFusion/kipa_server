@@ -11,49 +11,30 @@ import (
 )
 
 const (
-	// Time allowed to write a message
 	writeWait = 10 * time.Second
-
-	// Time allowed to read the next pong
 	pongWait = 60 * time.Second
-
-	// Send pings with this period (must be < pongWait)
 	pingPeriod = 30 * time.Second
-
-	// Maximum message size
 	maxMessageSize = 4096
 )
-
-// ClientRole represents user or rider
 type ClientRole string
 
 const (
 	RoleUser  ClientRole = "user"
 	RoleRider ClientRole = "rider"
 )
-
-// Client represents a single WebSocket connection
 type Client struct {
 	hub    *Hub
 	conn   *websocket.Conn
 	send   chan []byte
 	logger *zap.Logger
-
-	// Identity
 	ID       string
 	UserID   uuid.UUID
 	Role     ClientRole
 	DeviceID string
-
-	// For riders: current active job
 	ActiveJobID *uuid.UUID
-
-	// For users: jobs being watched
 	watchedJobs map[string]bool
 	mu          sync.RWMutex
 }
-
-// NewClient creates a new client
 func NewClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, role ClientRole, deviceID string, logger *zap.Logger) *Client {
 	return &Client{
 		hub:         hub,
@@ -67,8 +48,6 @@ func NewClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, role ClientRole
 		watchedJobs: make(map[string]bool),
 	}
 }
-
-// ReadPump pumps messages from the websocket to the hub
 func (c *Client) ReadPump() {
 	defer func() {
 		c.hub.unregister <- c
@@ -94,8 +73,6 @@ func (c *Client) ReadPump() {
 		c.handleMessage(message)
 	}
 }
-
-// WritePump pumps messages from the hub to the websocket
 func (c *Client) WritePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -124,8 +101,6 @@ func (c *Client) WritePump() {
 		}
 	}
 }
-
-// handleMessage processes incoming messages
 func (c *Client) handleMessage(data []byte) {
 	var base BaseMessage
 	if err := json.Unmarshal(data, &base); err != nil {
@@ -173,24 +148,18 @@ func (c *Client) handleMessage(data []byte) {
 		c.sendError("UNKNOWN_TYPE", "Unknown message type: "+base.Type)
 	}
 }
-
-// Subscribe adds this client to a job's room
 func (c *Client) Subscribe(jobID string) {
 	c.mu.Lock()
 	c.watchedJobs[jobID] = true
 	c.mu.Unlock()
 	c.hub.SubscribeToJob(c, jobID)
 }
-
-// Unsubscribe removes this client from a job's room
 func (c *Client) Unsubscribe(jobID string) {
 	c.mu.Lock()
 	delete(c.watchedJobs, jobID)
 	c.mu.Unlock()
 	c.hub.UnsubscribeFromJob(c, jobID)
 }
-
-// GetWatchedJobs returns list of jobs being watched
 func (c *Client) GetWatchedJobs() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -200,8 +169,6 @@ func (c *Client) GetWatchedJobs() []string {
 	}
 	return jobs
 }
-
-// Send sends a message to this client
 func (c *Client) Send(msg interface{}) {
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -212,7 +179,6 @@ func (c *Client) Send(msg interface{}) {
 	select {
 	case c.send <- data:
 	default:
-		// Channel full, client too slow
 		c.logger.Warn("client send buffer full", zap.String("client_id", c.ID))
 	}
 }

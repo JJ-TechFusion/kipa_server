@@ -117,9 +117,6 @@ func (h *AuthHandler) Me(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, response)
 }
-
-// UpdateProfile updates the user's profile
-// PATCH /auth/profile
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {

@@ -10,13 +10,9 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// OrderRepo implements repository.OrderRepository
 type OrderRepo struct {
 	db *sqlx.DB
 }
-
-// NewOrderRepo creates a new order repository
 func NewOrderRepo(db *sqlx.DB) repository.OrderRepository {
 	return &OrderRepo{db: db}
 }

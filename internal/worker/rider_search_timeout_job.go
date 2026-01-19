@@ -8,21 +8,9 @@ import (
 
 	"kipa/internal/domain"
 )
-
-// runRiderSearchTimeoutJob periodically checks for delivery jobs that have been
-// searching for a rider beyond the timeout threshold.
-//
-// Flow:
-// 1. Query jobs WHERE status = 'searching' AND search_timeout_at <= NOW()
-// 2. For each job:
-//    - Update delivery_job.status = 'timeout'
-//    - Update payment_request.status = 'no_rider_found'
-//    - (Future) Send notification to seller
 func (p *JobProcessor) runRiderSearchTimeoutJob(ctx context.Context) {
 	ticker := time.NewTicker(p.config.RiderSearchCheckInterval)
 	defer ticker.Stop()
-
-	// Run immediately on start, then on ticker
 	p.processRiderSearchTimeouts(ctx)
 
 	for {
@@ -38,15 +26,11 @@ func (p *JobProcessor) runRiderSearchTimeoutJob(ctx context.Context) {
 		}
 	}
 }
-
-// processRiderSearchTimeouts handles the actual timeout processing
 func (p *JobProcessor) processRiderSearchTimeouts(ctx context.Context) {
 	if p.deliveryJobRepo == nil {
 		p.logger.Warn("rider search timeout job: delivery job repo not configured")
 		return
 	}
-
-	// Acquire distributed lock to prevent multiple instances processing same jobs
 	release, proceed := p.acquireLock(ctx, "worker:rider_search_timeout", 1*time.Minute)
 	if !proceed {
 		return
@@ -56,8 +40,6 @@ func (p *JobProcessor) processRiderSearchTimeouts(ctx context.Context) {
 	}
 
 	p.logger.Debug("rider search timeout job: checking for timed out jobs")
-
-	// Get all jobs that have exceeded their search timeout
 	timedOutJobs, err := p.deliveryJobRepo.GetTimedOutJobs(ctx)
 	if err != nil {
 		p.logger.Error("rider search timeout job: failed to get timed out jobs",
@@ -89,10 +71,7 @@ func (p *JobProcessor) processRiderSearchTimeouts(ctx context.Context) {
 		zap.Int("processed", len(timedOutJobs)),
 	)
 }
-
-// processTimedOutJob handles a single timed out delivery job
 func (p *JobProcessor) processTimedOutJob(ctx context.Context, job *domain.DeliveryJob) error {
-	// Update delivery job status to timeout
 	if err := p.deliveryJobRepo.UpdateStatus(ctx, job.ID, domain.DJStatusTimeout); err != nil {
 		return err
 	}
@@ -101,19 +80,14 @@ func (p *JobProcessor) processTimedOutJob(ctx context.Context, job *domain.Deliv
 		zap.String("job_id", job.ID.String()),
 		zap.String("payment_request_id", job.PaymentRequestID.String()),
 	)
-
-	// Expire any pending rider offers for this job
 	if p.riderOfferRepo != nil {
 		if err := p.riderOfferRepo.ExpirePendingOffers(ctx, job.ID); err != nil {
 			p.logger.Error("rider search timeout job: failed to expire pending offers",
 				zap.String("job_id", job.ID.String()),
 				zap.Error(err),
 			)
-			// Don't return error - continue with other cleanup
 		}
 	}
-
-	// Update payment request status to no_rider_found
 	if p.paymentRequestRepo != nil {
 		if err := p.paymentRequestRepo.UpdateStatus(ctx, job.PaymentRequestID, domain.PRStatusNoRiderFound); err != nil {
 			p.logger.Error("rider search timeout job: failed to update payment request status",
@@ -121,17 +95,8 @@ func (p *JobProcessor) processTimedOutJob(ctx context.Context, job *domain.Deliv
 				zap.String("payment_request_id", job.PaymentRequestID.String()),
 				zap.Error(err),
 			)
-			// Don't return error - the job was already marked as timed out
 		}
 	}
-
-	// TODO: Send notification to seller
-	// p.notificationService.SendToUser(ctx, sellerID, NotificationPayload{
-	//     Title: "No Riders Available",
-	//     Body:  "We couldn't find a rider for your order. Would you like to retry or cancel?",
-	//     Type:  "rider_search_timeout",
-	//     Data:  map[string]interface{}{"payment_request_id": job.PaymentRequestID},
-	// })
 
 	return nil
 }

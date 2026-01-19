@@ -35,9 +35,6 @@ func (h *PaymentRequestHandler) RegisterRoutes(router *gin.RouterGroup, authMidd
 		pr.DELETE("/:id", h.Cancel)
 	}
 }
-
-// CreateDraft creates a new draft payment request (Step 1)
-// POST /payment-requests
 func (h *PaymentRequestHandler) CreateDraft(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -60,9 +57,6 @@ func (h *PaymentRequestHandler) CreateDraft(c *gin.Context) {
 
 	util.Success(c, http.StatusCreated, paymentRequestToResponse(pr))
 }
-
-// ListMyRequests lists all payment requests for the authenticated seller
-// GET /payment-requests
 func (h *PaymentRequestHandler) ListMyRequests(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -72,7 +66,6 @@ func (h *PaymentRequestHandler) ListMyRequests(c *gin.Context) {
 
 	limit := 20
 	offset := 0
-	// Could parse query params for pagination
 
 	requests, err := h.prService.GetBySellerID(c.Request.Context(), userID, limit, offset)
 	if err != nil {
@@ -90,9 +83,6 @@ func (h *PaymentRequestHandler) ListMyRequests(c *gin.Context) {
 		"count":            len(responses),
 	})
 }
-
-// GetByID gets a specific payment request
-// GET /payment-requests/:id
 func (h *PaymentRequestHandler) GetByID(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -111,8 +101,6 @@ func (h *PaymentRequestHandler) GetByID(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Verify ownership
 	if pr.SellerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this payment request")
 		return
@@ -120,9 +108,6 @@ func (h *PaymentRequestHandler) GetByID(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, paymentRequestToResponse(pr))
 }
-
-// ConfigureFulfillment configures fulfillment and generates payment link (Step 2)
-// PATCH /payment-requests/:id/fulfillment
 func (h *PaymentRequestHandler) ConfigureFulfillment(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -153,14 +138,9 @@ func (h *PaymentRequestHandler) ConfigureFulfillment(c *gin.Context) {
 		"payment_url":     "https://kipa.ng/pay/" + *pr.PaymentCode,
 	})
 }
-
-// MarkReadyForPickupRequest is the request body for marking an order as ready
 type MarkReadyForPickupRequest struct {
 	VehicleType string `json:"vehicle_type" binding:"required,oneof=motorcycle car"`
 }
-
-// MarkReadyForPickup marks the payment request as ready (triggers rider search for intra-state)
-// POST /payment-requests/:id/ready-for-pickup
 func (h *PaymentRequestHandler) MarkReadyForPickup(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -173,8 +153,6 @@ func (h *PaymentRequestHandler) MarkReadyForPickup(c *gin.Context) {
 		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid payment request ID")
 		return
 	}
-
-	// Vehicle type is now taken from the payment request (set during fulfillment)
 	pr, err := h.prService.MarkReadyForPickup(c.Request.Context(), id, userID)
 	if err != nil {
 		h.handleError(c, err)
@@ -183,9 +161,6 @@ func (h *PaymentRequestHandler) MarkReadyForPickup(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, paymentRequestToResponse(pr))
 }
-
-// Cancel cancels a payment request (only if not paid)
-// DELETE /payment-requests/:id
 func (h *PaymentRequestHandler) Cancel(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -285,8 +260,6 @@ func mapPaymentRequestErrorToResponse(err error) (int, string, string) {
 		return http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred"
 	}
 }
-
-// PaymentRequestResponse is the API response for a payment request
 type PaymentRequestResponse struct {
 	ID                   uuid.UUID `json:"id"`
 	SellerID             uuid.UUID `json:"seller_id"`

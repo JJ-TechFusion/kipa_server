@@ -12,38 +12,26 @@ import (
 	"kipa/internal/integration/maps"
 	"kipa/internal/repository/postgres"
 )
-
-// LocationService handles rider location updates, ETA calculation, and broadcasting
 type LocationService interface {
 	HandleLocationUpdate(ctx context.Context, riderID uuid.UUID, jobID string, lat, lng, heading, speed float64)
 	CleanupOldLocations(ctx context.Context, olderThanDays int) (int64, error)
 }
-
-// LocationServiceImpl implements LocationService
 type LocationServiceImpl struct {
 	locationHistoryRepo *postgres.LocationHistoryRepo
 	deliveryJobRepo     *postgres.DeliveryJobRepo
 	mapsClient          maps.MapsClient
-
-	// ETA throttling
 	etaLastCalc   map[string]time.Time
 	etaThrottleMs int
 	etaMu         sync.Mutex
-
-	// Rate limiting (1 update per second per client)
 	lastUpdate map[string]time.Time
 	rateMu     sync.Mutex
 
 	logger *zap.Logger
 }
-
-// LocationServiceConfig configures the location service
 type LocationServiceConfig struct {
 	ETAThrottleSeconds int // How often to recalculate ETA (default 30)
 	RateLimitMs        int // Minimum ms between updates (default 1000)
 }
-
-// NewLocationService creates a new location service
 func NewLocationService(
 	locationHistoryRepo *postgres.LocationHistoryRepo,
 	deliveryJobRepo *postgres.DeliveryJobRepo,
@@ -68,10 +56,7 @@ func NewLocationService(
 		logger:              logger,
 	}
 }
-
-// HandleLocationUpdate processes a location update from a rider
 func (s *LocationServiceImpl) HandleLocationUpdate(ctx context.Context, riderID uuid.UUID, jobID string, lat, lng, heading, speed float64) {
-	// Rate limiting: max 1 update per second per rider
 	clientKey := riderID.String()
 	s.rateMu.Lock()
 	lastUpdate, exists := s.lastUpdate[clientKey]
@@ -81,14 +66,10 @@ func (s *LocationServiceImpl) HandleLocationUpdate(ctx context.Context, riderID 
 	}
 	s.lastUpdate[clientKey] = time.Now()
 	s.rateMu.Unlock()
-
-	// Parse job ID
 	jobUUID, err := uuid.Parse(jobID)
 	if err != nil {
 		return
 	}
-
-	// Calculate ETA (throttled)
 	var etaMinutes *int
 	var distanceRemaining *float64
 
@@ -112,8 +93,6 @@ func (s *LocationServiceImpl) HandleLocationUpdate(ctx context.Context, riderID 
 			}
 		}
 	}
-
-	// Store location
 	_ = s.locationHistoryRepo.Create(ctx, &domain.LocationRecord{
 		RiderID:             riderID,
 		DeliveryJobID:       &jobUUID,
@@ -125,8 +104,6 @@ func (s *LocationServiceImpl) HandleLocationUpdate(ctx context.Context, riderID 
 		DistanceRemainingKM: distanceRemaining,
 	})
 }
-
-// CleanupOldLocations removes location history older than given days
 func (s *LocationServiceImpl) CleanupOldLocations(ctx context.Context, olderThanDays int) (int64, error) {
 	before := time.Now().AddDate(0, 0, -olderThanDays)
 	return s.locationHistoryRepo.DeleteOlderThan(ctx, before)

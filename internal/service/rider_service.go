@@ -12,28 +12,19 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// RiderService handles rider profile and delivery job operations
 type RiderService interface {
-	// Profile management
 	CreateProfile(ctx context.Context, userID uuid.UUID, req *CreateRiderProfileRequest) (*domain.RiderProfile, error)
 	GetProfile(ctx context.Context, userID uuid.UUID) (*domain.RiderProfile, error)
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req *UpdateRiderProfileRequest) (*domain.RiderProfile, error)
-
-	// Online status
 	GoOnline(ctx context.Context, userID uuid.UUID) error
 	GoOffline(ctx context.Context, userID uuid.UUID) error
 	UpdateLocation(ctx context.Context, userID uuid.UUID, lat, lng, heading, speed float64) error
-
-	// Job management
 	GetAvailableJobs(ctx context.Context, userID uuid.UUID) ([]*domain.DeliveryJob, error)
 	AcceptJob(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, error)
 	GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, error)
 	ConfirmPickup(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 	ConfirmDelivery(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 	GetJobHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DeliveryJob, error)
-
-	// Earnings
 	GetEarnings(ctx context.Context, userID uuid.UUID) (*RiderEarnings, error)
 }
 
@@ -102,22 +93,14 @@ func NewRiderService(
 		config:            config,
 	}
 }
-
-// ... CreateProfile ...
-
-// UpdateLocation updates a rider's current location
 func (s *RiderServiceImpl) UpdateLocation(ctx context.Context, userID uuid.UUID, lat, lng, heading, speed float64) error {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return err
 	}
-
-	// Update rider's current location
 	if err := s.riderRepo.UpdateLocation(ctx, profile.ID, lat, lng); err != nil {
 		return fmt.Errorf("failed to update location: %w", err)
 	}
-
-	// If rider has an active job, record location history for tracking
 	job, err := s.jobRepo.GetActiveByRiderID(ctx, profile.ID)
 	if err == nil && job != nil {
 		s.locationService.HandleLocationUpdate(ctx, profile.ID, job.ID.String(), lat, lng, heading, speed)
@@ -125,10 +108,7 @@ func (s *RiderServiceImpl) UpdateLocation(ctx context.Context, userID uuid.UUID,
 
 	return nil
 }
-
-// CreateProfile creates a new rider profile
 func (s *RiderServiceImpl) CreateProfile(ctx context.Context, userID uuid.UUID, req *CreateRiderProfileRequest) (*domain.RiderProfile, error) {
-	// Check if profile already exists
 	existing, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err == nil && existing != nil {
 		return nil, fmt.Errorf("rider profile already exists")
@@ -161,13 +141,9 @@ func (s *RiderServiceImpl) CreateProfile(ctx context.Context, userID uuid.UUID, 
 
 	return profile, nil
 }
-
-// GetProfile gets a rider's profile
 func (s *RiderServiceImpl) GetProfile(ctx context.Context, userID uuid.UUID) (*domain.RiderProfile, error) {
 	return s.riderRepo.GetByUserID(ctx, userID)
 }
-
-// UpdateProfile updates a rider's profile
 func (s *RiderServiceImpl) UpdateProfile(ctx context.Context, userID uuid.UUID, req *UpdateRiderProfileRequest) (*domain.RiderProfile, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -190,8 +166,6 @@ func (s *RiderServiceImpl) UpdateProfile(ctx context.Context, userID uuid.UUID, 
 
 	return profile, nil
 }
-
-// GoOnline sets a rider as online and available for deliveries
 func (s *RiderServiceImpl) GoOnline(ctx context.Context, userID uuid.UUID) error {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -216,8 +190,6 @@ func (s *RiderServiceImpl) GoOnline(ctx context.Context, userID uuid.UUID) error
 
 	return nil
 }
-
-// GoOffline sets a rider as offline
 func (s *RiderServiceImpl) GoOffline(ctx context.Context, userID uuid.UUID) error {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -238,10 +210,6 @@ func (s *RiderServiceImpl) GoOffline(ctx context.Context, userID uuid.UUID) erro
 
 	return nil
 }
-
-
-
-// GetAvailableJobs gets delivery jobs available to a rider (searching status, matching vehicle type)
 func (s *RiderServiceImpl) GetAvailableJobs(ctx context.Context, userID uuid.UUID) ([]*domain.DeliveryJob, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -251,25 +219,17 @@ func (s *RiderServiceImpl) GetAvailableJobs(ctx context.Context, userID uuid.UUI
 	if !profile.IsOnline {
 		return nil, domain.ErrRiderNotOnline
 	}
-
-	// If rider has a vehicle type set, filter jobs by it
 	if profile.VehicleType != nil && *profile.VehicleType != "" {
 		vehicleType := domain.VehicleType(*profile.VehicleType)
 		return s.jobRepo.GetSearchingJobsByVehicleType(ctx, vehicleType, 50)
 	}
-
-	// Fallback: get all jobs (for backwards compatibility)
 	return s.jobRepo.GetSearchingJobs(ctx, 50)
 }
-
-// AcceptJob accepts a delivery job
 func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Check if rider is blocked for unpaid commission
 	if profile.IsCommissionBlocked {
 		s.logger.Warn("rider blocked for unpaid commission",
 			zap.String("user_id", userID.String()),
@@ -291,8 +251,6 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 	if job.Status != domain.DJStatusSearching {
 		return nil, domain.ErrJobAlreadyAccepted
 	}
-
-	// Verify rider's vehicle type matches the job's required vehicle type
 	if job.RequiredVehicleType != "" {
 		if profile.VehicleType == nil || *profile.VehicleType == "" {
 			return nil, domain.ErrVehicleTypeMismatch
@@ -301,19 +259,13 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 			return nil, domain.ErrVehicleTypeMismatch
 		}
 	}
-
-	// Assign rider to job
 	now := time.Now()
 	if err := s.jobRepo.AssignRider(ctx, jobID, profile.ID); err != nil {
 		return nil, fmt.Errorf("failed to assign rider: %w", err)
 	}
-
-	// Update job
 	job.RiderID = &profile.ID
 	job.Status = domain.DJStatusAccepted
 	job.AcceptedAt = &now
-
-	// Generate verification codes
 	pickupCode := generateVerificationCode()
 	dropoffCode := generateVerificationCode()
 	job.PickupCode = &pickupCode
@@ -322,14 +274,11 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 	if err := s.jobRepo.Update(ctx, job); err != nil {
 		return nil, fmt.Errorf("failed to update job: %w", err)
 	}
-
-	// Update source status based on type
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		if err := s.errandService.OnJobAccepted(ctx, *job.ErrandID, profile.ID); err != nil {
 			s.logger.Warn("failed to update errand status to accepted", zap.Error(err))
 		}
 	} else {
-		// Default to Payment Request
 		if err := s.prRepo.UpdateStatus(ctx, job.PaymentRequestID, domain.PRStatusRiderAssigned); err != nil {
 			s.logger.Warn("failed to update payment request status to rider_assigned", zap.Error(err))
 		}
@@ -342,8 +291,6 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 
 	return job, nil
 }
-
-// GetActiveJob gets the rider's current active job
 func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -352,8 +299,6 @@ func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (
 
 	return s.jobRepo.GetActiveByRiderID(ctx, profile.ID)
 }
-
-// ConfirmPickup confirms item pickup with verification code
 func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -364,8 +309,6 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 	if err != nil {
 		return err
 	}
-
-	// Verify this is the rider's job
 	if job.RiderID == nil || *job.RiderID != profile.ID {
 		return domain.ErrUnauthorized
 	}
@@ -373,8 +316,6 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 	if job.Status != domain.DJStatusAccepted && job.Status != domain.DJStatusEnRoutePickup {
 		return domain.ErrInvalidStatusTransition
 	}
-
-	// Verify pickup code
 	if job.PickupCode == nil || *job.PickupCode != code {
 		return domain.ErrInvalidPickupCode
 	}
@@ -386,15 +327,11 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 	if err := s.jobRepo.Update(ctx, job); err != nil {
 		return fmt.Errorf("failed to update job: %w", err)
 	}
-
-	// Update source status
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		if err := s.errandService.OnJobPickedUp(ctx, *job.ErrandID); err != nil {
 			s.logger.Warn("failed to update errand status to picked_up", zap.Error(err))
 		}
 	} else {
-		// Payment Request logic
-		// Mark escrow as delivery in progress
 		pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if err != nil {
 			s.logger.Warn("failed to get payment request for escrow update", zap.Error(err))
@@ -403,8 +340,6 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 				s.logger.Warn("failed to mark escrow as delivery in progress", zap.Error(err))
 			}
 		}
-
-		// Update payment request status to in_delivery
 		if err := s.prRepo.UpdateStatus(ctx, job.PaymentRequestID, domain.PRStatusInDelivery); err != nil {
 			s.logger.Warn("failed to update payment request status to in_delivery", zap.Error(err))
 		}
@@ -418,8 +353,6 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 
 	return nil
 }
-
-// ConfirmDelivery confirms item delivery with verification code
 func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -430,8 +363,6 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 	if err != nil {
 		return err
 	}
-
-	// Verify this is the rider's job
 	if job.RiderID == nil || *job.RiderID != profile.ID {
 		return domain.ErrUnauthorized
 	}
@@ -439,8 +370,6 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 	if job.Status != domain.DJStatusPickedUp && job.Status != domain.DJStatusInTransit {
 		return domain.ErrInvalidStatusTransition
 	}
-
-	// Verify dropoff code
 	if job.DropoffCode == nil || *job.DropoffCode != code {
 		return domain.ErrInvalidDropoffCode
 	}
@@ -452,14 +381,9 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 	if err := s.jobRepo.Update(ctx, job); err != nil {
 		return fmt.Errorf("failed to update job: %w", err)
 	}
-
-	// Increment rider's delivery count
 	if err := s.riderRepo.IncrementDeliveries(ctx, profile.ID); err != nil {
 		s.logger.Error("failed to increment deliveries", zap.Error(err))
 	}
-
-	// Record commission owed to platform (buyer pays rider directly)
-	// Rider collects full delivery fee from buyer, owes platform 15%
 	if job.DeliveryFee > 0 {
 		if err := s.commissionService.RecordCommission(ctx, profile.ID, jobID, job.DeliveryFee); err != nil {
 			s.logger.Error("failed to record rider commission",
@@ -467,27 +391,19 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 				zap.String("job_id", jobID.String()),
 			)
 		}
-
-		// Check if rider should now be blocked (after 5 unpaid rides)
 		if err := s.commissionService.CheckAndUpdateBlockStatus(ctx, profile.ID); err != nil {
 			s.logger.Error("failed to check commission block status", zap.Error(err))
 		}
-
-		// Update total earnings (rider's take = full fee - 15% commission)
 		riderTake := domain.CalculateRiderTake(job.DeliveryFee)
 		if err := s.riderRepo.AddEarnings(ctx, profile.ID, riderTake); err != nil {
 			s.logger.Error("failed to update rider earnings", zap.Error(err))
 		}
 	}
-
-	// Update source status based on type
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		if err := s.errandService.OnJobDelivered(ctx, *job.ErrandID); err != nil {
 			s.logger.Error("failed to update errand status to delivered", zap.Error(err))
 		}
 	} else {
-		// Payment Request logic
-		// Start escrow confirmation window (24hr for buyer to confirm/dispute)
 		pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if err != nil {
 			s.logger.Error("failed to get payment request for escrow update", zap.Error(err))
@@ -507,8 +423,6 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 				zap.String("pr_id", job.PaymentRequestID.String()),
 			)
 		}
-
-		// Update payment request status to confirmation_window
 		if err := s.prRepo.UpdateStatus(ctx, job.PaymentRequestID, domain.PRStatusConfirmationWindow); err != nil {
 			s.logger.Error("failed to update payment request status to confirmation_window", zap.Error(err))
 		}
@@ -521,23 +435,17 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 
 	return nil
 }
-
-// GetJobHistory gets a rider's completed jobs
 func (s *RiderServiceImpl) GetJobHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DeliveryJob, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Get all jobs for this rider (completed statuses)
 	statuses := []domain.DeliveryJobStatus{
 		domain.DJStatusDelivered,
 		domain.DJStatusPaidOut,
 	}
 	return s.jobRepo.GetByRiderID(ctx, profile.ID, statuses, limit, offset)
 }
-
-// GetEarnings gets a rider's earnings summary
 func (s *RiderServiceImpl) GetEarnings(ctx context.Context, userID uuid.UUID) (*RiderEarnings, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -556,11 +464,7 @@ func (s *RiderServiceImpl) GetEarnings(ctx context.Context, userID uuid.UUID) (*
 		Rating:           profile.Rating,
 	}, nil
 }
-
-// generateVerificationCode generates a 6-digit verification code
 func generateVerificationCode() string {
 	return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
 }
-
-// Ensure RiderServiceImpl implements RiderService
 var _ RiderService = (*RiderServiceImpl)(nil)

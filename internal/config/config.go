@@ -32,14 +32,10 @@ type WorkerConfig struct {
 	RadiusExpandSteps        []int
 	RadiusExpandIntervalMins int
 	RiderOfferTimeoutMins    int
-
-	// Resilience settings
 	MaxJobRestarts   int
 	InitialBackoff   time.Duration
 	MaxBackoff       time.Duration
 	JitterPercent    int
-
-	// Reminder settings
 	ReminderCooldownMins int
 }
 
@@ -118,10 +114,7 @@ func Load() (*Config, error) {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
 	viper.AddConfigPath("./config")
-
-	// Enable environment variables
 	viper.AutomaticEnv()
-	// Replace dots with underscores for env vars (e.g., database.host -> DATABASE_HOST)
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	setDefaults()
@@ -217,13 +210,10 @@ func Load() (*Config, error) {
 }
 
 func setDefaults() {
-	// Server defaults
 	viper.SetDefault("server.port", "8080")
 	viper.SetDefault("server.environment", "development")
 	viper.SetDefault("server.read_timeout", "30s")
 	viper.SetDefault("server.write_timeout", "30s")
-
-	// Database defaults
 	viper.SetDefault("database.host", "localhost")
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
@@ -233,36 +223,24 @@ func setDefaults() {
 	viper.SetDefault("database.max_open_conns", 25)
 	viper.SetDefault("database.max_idle_conns", 5)
 	viper.SetDefault("database.conn_max_lifetime", "5m")
-
-	// Redis defaults
 	viper.SetDefault("redis.host", "localhost")
 	viper.SetDefault("redis.port", 6379)
 	viper.SetDefault("redis.password", "")
 	viper.SetDefault("redis.db", 0)
 	viper.SetDefault("redis.pool_size", 10)
 	viper.SetDefault("redis.min_idle_conns", 2)
-
-	// JWT defaults
 	viper.SetDefault("jwt.access_token_expiry", "15m")
 	viper.SetDefault("jwt.refresh_token_expiry", "168h") // 7 days
 	viper.SetDefault("jwt.issuer", "kipa")
-
-	// OTP defaults
 	viper.SetDefault("otp.length", 6)
 	viper.SetDefault("otp.expiry_duration", "5m")
 	viper.SetDefault("otp.max_attempts", 3)
 	viper.SetDefault("otp.rate_limit_count", 5)
 	viper.SetDefault("otp.rate_limit_window", "1h")
 	viper.SetDefault("otp.bcrypt_cost", 10)
-
-	// Termii defaults
 	viper.SetDefault("termii.sender_id", "Kipa")
 	viper.SetDefault("termii.enable_voice_fallback", true)
-
-	// Paystack defaults
 	viper.SetDefault("paystack.base_url", "https://api.paystack.co")
-
-	// Worker defaults
 	viper.SetDefault("worker.enabled", true)
 	viper.SetDefault("worker.escrow_check_interval", "1m")
 	viper.SetDefault("worker.rider_search_check_interval", "30s")
@@ -278,8 +256,6 @@ func setDefaults() {
 	viper.SetDefault("worker.max_backoff", "5m")
 	viper.SetDefault("worker.jitter_percent", 20)
 	viper.SetDefault("worker.reminder_cooldown_mins", 60)
-
-	// S3 defaults
 	viper.SetDefault("aws.region", "us-east-1")
 	viper.SetDefault("aws.max_file_size_mb", 5)
 }

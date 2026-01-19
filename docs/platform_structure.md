@@ -174,6 +174,7 @@ escrow-platform/
 ## KEY ARCHITECTURAL DECISIONS
 
 ### 1. **Clean Architecture Layers**
+
 ```
 Handler → Service → Repository → Database
          ↓
@@ -181,7 +182,9 @@ Handler → Service → Repository → Database
 ```
 
 ### 2. **Dependency Injection**
+
 Use constructor injection for all services:
+
 ```go
 type EscrowService struct {
     escrowRepo     repository.EscrowRepository
@@ -201,23 +204,21 @@ func NewEscrowService(
 ```
 
 ### 3. **State Machine for Escrow**
+
 ```go
-// internal/service/escrow_service.go
 func (s *EscrowService) TransitionState(
-    escrowID string, 
-    from domain.EscrowState, 
+    escrowID string,
+    from domain.EscrowState,
     to domain.EscrowState,
 ) error {
-    // Validate state transition
-    // Execute side effects (notifications, timers)
-    // Update database
 }
 ```
 
 ### 4. **Background Job Queue**
+
 Use Redis-backed queue (asynq or machinery):
+
 ```go
-// Enqueue job
 s.jobQueue.Enqueue(CheckEscrowTimeout{
     EscrowID: escrow.ID,
     RunAt: time.Now().Add(48 * time.Hour),
@@ -225,13 +226,10 @@ s.jobQueue.Enqueue(CheckEscrowTimeout{
 ```
 
 ### 5. **Transaction Management**
+
 ```go
 func (s *EscrowService) ProcessPayment(ctx context.Context, dto PaymentDTO) error {
     return s.db.WithTransaction(ctx, func(tx *sql.Tx) error {
-        // Create escrow
-        // Lock wallet funds
-        // Create transaction record
-        // Send notifications
         return nil
     })
 }
@@ -242,7 +240,6 @@ func (s *EscrowService) ProcessPayment(ctx context.Context, dto PaymentDTO) erro
 ## EXAMPLE SERVICE STRUCTURE
 
 ```go
-// internal/service/escrow_service.go
 package service
 
 import (
@@ -280,7 +277,6 @@ func NewEscrowService(...) EscrowService {
 ## EXAMPLE HANDLER STRUCTURE
 
 ```go
-// internal/handler/escrow_handler.go
 package handler
 
 import (
@@ -321,7 +317,6 @@ func (h *EscrowHandler) CreateEscrow(c *gin.Context) {
 ## RECOMMENDED GO PACKAGES
 
 ```go
-// go.mod
 module github.com/yourusername/escrow-platform
 
 go 1.21
@@ -385,6 +380,7 @@ seed:
 ```
 
 This structure gives you:
+
 - ✅ Clear separation of concerns
 - ✅ Easy testing (mock repositories/services)
 - ✅ Scalable (add features without refactoring)

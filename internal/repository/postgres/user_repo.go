@@ -11,8 +11,6 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// UserRepo implements repository.UserRepository
 type UserRepo struct {
 	db *sqlx.DB
 }
@@ -124,8 +122,6 @@ func (r *UserRepo) SetIsRider(ctx context.Context, userID uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, query, userID)
 	return err
 }
-
-// OTPRepo implements repository.OTPRepository
 type OTPRepo struct {
 	db *sqlx.DB
 }
@@ -197,8 +193,6 @@ func (r *OTPRepo) DeleteExpired(ctx context.Context) (int64, error) {
 	}
 	return result.RowsAffected()
 }
-
-// IdempotencyRepo implements repository.IdempotencyRepository
 type IdempotencyRepo struct {
 	db *sqlx.DB
 }

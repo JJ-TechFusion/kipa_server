@@ -9,18 +9,12 @@ import (
 
 	"kipa/internal/domain"
 )
-
-// LocationHistoryRepo handles location history persistence
 type LocationHistoryRepo struct {
 	db *sqlx.DB
 }
-
-// NewLocationHistoryRepo creates a new location history repo
 func NewLocationHistoryRepo(db *sqlx.DB) *LocationHistoryRepo {
 	return &LocationHistoryRepo{db: db}
 }
-
-// Create saves a location record
 func (r *LocationHistoryRepo) Create(ctx context.Context, record *domain.LocationRecord) error {
 	query := `
 		INSERT INTO rider_location_history (
@@ -49,8 +43,6 @@ func (r *LocationHistoryRepo) Create(ctx context.Context, record *domain.Locatio
 	)
 	return err
 }
-
-// GetByJobID gets location history for a job
 func (r *LocationHistoryRepo) GetByJobID(ctx context.Context, jobID uuid.UUID, limit int) ([]*domain.LocationRecord, error) {
 	var records []*domain.LocationRecord
 	query := `
@@ -77,8 +69,6 @@ func (r *LocationHistoryRepo) GetByJobID(ctx context.Context, jobID uuid.UUID, l
 
 	return records, nil
 }
-
-// GetLatestByJobID gets the most recent location for a job
 func (r *LocationHistoryRepo) GetLatestByJobID(ctx context.Context, jobID uuid.UUID) (*domain.LocationRecord, error) {
 	var rec domain.LocationRecord
 	query := `
@@ -95,8 +85,6 @@ func (r *LocationHistoryRepo) GetLatestByJobID(ctx context.Context, jobID uuid.U
 	}
 	return &rec, nil
 }
-
-// DeleteOlderThan deletes records older than the given time
 func (r *LocationHistoryRepo) DeleteOlderThan(ctx context.Context, before time.Time) (int64, error) {
 	result, err := r.db.ExecContext(ctx,
 		"DELETE FROM rider_location_history WHERE created_at < $1",

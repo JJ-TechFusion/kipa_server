@@ -12,8 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
-
-// RiderCommissionRepo implements repository.RiderCommissionRepository
 type RiderCommissionRepo struct {
 	db *sqlx.DB
 }
@@ -176,8 +174,6 @@ func (r *RiderCommissionRepo) MarkAsWaived(ctx context.Context, riderProfileID u
 
 	return int(rows), nil
 }
-
-// CommissionPaymentRepo implements repository.CommissionPaymentRepository
 type CommissionPaymentRepo struct {
 	db *sqlx.DB
 }

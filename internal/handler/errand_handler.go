@@ -12,8 +12,6 @@ import (
 	"kipa/internal/service"
 	"kipa/internal/util"
 )
-
-// ErrandHandler handles errand API endpoints
 type ErrandHandler struct {
 	errandService service.ErrandService
 }
@@ -23,8 +21,6 @@ func NewErrandHandler(errandService service.ErrandService) *ErrandHandler {
 		errandService: errandService,
 	}
 }
-
-// RegisterRoutes registers errand routes
 func (h *ErrandHandler) RegisterRoutes(rg *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware) {
 	errands := rg.Group("/errands")
 	errands.Use(authMiddleware.RequireAuth())
@@ -38,9 +34,6 @@ func (h *ErrandHandler) RegisterRoutes(rg *gin.RouterGroup, authMiddleware *midd
 		errands.DELETE("/:id", h.Cancel)
 	}
 }
-
-// Create creates a new errand request
-// POST /errands
 func (h *ErrandHandler) Create(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -59,8 +52,6 @@ func (h *ErrandHandler) Create(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Include fee breakdown in response
 	feeBreakdown := domain.NewRiderFeeBreakdown(errand.DeliveryFee)
 
 	util.Success(c, http.StatusCreated, ErrandResponse{
@@ -69,9 +60,6 @@ func (h *ErrandHandler) Create(c *gin.Context) {
 		Message:      "Errand created. Confirm to start searching for a rider.",
 	})
 }
-
-// List lists user's errands
-// GET /errands
 func (h *ErrandHandler) List(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -93,9 +81,6 @@ func (h *ErrandHandler) List(c *gin.Context) {
 		"count":   len(errands),
 	})
 }
-
-// GetActive gets user's active errands
-// GET /errands/active
 func (h *ErrandHandler) GetActive(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -114,9 +99,6 @@ func (h *ErrandHandler) GetActive(c *gin.Context) {
 		"count":   len(errands),
 	})
 }
-
-// GetByID gets an errand by ID
-// GET /errands/:id
 func (h *ErrandHandler) GetByID(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -143,9 +125,6 @@ func (h *ErrandHandler) GetByID(c *gin.Context) {
 		FeeBreakdown: feeBreakdown,
 	})
 }
-
-// Confirm confirms an errand and starts rider search
-// POST /errands/:id/confirm
 func (h *ErrandHandler) Confirm(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -171,9 +150,6 @@ func (h *ErrandHandler) Confirm(c *gin.Context) {
 		"message":     "Searching for a rider. You will be notified when one accepts.",
 	})
 }
-
-// Cancel cancels an errand
-// DELETE /errands/:id
 func (h *ErrandHandler) Cancel(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -196,9 +172,6 @@ func (h *ErrandHandler) Cancel(c *gin.Context) {
 		"message": "Errand cancelled successfully",
 	})
 }
-
-// Complete allows recipient to confirm delivery with dropoff code
-// POST /errands/:id/complete
 func (h *ErrandHandler) Complete(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -255,8 +228,6 @@ func mapErrandErrorToResponse(err error) (int, string, string) {
 		return http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred"
 	}
 }
-
-// Response types
 
 type ErrandResponse struct {
 	Errand       *domain.Errand           `json:"errand"`

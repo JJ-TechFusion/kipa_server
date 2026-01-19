@@ -26,8 +26,6 @@ func NewLocationCleanupJob(
 		logger:              logger,
 	}
 }
-
-// Run executes the cleanup job
 func (j *LocationCleanupJob) Run(ctx context.Context) error {
 	before := time.Now().AddDate(0, 0, -j.retentionDays)
 	
@@ -49,13 +47,9 @@ func (j *LocationCleanupJob) Run(ctx context.Context) error {
 	
 	return nil
 }
-
-// Schedule returns the cron schedule for this job (daily at 3am)
 func (j *LocationCleanupJob) Schedule() string {
 	return "0 3 * * *" // 3:00 AM daily
 }
-
-// Name returns the job name
 func (j *LocationCleanupJob) Name() string {
 	return "location_cleanup"
 }

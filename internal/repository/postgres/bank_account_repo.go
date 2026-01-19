@@ -11,8 +11,6 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// BankAccountRepo implements repository.BankAccountRepository
 type BankAccountRepo struct {
 	db *sqlx.DB
 }
@@ -119,13 +117,10 @@ func (r *BankAccountRepo) Update(ctx context.Context, account *domain.BankAccoun
 }
 
 func (r *BankAccountRepo) SetDefault(ctx context.Context, userID, accountID uuid.UUID) error {
-	// First, unset all defaults for this user
 	_, err := r.db.ExecContext(ctx, `UPDATE bank_accounts SET is_default = false WHERE user_id = $1`, userID)
 	if err != nil {
 		return err
 	}
-
-	// Then set the specified account as default
 	_, err = r.db.ExecContext(ctx, `UPDATE bank_accounts SET is_default = true WHERE id = $1`, accountID)
 	return err
 }
@@ -134,8 +129,6 @@ func (r *BankAccountRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM bank_accounts WHERE id = $1`, id)
 	return err
 }
-
-// VirtualAccountRepo implements repository.VirtualAccountRepository
 type VirtualAccountRepo struct {
 	db *sqlx.DB
 }
@@ -242,8 +235,6 @@ func (r *VirtualAccountRepo) Update(ctx context.Context, account *domain.Virtual
 	)
 	return err
 }
-
-// WithdrawalRepo implements repository.WithdrawalRepository
 type WithdrawalRepo struct {
 	db *sqlx.DB
 }
@@ -353,8 +344,6 @@ func (r *WithdrawalRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 	_, err := r.db.ExecContext(ctx, query, id, status)
 	return err
 }
-
-// TopUpRepo implements repository.TopUpRepository
 type TopUpRepo struct {
 	db *sqlx.DB
 }

@@ -6,8 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// Request DTOs
-
 type SendOTPRequest struct {
 	PhoneNumber string `json:"phone_number" binding:"required,e164"`
 	DeviceID    string `json:"device_id" binding:"required,min=16,max=64"`
@@ -37,8 +35,6 @@ type UpdateProfileRequest struct {
 	Email           *string `json:"email" binding:"omitempty,email"`
 	ProfilePhotoURL *string `json:"profile_photo_url" binding:"omitempty,url"`
 }
-
-// Response DTOs
 
 type SendOTPResponse struct {
 	VerificationID string    `json:"verification_id"`
@@ -80,8 +76,6 @@ type UserResponse struct {
 type LogoutResponse struct {
 	Message string `json:"message"`
 }
-
-// Internal DTOs (service layer)
 
 type TokenPair struct {
 	AccessToken           string

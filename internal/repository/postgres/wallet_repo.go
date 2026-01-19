@@ -10,8 +10,6 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// WalletRepo implements repository.WalletRepository
 type WalletRepo struct {
 	db *sqlx.DB
 }
@@ -79,8 +77,6 @@ func (r *WalletRepo) GetOrCreate(ctx context.Context, userID uuid.UUID) (*domain
 	if !errors.Is(err, domain.ErrWalletNotFound) {
 		return nil, err
 	}
-
-	// Create new wallet
 	newWallet := &domain.Wallet{
 		ID:               uuid.New(),
 		UserID:           userID,
@@ -91,7 +87,6 @@ func (r *WalletRepo) GetOrCreate(ctx context.Context, userID uuid.UUID) (*domain
 	}
 
 	if err := r.Create(ctx, newWallet); err != nil {
-		// Check if wallet was created by another process
 		if isUniqueViolation(err) {
 			return r.GetByUserID(ctx, userID)
 		}
@@ -165,8 +160,6 @@ func (r *WalletRepo) Debit(ctx context.Context, walletID uuid.UUID, amount float
 
 	return nil
 }
-
-// WalletTransactionRepo implements repository.WalletTransactionRepository
 type WalletTransactionRepo struct {
 	db *sqlx.DB
 }

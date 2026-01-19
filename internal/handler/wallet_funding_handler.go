@@ -16,8 +16,6 @@ import (
 	"kipa/internal/service"
 	"kipa/internal/util"
 )
-
-// WalletFundingHandler handles wallet funding operations
 type WalletFundingHandler struct {
 	fundingService service.WalletFundingService
 	walletService  service.WalletService
@@ -44,51 +42,30 @@ func NewWalletFundingHandler(
 		logger:         logger,
 	}
 }
-
-// RegisterRoutes registers wallet funding routes
 func (h *WalletFundingHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware) {
 	wallet := r.Group("/wallet")
 	wallet.Use(authMiddleware.RequireAuth())
 	{
-		// Top-up
 		wallet.POST("/top-up", h.InitializeTopUp)
 		wallet.GET("/top-up/history", h.GetTopUpHistory)
 		wallet.POST("/top-up/verify", h.VerifyTopUp)
-
-		// Virtual Account
 		wallet.GET("/virtual-account", h.GetVirtualAccount)
 		wallet.POST("/virtual-account", h.CreateVirtualAccount)
-
-		// Withdrawal (using new funding service)
 		wallet.POST("/withdraw/v2", h.RequestWithdrawal)
 		wallet.GET("/withdrawals", h.GetWithdrawalHistory)
 		wallet.GET("/withdrawals/:id", h.GetWithdrawalByID)
-
-		// Bank Accounts
 		wallet.GET("/bank-accounts", h.GetBankAccounts)
 		wallet.POST("/bank-accounts", h.AddBankAccount)
 		wallet.PUT("/bank-accounts/:id/default", h.SetDefaultBankAccount)
 		wallet.DELETE("/bank-accounts/:id", h.DeleteBankAccount)
 	}
-
-	// Banks list (public)
 	r.GET("/banks", h.ListBanks)
 }
-
-// ==================== Top-up ====================
 
 type InitializeTopUpRequest struct {
 	Amount      float64 `json:"amount" binding:"required,gt=0"`
 	CallbackURL string  `json:"callback_url"`
 }
-
-// InitializeTopUp initializes a wallet top-up
-// @Summary Initialize wallet top-up
-// @Tags Wallet
-// @Security BearerAuth
-// @Param request body InitializeTopUpRequest true "Top-up request"
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/top-up [post]
 func (h *WalletFundingHandler) InitializeTopUp(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -101,8 +78,6 @@ func (h *WalletFundingHandler) InitializeTopUp(c *gin.Context) {
 		util.ValidationError(c, err)
 		return
 	}
-
-	// Get user for email
 	user, err := h.userRepo.GetByID(c.Request.Context(), userID)
 	if err != nil {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get user")
@@ -139,14 +114,6 @@ func (h *WalletFundingHandler) InitializeTopUp(c *gin.Context) {
 type VerifyTopUpRequest struct {
 	Reference string `json:"reference" binding:"required"`
 }
-
-// VerifyTopUp verifies a top-up payment
-// @Summary Verify top-up payment
-// @Tags Wallet
-// @Security BearerAuth
-// @Param request body VerifyTopUpRequest true "Verify request"
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/top-up/verify [post]
 func (h *WalletFundingHandler) VerifyTopUp(c *gin.Context) {
 	var req VerifyTopUpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -176,15 +143,6 @@ func (h *WalletFundingHandler) VerifyTopUp(c *gin.Context) {
 		"message": "Top-up processed successfully",
 	})
 }
-
-// GetTopUpHistory returns top-up history
-// @Summary Get top-up history
-// @Tags Wallet
-// @Security BearerAuth
-// @Param limit query int false "Limit" default(20)
-// @Param offset query int false "Offset" default(0)
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/top-up/history [get]
 func (h *WalletFundingHandler) GetTopUpHistory(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -208,15 +166,6 @@ func (h *WalletFundingHandler) GetTopUpHistory(c *gin.Context) {
 		"offset":  offset,
 	})
 }
-
-// ==================== Virtual Account ====================
-
-// GetVirtualAccount returns the user's virtual account
-// @Summary Get virtual account
-// @Tags Wallet
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/virtual-account [get]
 func (h *WalletFundingHandler) GetVirtualAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -249,21 +198,12 @@ func (h *WalletFundingHandler) GetVirtualAccount(c *gin.Context) {
 		},
 	})
 }
-
-// CreateVirtualAccount creates a virtual account for the user
-// @Summary Create virtual account
-// @Tags Wallet
-// @Security BearerAuth
-// @Success 201 {object} map[string]interface{}
-// @Router /wallet/virtual-account [post]
 func (h *WalletFundingHandler) CreateVirtualAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
 		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
 		return
 	}
-
-	// Get user
 	user, err := h.userRepo.GetByID(c.Request.Context(), userID)
 	if err != nil {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get user")
@@ -293,20 +233,10 @@ func (h *WalletFundingHandler) CreateVirtualAccount(c *gin.Context) {
 	})
 }
 
-// ==================== Withdrawal ====================
-
 type FundingWithdrawalRequest struct {
 	BankAccountID string  `json:"bank_account_id" binding:"required,uuid"`
 	Amount        float64 `json:"amount" binding:"required,gt=0"`
 }
-
-// RequestWithdrawal initiates a withdrawal
-// @Summary Request withdrawal
-// @Tags Wallet
-// @Security BearerAuth
-// @Param request body FundingWithdrawalRequest true "Withdrawal request"
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/withdraw/v2 [post]
 func (h *WalletFundingHandler) RequestWithdrawal(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -357,15 +287,6 @@ func (h *WalletFundingHandler) RequestWithdrawal(c *gin.Context) {
 		"message": "Withdrawal initiated. You will receive the funds shortly.",
 	})
 }
-
-// GetWithdrawalHistory returns withdrawal history
-// @Summary Get withdrawal history
-// @Tags Wallet
-// @Security BearerAuth
-// @Param limit query int false "Limit" default(20)
-// @Param offset query int false "Offset" default(0)
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/withdrawals [get]
 func (h *WalletFundingHandler) GetWithdrawalHistory(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -389,14 +310,6 @@ func (h *WalletFundingHandler) GetWithdrawalHistory(c *gin.Context) {
 		"offset":      offset,
 	})
 }
-
-// GetWithdrawalByID returns a specific withdrawal
-// @Summary Get withdrawal by ID
-// @Tags Wallet
-// @Security BearerAuth
-// @Param id path string true "Withdrawal ID"
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/withdrawals/{id} [get]
 func (h *WalletFundingHandler) GetWithdrawalByID(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -426,20 +339,10 @@ func (h *WalletFundingHandler) GetWithdrawalByID(c *gin.Context) {
 	})
 }
 
-// ==================== Bank Accounts ====================
-
 type AddBankAccountRequest struct {
 	BankCode      string `json:"bank_code" binding:"required"`
 	AccountNumber string `json:"account_number" binding:"required,len=10"`
 }
-
-// AddBankAccount adds a new bank account
-// @Summary Add bank account
-// @Tags Wallet
-// @Security BearerAuth
-// @Param request body AddBankAccountRequest true "Bank account request"
-// @Success 201 {object} map[string]interface{}
-// @Router /wallet/bank-accounts [post]
 func (h *WalletFundingHandler) AddBankAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -479,13 +382,6 @@ func (h *WalletFundingHandler) AddBankAccount(c *gin.Context) {
 		},
 	})
 }
-
-// GetBankAccounts returns all bank accounts
-// @Summary Get bank accounts
-// @Tags Wallet
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/bank-accounts [get]
 func (h *WalletFundingHandler) GetBankAccounts(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -504,14 +400,6 @@ func (h *WalletFundingHandler) GetBankAccounts(c *gin.Context) {
 		"bank_accounts": accounts,
 	})
 }
-
-// SetDefaultBankAccount sets a bank account as default
-// @Summary Set default bank account
-// @Tags Wallet
-// @Security BearerAuth
-// @Param id path string true "Bank Account ID"
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/bank-accounts/{id}/default [put]
 func (h *WalletFundingHandler) SetDefaultBankAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -539,14 +427,6 @@ func (h *WalletFundingHandler) SetDefaultBankAccount(c *gin.Context) {
 		"message": "Default bank account updated",
 	})
 }
-
-// DeleteBankAccount deletes a bank account
-// @Summary Delete bank account
-// @Tags Wallet
-// @Security BearerAuth
-// @Param id path string true "Bank Account ID"
-// @Success 200 {object} map[string]interface{}
-// @Router /wallet/bank-accounts/{id} [delete]
 func (h *WalletFundingHandler) DeleteBankAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -574,14 +454,6 @@ func (h *WalletFundingHandler) DeleteBankAccount(c *gin.Context) {
 		"message": "Bank account deleted",
 	})
 }
-
-// ==================== Banks List ====================
-
-// ListBanks returns the list of supported banks
-// @Summary List supported banks
-// @Tags Banks
-// @Success 200 {object} map[string]interface{}
-// @Router /banks [get]
 func (h *WalletFundingHandler) ListBanks(c *gin.Context) {
 	banks, err := h.fundingService.ListBanks(c.Request.Context())
 	if err != nil {
@@ -589,8 +461,6 @@ func (h *WalletFundingHandler) ListBanks(c *gin.Context) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to list banks")
 		return
 	}
-
-	// Map to simpler format for frontend
 	bankList := make([]gin.H, 0, len(banks))
 	for _, bank := range banks {
 		if bank.Active {
@@ -606,8 +476,6 @@ func (h *WalletFundingHandler) ListBanks(c *gin.Context) {
 		"banks": bankList,
 	})
 }
-
-// Helper function
 func getIntQuery(c *gin.Context, key string, defaultValue int) int {
 	if v := c.Query(key); v != "" {
 		if i, err := strconv.Atoi(v); err == nil {

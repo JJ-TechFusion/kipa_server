@@ -30,9 +30,6 @@ func (h *WalletHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 		wallet.POST("/withdraw", h.RequestWithdrawal)
 	}
 }
-
-// GetWallet gets the user's wallet balance
-// GET /wallet
 func (h *WalletHandler) GetWallet(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -53,9 +50,6 @@ func (h *WalletHandler) GetWallet(c *gin.Context) {
 		TotalWithdrawn:   balance.TotalWithdrawn,
 	})
 }
-
-// GetTransactions gets the user's transaction history
-// GET /wallet/transactions
 func (h *WalletHandler) GetTransactions(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -82,9 +76,6 @@ func (h *WalletHandler) GetTransactions(c *gin.Context) {
 		"count":        len(responses),
 	})
 }
-
-// RequestWithdrawal initiates a withdrawal request
-// POST /wallet/withdraw
 func (h *WalletHandler) RequestWithdrawal(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -97,8 +88,6 @@ func (h *WalletHandler) RequestWithdrawal(c *gin.Context) {
 		util.ValidationError(c, err)
 		return
 	}
-
-	// Check available balance
 	balance, err := h.walletService.GetBalance(c.Request.Context(), userID)
 	if err != nil {
 		h.handleError(c, err)
@@ -109,8 +98,6 @@ func (h *WalletHandler) RequestWithdrawal(c *gin.Context) {
 		util.Error(c, http.StatusBadRequest, "INSUFFICIENT_BALANCE", "Insufficient balance for withdrawal")
 		return
 	}
-
-	// For now, we'll just debit the wallet (actual bank transfer integration would be separate)
 	idempotencyKey := uuid.New().String()
 	_, err = h.walletService.Debit(
 		c.Request.Context(),
@@ -154,8 +141,6 @@ func mapWalletErrorToResponse(err error) (int, string, string) {
 		return http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred"
 	}
 }
-
-// Request/Response types
 
 type WithdrawalRequest struct {
 	Amount          float64 `json:"amount" binding:"required,gt=0"`

@@ -124,8 +124,6 @@ func (s *ErrandServiceImpl) Create(ctx context.Context, userID uuid.UUID, req *C
 
 	return errand, nil
 }
-
-// Confirm confirms the errand and starts rider search
 func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) (*domain.Errand, error) {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
 	if err != nil {
@@ -165,8 +163,6 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 
 	riderPayout := errand.DeliveryFee
 	job.RiderPayout = &riderPayout
-
-	// Platform fee (15%)
 	platformFee := domain.CalculateCommission(errand.DeliveryFee)
 	job.PlatformDeliveryFee = &platformFee
 
@@ -193,8 +189,6 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 
 	return errand, nil
 }
-
-// Cancel cancels an errand
 func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) error {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
 	if err != nil {
@@ -239,8 +233,6 @@ func (s *ErrandServiceImpl) GetByID(ctx context.Context, userID uuid.UUID, erran
 	if err != nil {
 		return nil, err
 	}
-
-	// Verify ownership
 	if errand.UserID != userID {
 		return nil, domain.ErrUnauthorized
 	}
@@ -252,13 +244,9 @@ func (s *ErrandServiceImpl) GetByID(ctx context.Context, userID uuid.UUID, erran
 func (s *ErrandServiceImpl) List(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Errand, error) {
 	return s.errandRepo.GetByUserID(ctx, userID, limit, offset)
 }
-
-// GetActive gets user's active errands
 func (s *ErrandServiceImpl) GetActive(ctx context.Context, userID uuid.UUID) ([]*domain.Errand, error) {
 	return s.errandRepo.GetActiveByUserID(ctx, userID)
 }
-
-// OnJobAccepted called when rider accepts the job
 func (s *ErrandServiceImpl) OnJobAccepted(ctx context.Context, errandID uuid.UUID, riderID uuid.UUID) error {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
 	if err != nil {
@@ -272,8 +260,6 @@ func (s *ErrandServiceImpl) OnJobAccepted(ctx context.Context, errandID uuid.UUI
 
 	return s.errandRepo.Update(ctx, errand)
 }
-
-// OnJobPickedUp called when rider confirms pickup
 func (s *ErrandServiceImpl) OnJobPickedUp(ctx context.Context, errandID uuid.UUID) error {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
 	if err != nil {
@@ -286,8 +272,6 @@ func (s *ErrandServiceImpl) OnJobPickedUp(ctx context.Context, errandID uuid.UUI
 
 	return s.errandRepo.Update(ctx, errand)
 }
-
-// OnJobDelivered called when rider confirms delivery
 func (s *ErrandServiceImpl) OnJobDelivered(ctx context.Context, errandID uuid.UUID) error {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
 	if err != nil {
@@ -300,8 +284,6 @@ func (s *ErrandServiceImpl) OnJobDelivered(ctx context.Context, errandID uuid.UU
 
 	return s.errandRepo.Update(ctx, errand)
 }
-
-// CompleteErrand allows recipient to confirm delivery with dropoff code
 func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID, errandID uuid.UUID, code string) (*domain.Errand, error) {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
 	if err != nil {

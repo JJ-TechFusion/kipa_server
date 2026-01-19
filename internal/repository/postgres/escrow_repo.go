@@ -12,8 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
-
-// EscrowRepo implements repository.EscrowRepository
 type EscrowRepo struct {
 	db *sqlx.DB
 }

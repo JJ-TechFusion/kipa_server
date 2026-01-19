@@ -12,8 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
-
-// RiderProfileRepo implements repository.RiderProfileRepository
 type RiderProfileRepo struct {
 	db *sqlx.DB
 }
@@ -199,8 +197,6 @@ func (r *RiderProfileRepo) AddEarnings(ctx context.Context, id uuid.UUID, amount
 	_, err := r.db.ExecContext(ctx, query, id, amount)
 	return err
 }
-
-// UpdateCommissionStats updates the rider's unpaid commission amount and count
 func (r *RiderProfileRepo) UpdateCommissionStats(ctx context.Context, id uuid.UUID, unpaidCommission float64, unpaidCount int) error {
 	query := `
 		UPDATE rider_profiles SET 
@@ -210,15 +206,11 @@ func (r *RiderProfileRepo) UpdateCommissionStats(ctx context.Context, id uuid.UU
 	_, err := r.db.ExecContext(ctx, query, id, unpaidCommission, unpaidCount)
 	return err
 }
-
-// SetCommissionBlocked sets or clears the commission block flag
 func (r *RiderProfileRepo) SetCommissionBlocked(ctx context.Context, id uuid.UUID, blocked bool) error {
 	query := `UPDATE rider_profiles SET is_commission_blocked = $2 WHERE id = $1`
 	_, err := r.db.ExecContext(ctx, query, id, blocked)
 	return err
 }
-
-// ClearCommissionDebt resets all commission tracking after full payment
 func (r *RiderProfileRepo) ClearCommissionDebt(ctx context.Context, id uuid.UUID) error {
 	now := time.Now()
 	query := `
@@ -231,16 +223,12 @@ func (r *RiderProfileRepo) ClearCommissionDebt(ctx context.Context, id uuid.UUID
 	_, err := r.db.ExecContext(ctx, query, id, now)
 	return err
 }
-
-// RecordCommissionPayment updates the last payment timestamp
 func (r *RiderProfileRepo) RecordCommissionPayment(ctx context.Context, id uuid.UUID) error {
 	now := time.Now()
 	query := `UPDATE rider_profiles SET last_commission_paid_at = $2 WHERE id = $1`
 	_, err := r.db.ExecContext(ctx, query, id, now)
 	return err
 }
-
-// DeliveryZoneRepo implements repository.DeliveryZoneRepository
 type DeliveryZoneRepo struct {
 	db *sqlx.DB
 }

@@ -6,8 +6,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// RiderCommissionStatus represents the payment status of a commission
 type RiderCommissionStatus string
 
 const (
@@ -15,14 +13,10 @@ const (
 	CommissionStatusPaid    RiderCommissionStatus = "paid"
 	CommissionStatusWaived  RiderCommissionStatus = "waived"
 )
-
-// Commission configuration constants
 const (
 	RiderCommissionRate      = 0.15 // 15% platform commission
 	MaxUnpaidRidesBeforeBlock = 5   // Grace period: rides 1-5
 )
-
-// RiderCommission tracks commission owed for each completed delivery
 type RiderCommission struct {
 	ID             uuid.UUID `db:"id" json:"id"`
 	RiderProfileID uuid.UUID `db:"rider_profile_id" json:"rider_profile_id"`
@@ -38,8 +32,6 @@ type RiderCommission struct {
 
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
-
-// CommissionPayment records when a rider pays their accumulated commission
 type CommissionPayment struct {
 	ID             uuid.UUID `db:"id" json:"id"`
 	RiderProfileID uuid.UUID `db:"rider_profile_id" json:"rider_profile_id"`
@@ -52,18 +44,12 @@ type CommissionPayment struct {
 
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
-
-// CalculateCommission calculates the platform commission from a delivery fee
 func CalculateCommission(deliveryFee float64) float64 {
 	return roundToTwoDecimals(deliveryFee * RiderCommissionRate)
 }
-
-// CalculateRiderTake calculates what the rider keeps after commission
 func CalculateRiderTake(deliveryFee float64) float64 {
 	return roundToTwoDecimals(deliveryFee - CalculateCommission(deliveryFee))
 }
-
-// NewRiderCommission creates a new commission record for a completed delivery
 func NewRiderCommission(riderProfileID, deliveryJobID uuid.UUID, deliveryFee float64) *RiderCommission {
 	commissionAmount := CalculateCommission(deliveryFee)
 
@@ -78,16 +64,12 @@ func NewRiderCommission(riderProfileID, deliveryJobID uuid.UUID, deliveryFee flo
 		CreatedAt:        time.Now(),
 	}
 }
-
-// RiderFeeBreakdown shows the fee split for a delivery job
 type RiderFeeBreakdown struct {
 	DeliveryFee        float64 `json:"delivery_fee"`        // Full fee from buyer
 	PlatformCommission float64 `json:"platform_commission"` // 15% to platform
 	RiderTake          float64 `json:"rider_take"`          // What rider keeps (85%)
 	CommissionRate     float64 `json:"commission_rate"`     // 0.15
 }
-
-// NewRiderFeeBreakdown creates a fee breakdown for display
 func NewRiderFeeBreakdown(deliveryFee float64) *RiderFeeBreakdown {
 	commission := CalculateCommission(deliveryFee)
 	return &RiderFeeBreakdown{
@@ -97,8 +79,6 @@ func NewRiderFeeBreakdown(deliveryFee float64) *RiderFeeBreakdown {
 		CommissionRate:     RiderCommissionRate,
 	}
 }
-
-// roundToTwoDecimals rounds a float to 2 decimal places
 func roundToTwoDecimals(val float64) float64 {
 	return math.Round(val*100) / 100
 }

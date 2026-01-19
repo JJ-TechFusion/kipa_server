@@ -25,31 +25,21 @@ func (h *RiderHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 	rider := router.Group("/rider")
 	rider.Use(authMiddleware.RequireAuth())
 	{
-		// Profile management
 		rider.GET("/profile", h.GetProfile)
 		rider.POST("/profile", h.CreateProfile)
 		rider.PATCH("/profile", h.UpdateProfile)
-
-		// Online status
 		rider.POST("/go-online", h.GoOnline)
 		rider.POST("/go-offline", h.GoOffline)
 		rider.PATCH("/location", h.UpdateLocation)
-
-		// Job management
 		rider.GET("/available-jobs", h.GetAvailableJobs)
 		rider.POST("/jobs/:id/accept", h.AcceptJob)
 		rider.GET("/jobs/active", h.GetActiveJob)
 		rider.POST("/jobs/:id/pickup", h.ConfirmPickup)
 		rider.POST("/jobs/:id/deliver", h.ConfirmDelivery)
 		rider.GET("/jobs/history", h.GetJobHistory)
-
-		// Earnings
 		rider.GET("/earnings", h.GetEarnings)
 	}
 }
-
-// GetProfile gets the rider's profile
-// GET /rider/profile
 func (h *RiderHandler) GetProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -65,9 +55,6 @@ func (h *RiderHandler) GetProfile(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, riderProfileToResponse(profile))
 }
-
-// CreateProfile creates a new rider profile
-// POST /rider/profile
 func (h *RiderHandler) CreateProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -89,9 +76,6 @@ func (h *RiderHandler) CreateProfile(c *gin.Context) {
 
 	util.Success(c, http.StatusCreated, riderProfileToResponse(profile))
 }
-
-// UpdateProfile updates the rider's profile
-// PATCH /rider/profile
 func (h *RiderHandler) UpdateProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -113,9 +97,6 @@ func (h *RiderHandler) UpdateProfile(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, riderProfileToResponse(profile))
 }
-
-// GoOnline sets the rider as online
-// POST /rider/go-online
 func (h *RiderHandler) GoOnline(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -130,9 +111,6 @@ func (h *RiderHandler) GoOnline(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, gin.H{"message": "You are now online and available for deliveries"})
 }
-
-// GoOffline sets the rider as offline
-// POST /rider/go-offline
 func (h *RiderHandler) GoOffline(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -147,9 +125,6 @@ func (h *RiderHandler) GoOffline(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, gin.H{"message": "You are now offline"})
 }
-
-// UpdateLocation updates the rider's current location
-// PATCH /rider/location
 func (h *RiderHandler) UpdateLocation(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -178,9 +153,6 @@ func (h *RiderHandler) UpdateLocation(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, gin.H{"message": "Location updated"})
 }
-
-// GetAvailableJobs gets jobs available to the rider
-// GET /rider/available-jobs
 func (h *RiderHandler) GetAvailableJobs(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -204,9 +176,6 @@ func (h *RiderHandler) GetAvailableJobs(c *gin.Context) {
 		"count": len(responses),
 	})
 }
-
-// AcceptJob accepts a delivery job
-// POST /rider/jobs/:id/accept
 func (h *RiderHandler) AcceptJob(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -232,9 +201,6 @@ func (h *RiderHandler) AcceptJob(c *gin.Context) {
 		"pickup_code": job.PickupCode,
 	})
 }
-
-// GetActiveJob gets the rider's current active job
-// GET /rider/jobs/active
 func (h *RiderHandler) GetActiveJob(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -255,9 +221,6 @@ func (h *RiderHandler) GetActiveJob(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, deliveryJobToResponse(job))
 }
-
-// ConfirmPickup confirms pickup with verification code
-// POST /rider/jobs/:id/pickup
 func (h *RiderHandler) ConfirmPickup(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -284,9 +247,6 @@ func (h *RiderHandler) ConfirmPickup(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, gin.H{"message": "Pickup confirmed. Item collected successfully."})
 }
-
-// ConfirmDelivery confirms delivery with verification code
-// POST /rider/jobs/:id/deliver
 func (h *RiderHandler) ConfirmDelivery(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -313,9 +273,6 @@ func (h *RiderHandler) ConfirmDelivery(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, gin.H{"message": "Delivery confirmed. Payment will be credited to your wallet."})
 }
-
-// GetJobHistory gets the rider's completed jobs
-// GET /rider/jobs/history
 func (h *RiderHandler) GetJobHistory(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -342,9 +299,6 @@ func (h *RiderHandler) GetJobHistory(c *gin.Context) {
 		"count": len(responses),
 	})
 }
-
-// GetEarnings gets the rider's earnings summary
-// GET /rider/earnings
 func (h *RiderHandler) GetEarnings(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -394,8 +348,6 @@ func mapRiderErrorToResponse(err error) (int, string, string) {
 		return http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred"
 	}
 }
-
-// Request/Response types
 
 type UpdateLocationRequest struct {
 	Latitude  float64  `json:"latitude" binding:"required"`
@@ -469,8 +421,6 @@ type DeliveryJobResponse struct {
 	DeliveredAt         *string                    `json:"delivered_at,omitempty"`
 	CreatedAt           string                     `json:"created_at"`
 }
-
-// FeeBreakdownResponse shows the rider what they'll earn from a delivery
 type FeeBreakdownResponse struct {
 	DeliveryFee        float64 `json:"delivery_fee"`        // Full fee buyer pays: ₦2,500
 	PlatformCommission float64 `json:"platform_commission"` // 15% to platform: ₦375
@@ -492,8 +442,6 @@ func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
 		DropoffCode:         j.DropoffCode,
 		CreatedAt:           j.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-
-	// Add fee breakdown for rider transparency
 	if j.DeliveryFee > 0 {
 		breakdown := domain.NewRiderFeeBreakdown(j.DeliveryFee)
 		resp.FeeBreakdown = &FeeBreakdownResponse{
