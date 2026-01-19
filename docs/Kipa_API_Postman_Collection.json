@@ -1568,6 +1568,39 @@
 					"response": []
 				},
 				{
+					"name": "Complete Errand",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/errands/{{errand_id}}/complete",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "errands", "{{errand_id}}", "complete"]
+						},
+						"description": "Complete errand delivery with dropoff code. Used by riders to mark errand as delivered."
+					},
+					"response": []
+				},
+				{
 					"name": "Cancel Errand",
 					"request": {
 						"auth": {

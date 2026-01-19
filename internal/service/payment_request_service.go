@@ -17,48 +17,38 @@ import (
 	"kipa/internal/repository"
 )
 
-// PaymentRequestService handles payment request operations
+
 type PaymentRequestService interface {
-	// CreateDraft creates a new draft payment request (Step 1)
+
 	CreateDraft(ctx context.Context, sellerID uuid.UUID, req *CreateDraftRequest) (*domain.PaymentRequest, error)
 
-	// ConfigureFulfillment configures fulfillment details and generates payment link (Step 2)
 	ConfigureFulfillment(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID, req *ConfigureFulfillmentRequest) (*domain.PaymentRequest, error)
 
-	// GetByID gets a payment request by ID
+	
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentRequest, error)
 
-	// GetByPaymentCode gets a payment request by payment code (for buyer payment page)
+	
 	GetByPaymentCode(ctx context.Context, code string) (*domain.PaymentRequest, error)
 
-	// GetBySellerID gets all payment requests for a seller
 	GetBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error)
 
-	// GetByBuyerID gets all purchases for a buyer
 	GetByBuyerID(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error)
 
-	// GetHistoryBySellerID gets expired/cancelled/completed payment requests
 	GetHistoryBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error)
 
-	// Edit edits a payment request (only draft or link_active status)
 	Edit(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID, req *EditPaymentRequestRequest) (*domain.PaymentRequest, error)
 
-	// MarkReadyForPickup marks a payment request as ready for pickup (triggers rider search for intra-state)
 	MarkReadyForPickup(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) (*domain.PaymentRequest, error)
 
-	// UpdateStatus updates the status of a payment request
 	UpdateStatus(ctx context.Context, prID uuid.UUID, status domain.PaymentRequestStatus) error
 
-	// Cancel cancels a payment request (only if not paid)
+	
 	Cancel(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) error
 
-	// SetBuyer sets the buyer ID and marks as paid
 	SetBuyer(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, escrowID uuid.UUID) error
 
-	// MarkDelivered marks the payment request as delivered
 	MarkDelivered(ctx context.Context, prID uuid.UUID) error
 
-	// MarkCompleted marks the payment request as completed
 	MarkCompleted(ctx context.Context, prID uuid.UUID) error
 }
 

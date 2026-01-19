@@ -14,7 +14,7 @@ import (
 	"kipa/internal/repository"
 )
 
-// ErrandService handles errand operations
+
 type ErrandService interface {
 
 	Create(ctx context.Context, userID uuid.UUID, req *CreateErrandRequest) (*domain.Errand, error)
@@ -24,33 +24,30 @@ type ErrandService interface {
 	List(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Errand, error)
 	GetActive(ctx context.Context, userID uuid.UUID) ([]*domain.Errand, error)
 
-	// Called by rider service when job is accepted
+
 	OnJobAccepted(ctx context.Context, errandID uuid.UUID, riderID uuid.UUID) error
 	OnJobPickedUp(ctx context.Context, errandID uuid.UUID) error
 	OnJobDelivered(ctx context.Context, errandID uuid.UUID) error
 
-	// Recipient confirmation
+
 	CompleteErrand(ctx context.Context, userID uuid.UUID, errandID uuid.UUID, code string) (*domain.Errand, error)
 }
 
 type CreateErrandRequest struct {
-	// Pickup
+
 	PickupAddress      string  `json:"pickup_address" binding:"required"`
 	PickupLat          float64 `json:"pickup_lat" binding:"required"`
 	PickupLng          float64 `json:"pickup_lng" binding:"required"`
 	PickupInstructions *string `json:"pickup_instructions"`
 
-	// Dropoff
 	DropoffAddress string  `json:"dropoff_address" binding:"required"`
 	DropoffLat     float64 `json:"dropoff_lat" binding:"required"`
 	DropoffLng     float64 `json:"dropoff_lng" binding:"required"`
 
-	// Package
 	PackageDescription string   `json:"package_description" binding:"required"`
 	PackageWeightKg    *float64 `json:"package_weight_kg"`
 	PackagePhotoURL    *string  `json:"package_photo_url"`
 
-	// Vehicle
 	VehicleType domain.VehicleType `json:"vehicle_type" binding:"required"`
 }
 
@@ -75,14 +72,13 @@ func NewErrandService(
 	}
 }
 
-// Create creates a new errand request in draft status
 func (s *ErrandServiceImpl) Create(ctx context.Context, userID uuid.UUID, req *CreateErrandRequest) (*domain.Errand, error) {
-	// Validate vehicle type
+
 	if !req.VehicleType.IsValid() {
 		return nil, domain.ErrInvalidVehicleType
 	}
 
-	// Calculate delivery fee based on distance and vehicle type
+
 	feeEstimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(
 		ctx,
 		req.PickupLat, req.PickupLng,
@@ -93,7 +89,7 @@ func (s *ErrandServiceImpl) Create(ctx context.Context, userID uuid.UUID, req *C
 		return nil, fmt.Errorf("failed to calculate delivery fee: %w", err)
 	}
 
-	// Generate dropoff code
+
 	dropoffCode := generateDropoffCode()
 
 	errand := &domain.Errand{
@@ -136,17 +132,17 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 		return nil, err
 	}
 
-	// Verify ownership
+
 	if errand.UserID != userID {
 		return nil, domain.ErrUnauthorized
 	}
 
-	// Check if can confirm
+
 	if !errand.CanConfirm() {
 		return nil, domain.ErrErrandNotConfirmable
 	}
 
-	// Create delivery job
+
 	sourceType := domain.DeliverySourceErrand
 	job := &domain.DeliveryJob{
 		ID:                  uuid.New(),
@@ -166,7 +162,7 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 		SearchRadiusKM:      5, // Default initial radius
 	}
 
-	// Set rider payout (full fee since direct payment)
+
 	riderPayout := errand.DeliveryFee
 	job.RiderPayout = &riderPayout
 
@@ -181,7 +177,7 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 		return nil, fmt.Errorf("failed to create delivery job: %w", err)
 	}
 
-	// Update errand
+
 	errand.Status = domain.ErrandStatusSearching
 	errand.ConfirmedAt = &now
 	errand.DeliveryJobID = &job.ID
@@ -205,12 +201,12 @@ func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errand
 		return err
 	}
 
-	// Verify ownership
+
 	if errand.UserID != userID {
 		return domain.ErrUnauthorized
 	}
 
-	// Check if can cancel
+
 	if !errand.CanCancel() {
 		return domain.ErrErrandNotCancellable
 	}
@@ -223,7 +219,7 @@ func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errand
 		return fmt.Errorf("failed to cancel errand: %w", err)
 	}
 
-	// Cancel associated delivery job if exists
+
 	if errand.DeliveryJobID != nil {
 		if err := s.jobRepo.UpdateStatus(ctx, *errand.DeliveryJobID, domain.DJStatusCancelled); err != nil {
 			s.logger.Error("failed to cancel delivery job", zap.Error(err))
@@ -237,7 +233,7 @@ func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errand
 	return nil
 }
 
-// GetByID gets an errand by ID
+
 func (s *ErrandServiceImpl) GetByID(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) (*domain.Errand, error) {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
 	if err != nil {
@@ -252,7 +248,7 @@ func (s *ErrandServiceImpl) GetByID(ctx context.Context, userID uuid.UUID, erran
 	return errand, nil
 }
 
-// List gets user's errands
+
 func (s *ErrandServiceImpl) List(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Errand, error) {
 	return s.errandRepo.GetByUserID(ctx, userID, limit, offset)
 }
@@ -312,22 +308,21 @@ func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID
 		return nil, err
 	}
 
-	// Verify ownership
+
 	if errand.UserID != userID {
 		return nil, domain.ErrUnauthorized
 	}
 
-	// Check if can complete
+
 	if !errand.CanComplete() {
 		return nil, fmt.Errorf("errand cannot be completed in current status: %s", errand.Status)
 	}
 
-	// Validate dropoff code
 	if errand.DropoffCode == nil || *errand.DropoffCode != code {
 		return nil, fmt.Errorf("invalid dropoff code")
 	}
 
-	// Update status
+
 	now := time.Now()
 	errand.Status = domain.ErrandStatusCompleted
 	errand.CompletedAt = &now
@@ -344,11 +339,10 @@ func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID
 	return errand, nil
 }
 
-// generateDropoffCode generates a 6-digit verification code
 func generateDropoffCode() string {
 	n, _ := rand.Int(rand.Reader, big.NewInt(900000))
 	return fmt.Sprintf("%06d", n.Int64()+100000)
 }
 
-// Ensure ErrandServiceImpl implements ErrandService
+
 var _ ErrandService = (*ErrandServiceImpl)(nil)

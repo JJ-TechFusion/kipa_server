@@ -13,39 +13,27 @@ import (
 	"kipa/internal/repository"
 )
 
-// EscrowService handles escrow operations
 type EscrowService interface {
-	// CreateAndFund creates a new escrow and marks it as funded (payment received)
 	CreateAndFund(ctx context.Context, req *CreateEscrowRequest) (*domain.Escrow, error)
 
-	// GetByID gets an escrow by ID
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Escrow, error)
 
-	// GetByPaymentRequestID gets an escrow by payment request ID
 	GetByPaymentRequestID(ctx context.Context, prID uuid.UUID) (*domain.Escrow, error)
 
-	// GetByBuyerID gets all escrows for a buyer
 	GetByBuyerID(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.Escrow, error)
 
-	// GetBySellerID gets all escrows for a seller
 	GetBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.Escrow, error)
 
-	// MarkDeliveryInProgress marks escrow as delivery in progress (rider picked up item)
 	MarkDeliveryInProgress(ctx context.Context, escrowID uuid.UUID) error
 
-	// StartConfirmationWindow marks escrow as delivered and starts the 24h confirmation window
 	StartConfirmationWindow(ctx context.Context, escrowID uuid.UUID, actualDeliveryFee float64) error
 
-	// Release releases the escrow funds to seller and rider
 	Release(ctx context.Context, escrowID uuid.UUID) error
 
-	// Dispute marks the escrow as disputed
 	Dispute(ctx context.Context, escrowID uuid.UUID, reason string) error
 
-	// Refund refunds the escrow to the buyer
 	Refund(ctx context.Context, escrowID uuid.UUID, reason string) error
 
-	// ProcessPendingConfirmationWindows processes all escrows past their confirmation window
 	ProcessPendingConfirmationWindows(ctx context.Context) error
 }
 
@@ -118,7 +106,6 @@ func (s *EscrowServiceImpl) CreateAndFund(ctx context.Context, req *CreateEscrow
 	return escrow, nil
 }
 
-// GetByID gets an escrow by ID
 func (s *EscrowServiceImpl) GetByID(ctx context.Context, id uuid.UUID) (*domain.Escrow, error) {
 	return s.escrowRepo.GetByID(ctx, id)
 }

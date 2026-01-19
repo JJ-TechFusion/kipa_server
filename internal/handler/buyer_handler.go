@@ -464,7 +464,7 @@ func (h *BuyerHandler) GetOrder(c *gin.Context) {
 		return
 	}
 
-	// Verify ownership
+	
 	if order.BuyerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this order")
 		return
@@ -513,12 +513,12 @@ func mapBuyerErrorToResponse(err error) (int, string, string) {
 	}
 }
 
-// Request/Response types
+
 
 type InitializePaymentRequest struct {
-	PaymentMethod string `json:"payment_method" binding:"required,oneof=card wallet"` // "card" or "wallet"
-	CallbackURL   string `json:"callback_url"`                                        // Optional callback URL after payment
-	Email         string `json:"email"`                                               // Required for card payments
+	PaymentMethod string `json:"payment_method" binding:"required,oneof=card wallet"` 
+	CallbackURL   string `json:"callback_url"`                                        
+	Email         string `json:"email"`                                               
 }
 
 type DisputeRequest struct {
@@ -551,8 +551,8 @@ func paymentPageToResponse(pr *domain.PaymentRequest) PaymentPageResponse {
 }
 
 type PurchaseResponse struct {
-	ID                   uuid.UUID  `json:"id"`                                  // Order ID
-	PaymentRequestID     uuid.UUID  `json:"payment_request_id"`                  // Original payment request
+	ID                   uuid.UUID  `json:"id"`
+	PaymentRequestID     uuid.UUID  `json:"payment_request_id"`                  
 	ItemName             string     `json:"item_name"`
 	ItemDescription      *string    `json:"item_description,omitempty"`
 	ItemPrice            float64    `json:"item_price"`
@@ -567,14 +567,13 @@ type PurchaseResponse struct {
 	PaidAt               *string    `json:"paid_at,omitempty"`
 	CreatedAt            string     `json:"created_at"`
 
-	// Delivery info (for intra-state deliveries)
 	Delivery *PurchaseDeliveryInfo `json:"delivery,omitempty"`
 }
 
 type PurchaseDeliveryInfo struct {
-	Status       string  `json:"status"`                  // Delivery job status
-	DropoffCode  *string `json:"dropoff_code,omitempty"`  // Code to give rider on delivery
-	RiderAssigned bool   `json:"rider_assigned"`          // Whether a rider has accepted
+	Status       string  `json:"status"`                  
+	DropoffCode  *string `json:"dropoff_code,omitempty"` 
+	RiderAssigned bool   `json:"rider_assigned"`          
 	PickedUpAt   *string `json:"picked_up_at,omitempty"`
 	DeliveredAt  *string `json:"delivered_at,omitempty"`
 }

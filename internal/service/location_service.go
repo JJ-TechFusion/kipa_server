@@ -77,7 +77,7 @@ func (s *LocationServiceImpl) HandleLocationUpdate(ctx context.Context, riderID 
 	lastUpdate, exists := s.lastUpdate[clientKey]
 	if exists && time.Since(lastUpdate) < time.Second {
 		s.rateMu.Unlock()
-		return // Rate limited
+		return 
 	}
 	s.lastUpdate[clientKey] = time.Now()
 	s.rateMu.Unlock()

@@ -80,7 +80,7 @@ func NewFeeCalculatorService(
 func (s *FeeCalculatorServiceImpl) CalculateDeliveryFee(ctx context.Context, pickupLat, pickupLng, dropoffLat, dropoffLng float64) (*DeliveryFeeEstimate, error) {
 	var distanceKM float64
 	
-	// Try Google Maps API for accurate road distance
+	// Google Maps API for accurate road distance
 	if s.mapsClient != nil {
 		etaResult, err := s.mapsClient.GetETA(ctx, pickupLat, pickupLng, dropoffLat, dropoffLng)
 		if err != nil {
@@ -97,11 +97,11 @@ func (s *FeeCalculatorServiceImpl) CalculateDeliveryFee(ctx context.Context, pic
 		distanceKM = s.calculateDistanceKM(pickupLat, pickupLng, dropoffLat, dropoffLng)
 	}
 
-	// Get configurable rates
+	
 	baseFee := s.getBaseDeliveryFee()  // Default: 500 NGN
 	perKMFee := s.getPerKMFee()        // Default: 100 NGN per km
 
-	// Calculate total: baseFee + (distance × perKMFee)
+	
 	totalFee := baseFee + (distanceKM * perKMFee)
 	totalFee = math.Round(totalFee*100) / 100
 
