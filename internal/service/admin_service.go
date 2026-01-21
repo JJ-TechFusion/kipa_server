@@ -154,7 +154,7 @@ type HealthStatus struct {
 type ExternalServicesHealth struct {
 	Paystack   *HealthStatus `json:"paystack"`
 	GoogleMaps *HealthStatus `json:"google_maps"`
-	Termii     *HealthStatus `json:"termii"`
+	Twilio     *HealthStatus `json:"twilio"`
 }
 
 func NewAdminService(
@@ -654,7 +654,7 @@ func (s *AdminServiceImpl) CheckExternalServices(ctx context.Context) (*External
 	return &ExternalServicesHealth{
 		Paystack:   s.checkHTTPEndpoint("https://api.paystack.co"),
 		GoogleMaps: s.checkHTTPEndpoint("https://maps.googleapis.com"),
-		Termii:     s.checkHTTPEndpoint("https://api.ng.termii.com"),
+		Twilio:     s.checkHTTPEndpoint("https://api.twilio.com"),
 	}, nil
 }
 

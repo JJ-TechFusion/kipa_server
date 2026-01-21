@@ -4,15 +4,16 @@ import (
 	"context"
 )
 
-type SMSProvider interface {
-	SendSMS(ctx context.Context, phoneNumber, message string) (*SMSResult, error)
-	SendVoiceOTP(ctx context.Context, phoneNumber, otp string) (*SMSResult, error)
-	SendWithFallback(ctx context.Context, phoneNumber, otp string) (*SMSResult, error)
+type VerifyProvider interface {
+	SendVerification(ctx context.Context, phoneNumber, channel string) (*VerifyResult, error)
+	
+
+	CheckVerification(ctx context.Context, phoneNumber, code string) (*VerifyResult, error)
 }
 
-type SMSResult struct {
-	Success   bool
-	MessageID string
-	Provider  string
-	Error     error
+type VerifyResult struct {
+	Success         bool
+	Status          string 
+	VerificationSID string
+	Error           error
 }

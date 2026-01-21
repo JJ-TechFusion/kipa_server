@@ -105,8 +105,8 @@ func main() {
 	otpGenerator := util.NewSecureOTPGenerator()
 	jwtManager := util.NewJWTManager(&cfg.JWT)
 
-	// Initialize SMS provider (Termii)
-	smsProvider := sms.NewTermiiClient(&cfg.Termii, logger)
+	// Initialize Twilio Verify provider
+	verifyProvider := sms.NewTwilioVerifyClient(&cfg.Twilio, logger)
 
 	// Initialize Paystack client
 	paystackClient := paystack.NewClient(&cfg.Paystack, logger)
@@ -134,7 +134,7 @@ func main() {
 		otpRepo,
 		idempotencyRepo,
 		sessionRepo,
-		smsProvider,
+		verifyProvider,
 		jwtManager,
 		hasher,
 		otpGenerator,

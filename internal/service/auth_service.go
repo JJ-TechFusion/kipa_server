@@ -24,7 +24,7 @@ type AuthServiceImpl struct {
 	otpRepo         repository.OTPRepository
 	idempotencyRepo repository.IdempotencyRepository
 	sessionRepo     repository.SessionRepository
-	smsProvider     integration.SMSProvider
+	verifyProvider  integration.VerifyProvider
 	jwtManager      util.JWTManager
 	hasher          util.Hasher
 	otpGenerator    util.OTPGenerator
@@ -37,7 +37,7 @@ func NewAuthService(
 	otpRepo repository.OTPRepository,
 	idempotencyRepo repository.IdempotencyRepository,
 	sessionRepo repository.SessionRepository,
-	smsProvider integration.SMSProvider,
+	verifyProvider integration.VerifyProvider,
 	jwtManager util.JWTManager,
 	hasher util.Hasher,
 	otpGenerator util.OTPGenerator,
@@ -49,7 +49,7 @@ func NewAuthService(
 		otpRepo:         otpRepo,
 		idempotencyRepo: idempotencyRepo,
 		sessionRepo:     sessionRepo,
-		smsProvider:     smsProvider,
+		verifyProvider:  verifyProvider,
 		jwtManager:      jwtManager,
 		hasher:          hasher,
 		otpGenerator:    otpGenerator,
@@ -59,7 +59,7 @@ func NewAuthService(
 }
 
 func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, ipAddress, userAgent string) (*dto.SendOTPResponse, error) {
-
+	// Check rate limit
 	count, err := s.sessionRepo.GetRateLimitCount(ctx, req.PhoneNumber)
 	if err != nil {
 		s.logger.Error("failed to check rate limit", zap.Error(err))
@@ -74,85 +74,36 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 		return nil, domain.ErrOTPRateLimitExceeded
 	}
 
-
-	plainOTP, err := s.otpGenerator.Generate(s.config.OTP.Length)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate OTP: %w", err)
-	}
-
-
-	hashedOTP, err := s.hasher.Hash(plainOTP)
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash OTP: %w", err)
-	}
-
-	verificationID := s.otpGenerator.GenerateVerificationID()
-	expiresAt := time.Now().Add(s.config.OTP.ExpiryDuration)
-
-
-	otpRecord := &domain.OTPVerification{
-		PhoneNumber:    req.PhoneNumber,
-		VerificationID: verificationID,
-		CodeHash:       hashedOTP,
-		Purpose:        domain.OTPPurposeLogin,
-		ExpiresAt:      expiresAt,
-		Attempts:       0,
-	}
-
-	if err := s.otpRepo.Create(ctx, otpRecord); err != nil {
-		return nil, fmt.Errorf("failed to store OTP: %w", err)
-	}
-	isDevelopment := s.config.Server.Environment == "development"
-	
-	if isDevelopment {
-		s.logger.Info("🔐 DEVELOPMENT MODE - OTP Generated",
-			zap.String("phone", req.PhoneNumber),
-			zap.String("otp_code", plainOTP),
-			zap.String("verification_id", verificationID.String()),
-		)
-	}
-	
-	result, err := s.smsProvider.SendWithFallback(ctx, req.PhoneNumber, plainOTP)
+	// Send verification via Twilio Verify
+	result, err := s.verifyProvider.SendVerification(ctx, req.PhoneNumber, "sms")
 	if err != nil || !result.Success {
-		if isDevelopment {
-			s.logger.Warn("SMS delivery failed (continuing in dev mode)",
-				zap.String("phone", req.PhoneNumber),
-				zap.Error(err),
-			)
-		} else {
-			s.logger.Error("failed to send OTP",
-				zap.String("phone", req.PhoneNumber),
-				zap.Error(err),
-			)
-			return nil, domain.ErrSMSDeliveryFailed
-		}
+		s.logger.Error("failed to send verification",
+			zap.String("phone", req.PhoneNumber),
+			zap.Error(err),
+		)
+		return nil, domain.ErrSMSDeliveryFailed
 	}
 
-
+	// Increment rate limit
 	if err := s.sessionRepo.IncrementRateLimitCount(ctx, req.PhoneNumber, s.config.OTP.RateLimitWindow); err != nil {
 		s.logger.Error("failed to increment rate limit", zap.Error(err))
 	}
 
-	s.logger.Info("OTP sent successfully",
+	s.logger.Info("verification sent successfully",
 		zap.String("phone", req.PhoneNumber),
-		zap.String("verification_id", verificationID.String()),
-		zap.String("provider", func() string {
-			if result != nil {
-				return result.Provider
-			}
-			return "dev-mode"
-		}()),
+		zap.String("status", result.Status),
 	)
 
+	// Use phone number as verification ID since Twilio manages the verification
 	return &dto.SendOTPResponse{
-		VerificationID: verificationID.String(),
-		ExpiresAt:      expiresAt,
+		VerificationID: req.PhoneNumber,
+		ExpiresAt:      time.Now().Add(s.config.OTP.ExpiryDuration),
 		RetryAfter:     60,
 	}, nil
 }
 
 func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPRequest, ipAddress, userAgent string) (*dto.VerifyOTPResponse, error) {
-
+	// Check idempotency
 	exists, err := s.idempotencyRepo.Exists(ctx, req.IdempotencyKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check idempotency: %w", err)
@@ -164,54 +115,22 @@ func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPReque
 		return nil, domain.ErrIdempotencyKeyExists
 	}
 
-
-	verificationID, err := uuid.Parse(req.VerificationID)
+	// Verify code with Twilio Verify
+	result, err := s.verifyProvider.CheckVerification(ctx, req.PhoneNumber, req.OTPCode)
 	if err != nil {
-		return nil, domain.ErrInvalidOTP
-	}
-
-
-	otpRecord, err := s.otpRepo.GetByVerificationID(ctx, req.PhoneNumber, verificationID)
-	if err != nil {
-		if errors.Is(err, domain.ErrOTPNotFound) {
-			return nil, domain.ErrInvalidOTP
-		}
-		return nil, fmt.Errorf("failed to get OTP: %w", err)
-	}
-
-
-	if otpRecord.VerifiedAt != nil {
-		return nil, domain.ErrOTPAlreadyVerified
-	}
-
-
-	if time.Now().After(otpRecord.ExpiresAt) {
-		return nil, domain.ErrOTPExpired
-	}
-
-
-	if otpRecord.Attempts >= s.config.OTP.MaxAttempts {
-		return nil, domain.ErrMaxOTPAttemptsExceeded
-	}
-
-
-	if err := s.otpRepo.IncrementAttempts(ctx, otpRecord.ID); err != nil {
-		s.logger.Error("failed to increment OTP attempts", zap.Error(err))
-	}
-
-
-	if !s.hasher.Compare(req.OTPCode, otpRecord.CodeHash) {
-		remainingAttempts := s.config.OTP.MaxAttempts - otpRecord.Attempts - 1
-		s.logger.Warn("invalid OTP attempt",
+		s.logger.Error("verification check failed",
 			zap.String("phone", req.PhoneNumber),
-			zap.Int("remaining_attempts", remainingAttempts),
+			zap.Error(err),
 		)
 		return nil, domain.ErrInvalidOTP
 	}
 
-
-	if err := s.otpRepo.MarkVerified(ctx, otpRecord.ID); err != nil {
-		s.logger.Error("failed to mark OTP as verified", zap.Error(err))
+	if !result.Success {
+		s.logger.Warn("invalid OTP attempt",
+			zap.String("phone", req.PhoneNumber),
+			zap.String("status", result.Status),
+		)
+		return nil, domain.ErrInvalidOTP
 	}
 
 

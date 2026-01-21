@@ -13,7 +13,7 @@ type SendOTPRequest struct {
 
 type VerifyOTPRequest struct {
 	PhoneNumber    string `json:"phone_number" binding:"required,e164"`
-	VerificationID string `json:"verification_id" binding:"required,uuid"`
+	VerificationID string `json:"verification_id" binding:"required"`
 	OTPCode        string `json:"otp_code" binding:"required,len=6,numeric"`
 	DeviceID       string `json:"device_id" binding:"required,min=16,max=64"`
 	IdempotencyKey string `json:"idempotency_key" binding:"required,min=32,max=64"`

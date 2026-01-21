@@ -14,7 +14,7 @@ type Config struct {
 	Redis      RedisConfig
 	JWT        JWTConfig
 	OTP        OTPConfig
-	Termii     TermiiConfig
+	Twilio     TwilioConfig
 	Paystack   PaystackConfig
 	Worker     WorkerConfig
 	GoogleMaps GoogleMapsConfig
@@ -89,10 +89,10 @@ type OTPConfig struct {
 	BcryptCost      int
 }
 
-type TermiiConfig struct {
-	APIKey              string
-	SenderID            string
-	EnableVoiceFallback bool
+type TwilioConfig struct {
+	AccountSID       string
+	AuthToken        string
+	VerifyServiceSID string
 }
 
 type PaystackConfig struct {
@@ -171,10 +171,10 @@ func Load() (*Config, error) {
 			RateLimitWindow: viper.GetDuration("otp.rate_limit_window"),
 			BcryptCost:      viper.GetInt("otp.bcrypt_cost"),
 		},
-		Termii: TermiiConfig{
-			APIKey:              viper.GetString("termii.api_key"),
-			SenderID:            viper.GetString("termii.sender_id"),
-			EnableVoiceFallback: viper.GetBool("termii.enable_voice_fallback"),
+		Twilio: TwilioConfig{
+			AccountSID:       viper.GetString("twilio.account_sid"),
+			AuthToken:        viper.GetString("twilio.auth_token"),
+			VerifyServiceSID: viper.GetString("twilio.verify_service_sid"),
 		},
 		Paystack: PaystackConfig{
 			SecretKey: viper.GetString("paystack.secret_key"),
@@ -234,7 +234,7 @@ func setDefaults() {
 	viper.SetDefault("redis.db", 0)
 	viper.SetDefault("redis.pool_size", 10)
 	viper.SetDefault("redis.min_idle_conns", 2)
-	viper.SetDefault("jwt.access_token_expiry", "15m")
+	viper.SetDefault("jwt.access_token_expiry", "168h") // 1 week for development
 	viper.SetDefault("jwt.refresh_token_expiry", "168h") // 7 days
 	viper.SetDefault("jwt.issuer", "kipa")
 	viper.SetDefault("otp.length", 6)
@@ -243,8 +243,7 @@ func setDefaults() {
 	viper.SetDefault("otp.rate_limit_count", 5)
 	viper.SetDefault("otp.rate_limit_window", "1h")
 	viper.SetDefault("otp.bcrypt_cost", 10)
-	viper.SetDefault("termii.sender_id", "Kipa")
-	viper.SetDefault("termii.enable_voice_fallback", true)
+
 	viper.SetDefault("paystack.base_url", "https://api.paystack.co")
 	viper.SetDefault("worker.enabled", true)
 	viper.SetDefault("worker.escrow_check_interval", "1m")
