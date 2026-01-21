@@ -18,9 +18,10 @@ Base URL: `/api/v1`
 5. [Wallet](#wallet)
 6. [Webhooks](#webhooks)
 7. [Paystack Integration](#paystack-integration)
-8. [Domain Models](#domain-models)
-9. [State Machines](#state-machines)
-10. [Fee Structure](#fee-structure)
+8. [Admin Endpoints](#admin-endpoints)
+9. [Domain Models](#domain-models)
+10. [State Machines](#state-machines)
+11. [Fee Structure](#fee-structure)
 
 ---
 

@@ -205,12 +205,16 @@ CREATE TABLE users (
     suspension_reason TEXT,
     last_login_at TIMESTAMP WITH TIME ZONE,
 
+    -- Admin flag
+    is_admin BOOLEAN DEFAULT FALSE,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX idx_users_phone ON users(phone_number);
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_admin ON users(is_admin) WHERE is_admin = TRUE;
 
 -- ============================================
 -- RIDER PROFILES
@@ -967,3 +971,67 @@ SELECT
     rp.last_commission_paid_at
 FROM rider_profiles rp
 JOIN users u ON rp.user_id = u.id;
+
+-- ============================================
+-- PLATFORM SETTINGS (Admin Configuration)
+-- ============================================
+
+CREATE TABLE platform_settings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    setting_key VARCHAR(100) UNIQUE NOT NULL,
+    setting_value JSONB NOT NULL,
+    description TEXT,
+    updated_by UUID REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_platform_settings_key ON platform_settings(setting_key);
+
+CREATE TRIGGER update_platform_settings_updated_at BEFORE UPDATE ON platform_settings
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Default platform settings
+INSERT INTO platform_settings (setting_key, setting_value, description) VALUES
+('delivery_pricing', '{
+    "base_fee": 500.0,
+    "per_km_fee": 100.0,
+    "vehicle_multipliers": {
+        "motorcycle": 1.0,
+        "car": 1.5
+    }
+}', 'Base delivery fee and per-kilometer pricing with vehicle type multipliers');
+
+INSERT INTO platform_settings (setting_key, setting_value, description) VALUES
+('platform_fees', '{
+    "buyer_fee_rate": 0.02,
+    "seller_fee_rate": 0.03,
+    "rider_payout_rate": 0.85
+}', 'Platform commission rates for buyers, sellers, and rider payouts');
+
+INSERT INTO platform_settings (setting_key, setting_value, description) VALUES
+('commission_settings', '{
+    "max_unpaid_rides": 5,
+    "commission_rate": 0.15
+}', 'Rider commission configuration');
+
+-- ============================================
+-- ADMIN AUDIT LOGS
+-- ============================================
+
+CREATE TABLE admin_audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_id UUID NOT NULL REFERENCES users(id),
+    action VARCHAR(100) NOT NULL,
+    target_type VARCHAR(50) NOT NULL,
+    target_id UUID,
+    details JSONB,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_audit_logs_admin ON admin_audit_logs(admin_id);
+CREATE INDEX idx_audit_logs_target ON admin_audit_logs(target_type, target_id);
+CREATE INDEX idx_audit_logs_created ON admin_audit_logs(created_at DESC);
+CREATE INDEX idx_audit_logs_action ON admin_audit_logs(action);

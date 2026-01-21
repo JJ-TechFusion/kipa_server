@@ -2188,6 +2188,96 @@
 					"response": []
 				}
 			]
+		},
+		{
+			"name": "Admin",
+			"item": [
+				{
+					"name": "Rider Management",
+					"item": [
+						{"name": "Verify Rider", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/riders/{{rider_id}}/verify", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "riders", "{{rider_id}}", "verify"]}}, "response": []},
+						{"name": "Suspend Rider", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"reason\": \"Multiple complaints\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/riders/{{rider_id}}/suspend", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "riders", "{{rider_id}}", "suspend"]}}, "response": []},
+						{"name": "Unsuspend Rider", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/riders/{{rider_id}}/unsuspend", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "riders", "{{rider_id}}", "unsuspend"]}}, "response": []},
+						{"name": "Get Pending Riders", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/riders/pending", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "riders", "pending"]}}, "response": []},
+						{"name": "Get Rider Statistics", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/riders/statistics", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "riders", "statistics"]}}, "response": []}
+					]
+				},
+				{
+					"name": "User Management",
+					"item": [
+						{"name": "List Users", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/users?limit=50&offset=0", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "users"], "query": [{"key": "limit", "value": "50"}, {"key": "offset", "value": "0"}]}}, "response": []},
+						{"name": "Suspend User", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"reason\": \"Policy violation\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/users/{{target_user_id}}/suspend", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "users", "{{target_user_id}}", "suspend"]}}, "response": []},
+						{"name": "Unsuspend User", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/users/{{target_user_id}}/unsuspend", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "users", "{{target_user_id}}", "unsuspend"]}}, "response": []},
+						{"name": "Verify Seller", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/users/{{target_user_id}}/verify-seller", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "users", "{{target_user_id}}", "verify-seller"]}}, "response": []},
+						{"name": "Get User Statistics", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/users/statistics", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "users", "statistics"]}}, "response": []}
+					]
+				},
+				{
+					"name": "Platform Settings",
+					"item": [
+						{"name": "Get Delivery Pricing", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/settings/delivery-pricing", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "settings", "delivery-pricing"]}}, "response": []},
+						{"name": "Update Delivery Pricing", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "PUT", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"base_fee\": 500.0, \"per_km_fee\": 100.0}"}, "url": {"raw": "{{base_url}}/api/v1/admin/settings/delivery-pricing", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "settings", "delivery-pricing"]}}, "response": []},
+						{"name": "Get Platform Fees", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/settings/platform-fees", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "settings", "platform-fees"]}}, "response": []},
+						{"name": "Update Platform Fees", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "PUT", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"buyer_fee_rate\": 0.02, \"seller_fee_rate\": 0.03, \"rider_payout_rate\": 0.85}"}, "url": {"raw": "{{base_url}}/api/v1/admin/settings/platform-fees", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "settings", "platform-fees"]}}, "response": []}
+					]
+				},
+				{
+					"name": "Analytics",
+					"item": [
+						{"name": "Get Platform Revenue", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/analytics/revenue", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "analytics", "revenue"]}}, "response": []},
+						{"name": "Get Active Deliveries", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/analytics/active-deliveries", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "analytics", "active-deliveries"]}}, "response": []},
+						{"name": "Get Rider Performance", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/analytics/rider-performance", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "analytics", "rider-performance"]}}, "response": []}
+					]
+				},
+				{
+					"name": "Payment Requests",
+					"item": [
+						{"name": "List Payment Requests", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/payment-requests?limit=50&offset=0", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "payment-requests"], "query": [{"key": "limit", "value": "50"}, {"key": "offset", "value": "0"}]}}, "response": []},
+						{"name": "Cancel Payment Request", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"reason\": \"Fraudulent listing\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/payment-requests/{{payment_request_id}}/cancel", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "payment-requests", "{{payment_request_id}}", "cancel"]}}, "response": []},
+						{"name": "Get Expired Requests", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/payment-requests/expired", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "payment-requests", "expired"]}}, "response": []}
+					]
+				},
+				{
+					"name": "System Health",
+					"item": [
+						{"name": "Database Health", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/health/database", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "health", "database"]}}, "response": []},
+						{"name": "Redis Health", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/health/redis", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "health", "redis"]}}, "response": []},
+						{"name": "External Services Health", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/health/external-services", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "health", "external-services"]}}, "response": []}
+					]
+				},
+				{
+					"name": "Audit Logs",
+					"item": [
+						{"name": "List Audit Logs", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/audit-logs", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "audit-logs"]}}, "response": []},
+						{"name": "Get User Audit Trail", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/audit-logs/user/{{target_user_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "audit-logs", "user", "{{target_user_id}}"]}}, "response": []}
+					]
+				},
+				{
+					"name": "Disputes",
+					"item": [
+						{"name": "List Disputes", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/disputes", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "disputes"]}}, "response": []},
+						{"name": "Get Dispute Details", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/disputes/{{dispute_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "disputes", "{{dispute_id}}"]}}, "response": []},
+						{"name": "Resolve Dispute", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"outcome\": \"buyer_wins\", \"notes\": \"Seller failed to provide proof\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/disputes/{{dispute_id}}/resolve", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "disputes", "{{dispute_id}}", "resolve"]}}, "response": []},
+						{"name": "Process Refund", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"refund_type\": \"full\", \"amount\": 50000.0, \"reason\": \"Item not received\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/disputes/{{dispute_id}}/refund", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "disputes", "{{dispute_id}}", "refund"]}}, "response": []},
+						{"name": "Get Dispute Statistics", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/disputes/statistics", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "disputes", "statistics"]}}, "response": []}
+					]
+				},
+				{
+					"name": "Commission Management",
+					"item": [
+						{"name": "Get Commission Settings", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/settings/commission", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "settings", "commission"]}}, "response": []},
+						{"name": "Update Commission Settings", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "PUT", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"max_unpaid_rides\": 5, \"commission_rate\": 0.15}"}, "url": {"raw": "{{base_url}}/api/v1/admin/settings/commission", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "settings", "commission"]}}, "response": []}
+					]
+				},
+				{
+					"name": "Wallet Management",
+					"item": [
+						{"name": "Get User Wallet", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/wallets/user/{{target_user_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "wallets", "user", "{{target_user_id}}"]}}, "response": []},
+						{"name": "Adjust User Wallet", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"adjustment_type\": \"credit\", \"amount\": 5000.0, \"reason\": \"Customer service compensation\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/wallets/user/{{target_user_id}}/adjust", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "wallets", "user", "{{target_user_id}}", "adjust"]}}, "response": []},
+						{"name": "Get Wallet Transactions", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/wallets/user/{{target_user_id}}/transactions", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "wallets", "user", "{{target_user_id}}", "transactions"]}}, "response": []}
+					]
+				}
+			]
 		}
 	],
 	"variable": [
@@ -2268,6 +2358,21 @@
 		},
 		{
 			"key": "errand_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "rider_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "target_user_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "dispute_id",
 			"value": "",
 			"type": "string"
 		}

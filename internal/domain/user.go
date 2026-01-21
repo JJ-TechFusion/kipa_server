@@ -16,6 +16,7 @@ type User struct {
 	IsSeller bool `db:"is_seller" json:"is_seller"`
 	IsBuyer  bool `db:"is_buyer" json:"is_buyer"`
 	IsRider  bool `db:"is_rider" json:"is_rider"`
+	IsAdmin  bool `db:"is_admin" json:"is_admin"`
 	SellerVerified   bool       `db:"seller_verified" json:"seller_verified"`
 	SellerVerifiedAt *time.Time `db:"seller_verified_at" json:"seller_verified_at,omitempty"`
 	IsSuspended      bool       `db:"is_suspended" json:"is_suspended"`
@@ -68,6 +69,11 @@ func (u *User) SetAsBuyer() {
 func (u *User) SetAsRider() {
 	u.IsRider = true
 }
+
+func (u *User) CanAccessAdmin() bool {
+	return u.IsAdmin && !u.IsSuspended
+}
+
 type OTPPurpose string
 
 const (

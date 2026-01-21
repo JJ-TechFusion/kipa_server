@@ -19,6 +19,21 @@ type UserRepository interface {
 	SetIsSeller(ctx context.Context, userID uuid.UUID) error
 	SetIsBuyer(ctx context.Context, userID uuid.UUID) error
 	SetIsRider(ctx context.Context, userID uuid.UUID) error
+	
+	// Admin methods
+	Suspend(ctx context.Context, userID uuid.UUID, reason string) error
+	Unsuspend(ctx context.Context, userID uuid.UUID) error
+	VerifySeller(ctx context.Context, userID uuid.UUID) error
+	List(ctx context.Context, filters interface{}, limit, offset int) ([]*domain.User, error)
+	GetStatistics(ctx context.Context) (*UserStatistics, error)
+}
+
+type UserStatistics struct {
+	TotalUsers     int `db:"total_users" json:"total_users"`
+	TotalSellers   int `db:"total_sellers" json:"total_sellers"`
+	TotalBuyers    int `db:"total_buyers" json:"total_buyers"`
+	TotalRiders    int `db:"total_riders" json:"total_riders"`
+	SuspendedUsers int `db:"suspended_users" json:"suspended_users"`
 }
 
 type OTPRepository interface {
@@ -54,6 +69,7 @@ type PaymentRequestRepository interface {
 	GetHistoryBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error)
 	GetExpiredLinks(ctx context.Context) ([]*domain.PaymentRequest, error)
 	GetOverdueProcessingOrders(ctx context.Context, reminderCooldownMins int) ([]*domain.PaymentRequest, error)
+	GetAll(ctx context.Context, limit, offset int) ([]*domain.PaymentRequest, error)
 	Update(ctx context.Context, pr *domain.PaymentRequest) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.PaymentRequestStatus) error
 	UpdateReminderSent(ctx context.Context, id uuid.UUID) error
@@ -77,6 +93,7 @@ type DeliveryJobRepository interface {
 	GetSearchingJobsByVehicleType(ctx context.Context, vehicleType domain.VehicleType, limit int) ([]*domain.DeliveryJob, error)
 	GetTimedOutJobs(ctx context.Context) ([]*domain.DeliveryJob, error)
 	GetJobsForRadiusExpansion(ctx context.Context, expandAfterMins int) ([]*domain.DeliveryJob, error)
+	GetCompletedTodayByRiderID(ctx context.Context, riderID uuid.UUID) (int, error)
 	Update(ctx context.Context, job *domain.DeliveryJob) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DeliveryJobStatus) error
 	UpdateSearchRadius(ctx context.Context, id uuid.UUID, radiusKM int) error
@@ -114,7 +131,17 @@ type WalletTransactionRepository interface {
 	GetByWalletID(ctx context.Context, walletID uuid.UUID, limit, offset int) ([]*domain.WalletTransaction, error)
 	GetByIdempotencyKey(ctx context.Context, key string) (*domain.WalletTransaction, error)
 	IdempotencyKeyExists(ctx context.Context, key string) (bool, error)
+	GetRevenueAnalytics(ctx context.Context, startDate, endDate *time.Time) (*RevenueAnalytics, error)
 }
+
+type RevenueAnalytics struct {
+	TotalRevenue      float64 `db:"total_revenue" json:"total_revenue"`
+	BuyerFees         float64 `db:"buyer_fees" json:"buyer_fees"`
+	SellerFees        float64 `db:"seller_fees" json:"seller_fees"`
+	DeliveryFees      float64 `db:"delivery_fees" json:"delivery_fees"`
+	TotalTransactions int     `db:"total_transactions" json:"total_transactions"`
+}
+
 type RiderProfileRepository interface {
 	Create(ctx context.Context, profile *domain.RiderProfile) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.RiderProfile, error)
@@ -130,6 +157,20 @@ type RiderProfileRepository interface {
 	SetCommissionBlocked(ctx context.Context, id uuid.UUID, blocked bool) error
 	ClearCommissionDebt(ctx context.Context, id uuid.UUID) error
 	RecordCommissionPayment(ctx context.Context, id uuid.UUID) error
+	
+	// Admin methods
+	GetByStatus(ctx context.Context, status domain.RiderStatus, limit, offset int) ([]*domain.RiderProfile, error)
+	GetStatistics(ctx context.Context) (*RiderStatistics, error)
+}
+
+type RiderStatistics struct {
+	TotalRiders     int
+	VerifiedRiders  int
+	PendingRiders   int
+	SuspendedRiders int
+	OnlineRiders    int
+	AverageRating   float64
+	TotalDeliveries int
 }
 type RiderCommissionRepository interface {
 	Create(ctx context.Context, commission *domain.RiderCommission) error

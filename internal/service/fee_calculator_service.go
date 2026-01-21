@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"math"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -55,23 +58,36 @@ type SettlementBreakdown struct {
 }
 
 type FeeCalculatorServiceImpl struct {
-	zoneRepo   repository.DeliveryZoneRepository
-	mapsClient maps.MapsClient
-	config     *config.Config
-	logger     *zap.Logger
+	zoneRepo     repository.DeliveryZoneRepository
+	settingsRepo repository.PlatformSettingsRepository
+	mapsClient   maps.MapsClient
+	config       *config.Config
+	logger       *zap.Logger
+
+	// Caching
+	pricingCache   *domain.DeliveryPricing
+	feesCache      *domain.PlatformFees
+	cacheExpiry    time.Time
+	cacheMutex     sync.RWMutex
+	cacheDuration  time.Duration
 }
+
+const defaultCacheDuration = 5 * time.Minute
 
 func NewFeeCalculatorService(
 	zoneRepo repository.DeliveryZoneRepository,
+	settingsRepo repository.PlatformSettingsRepository,
 	mapsClient maps.MapsClient,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) FeeCalculatorService {
 	return &FeeCalculatorServiceImpl{
-		zoneRepo:   zoneRepo,
-		mapsClient: mapsClient,
-		config:     cfg,
-		logger:     logger,
+		zoneRepo:      zoneRepo,
+		settingsRepo:  settingsRepo,
+		mapsClient:    mapsClient,
+		config:        cfg,
+		logger:        logger,
+		cacheDuration: defaultCacheDuration,
 	}
 }
 func (s *FeeCalculatorServiceImpl) CalculateDeliveryFee(ctx context.Context, pickupLat, pickupLng, dropoffLat, dropoffLng float64) (*DeliveryFeeEstimate, error) {
@@ -190,21 +206,128 @@ func (s *FeeCalculatorServiceImpl) calculatePlatformDeliveryFee(deliveryFee floa
 	return math.Round(deliveryFee*rate*100) / 100
 }
 func (s *FeeCalculatorServiceImpl) getBuyerFeeRate() float64 {
-	return 0.02
+	fees := s.getPlatformFees()
+	if fees != nil && fees.BuyerFeeRate > 0 {
+		return fees.BuyerFeeRate
+	}
+	return 0.02 // fallback
 }
 
 func (s *FeeCalculatorServiceImpl) getSellerFeeRate() float64 {
-	return 0.03
+	fees := s.getPlatformFees()
+	if fees != nil && fees.SellerFeeRate > 0 {
+		return fees.SellerFeeRate
+	}
+	return 0.03 // fallback
 }
 
 func (s *FeeCalculatorServiceImpl) getRiderPayoutRate() float64 {
-	return 0.85
+	fees := s.getPlatformFees()
+	if fees != nil && fees.RiderPayoutRate > 0 {
+		return fees.RiderPayoutRate
+	}
+	return 0.85 // fallback
 }
+
 func (s *FeeCalculatorServiceImpl) getBaseDeliveryFee() float64 {
-	return 500.0
+	pricing := s.getDeliveryPricing()
+	if pricing != nil && pricing.BaseFee > 0 {
+		return pricing.BaseFee
+	}
+	return 500.0 // fallback
 }
 
 func (s *FeeCalculatorServiceImpl) getPerKMFee() float64 {
-	return 100.0
+	pricing := s.getDeliveryPricing()
+	if pricing != nil && pricing.PerKMFee > 0 {
+		return pricing.PerKMFee
+	}
+	return 100.0 // fallback
+}
+
+func (s *FeeCalculatorServiceImpl) getDeliveryPricing() *domain.DeliveryPricing {
+	s.cacheMutex.RLock()
+	if s.pricingCache != nil && time.Now().Before(s.cacheExpiry) {
+		pricing := s.pricingCache
+		s.cacheMutex.RUnlock()
+		return pricing
+	}
+	s.cacheMutex.RUnlock()
+
+	// Cache miss - fetch from database
+	s.cacheMutex.Lock()
+	defer s.cacheMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if s.pricingCache != nil && time.Now().Before(s.cacheExpiry) {
+		return s.pricingCache
+	}
+
+	if s.settingsRepo == nil {
+		return nil
+	}
+
+	settings, err := s.settingsRepo.Get(context.Background(), "delivery_pricing")
+	if err != nil {
+		s.logger.Warn("failed to get delivery pricing from database, using fallback", zap.Error(err))
+		return nil
+	}
+
+	var pricing domain.DeliveryPricing
+	if err := json.Unmarshal(settings.SettingValue, &pricing); err != nil {
+		s.logger.Warn("failed to unmarshal delivery pricing, using fallback", zap.Error(err))
+		return nil
+	}
+
+	s.pricingCache = &pricing
+	s.cacheExpiry = time.Now().Add(s.cacheDuration)
+	s.logger.Debug("loaded delivery pricing from database", zap.Float64("base_fee", pricing.BaseFee), zap.Float64("per_km_fee", pricing.PerKMFee))
+
+	return &pricing
+}
+
+func (s *FeeCalculatorServiceImpl) getPlatformFees() *domain.PlatformFees {
+	s.cacheMutex.RLock()
+	if s.feesCache != nil && time.Now().Before(s.cacheExpiry) {
+		fees := s.feesCache
+		s.cacheMutex.RUnlock()
+		return fees
+	}
+	s.cacheMutex.RUnlock()
+
+	// Cache miss - fetch from database
+	s.cacheMutex.Lock()
+	defer s.cacheMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if s.feesCache != nil && time.Now().Before(s.cacheExpiry) {
+		return s.feesCache
+	}
+
+	if s.settingsRepo == nil {
+		return nil
+	}
+
+	settings, err := s.settingsRepo.Get(context.Background(), "platform_fees")
+	if err != nil {
+		s.logger.Warn("failed to get platform fees from database, using fallback", zap.Error(err))
+		return nil
+	}
+
+	var fees domain.PlatformFees
+	if err := json.Unmarshal(settings.SettingValue, &fees); err != nil {
+		s.logger.Warn("failed to unmarshal platform fees, using fallback", zap.Error(err))
+		return nil
+	}
+
+	s.feesCache = &fees
+	s.cacheExpiry = time.Now().Add(s.cacheDuration)
+	s.logger.Debug("loaded platform fees from database",
+		zap.Float64("buyer_fee_rate", fees.BuyerFeeRate),
+		zap.Float64("seller_fee_rate", fees.SellerFeeRate),
+		zap.Float64("rider_payout_rate", fees.RiderPayoutRate),
+	)
+
+	return &fees
 }
 var _ FeeCalculatorService = (*FeeCalculatorServiceImpl)(nil)

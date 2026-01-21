@@ -6,10 +6,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
 	"kipa/internal/domain"
 	"kipa/internal/repository"
+
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 type UserRepo struct {
 	db *sqlx.DB
@@ -122,6 +123,55 @@ func (r *UserRepo) SetIsRider(ctx context.Context, userID uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, query, userID)
 	return err
 }
+
+// Admin methods
+
+func (r *UserRepo) Suspend(ctx context.Context, userID uuid.UUID, reason string) error {
+	query := `UPDATE users SET is_suspended = true, suspension_reason = $2, updated_at = NOW() WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, userID, reason)
+	return err
+}
+
+func (r *UserRepo) Unsuspend(ctx context.Context, userID uuid.UUID) error {
+	query := `UPDATE users SET is_suspended = false, suspension_reason = NULL, updated_at = NOW() WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, userID)
+	return err
+}
+
+func (r *UserRepo) VerifySeller(ctx context.Context, userID uuid.UUID) error {
+	query := `UPDATE users SET seller_verified = true, seller_verified_at = NOW(), updated_at = NOW() WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, userID)
+	return err
+}
+
+func (r *UserRepo) List(ctx context.Context, filters interface{}, limit, offset int) ([]*domain.User, error) {
+	query := `SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+	var users []*domain.User
+	err := r.db.SelectContext(ctx, &users, query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+func (r *UserRepo) GetStatistics(ctx context.Context) (*repository.UserStatistics, error) {
+	query := `
+		SELECT 
+			COUNT(*) as total_users,
+			COUNT(*) FILTER (WHERE is_seller = true) as total_sellers,
+			COUNT(*) FILTER (WHERE is_buyer = true) as total_buyers,
+			COUNT(*) FILTER (WHERE is_rider = true) as total_riders,
+			COUNT(*) FILTER (WHERE is_suspended = true) as suspended_users
+		FROM users
+	`
+	var stats repository.UserStatistics
+	err := r.db.GetContext(ctx, &stats, query)
+	if err != nil {
+		return nil, err
+	}
+	return &stats, nil
+}
+
 type OTPRepo struct {
 	db *sqlx.DB
 }

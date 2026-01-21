@@ -65,11 +65,13 @@ func main() {
 	paymentRequestRepo := postgres.NewPaymentRequestRepo(db)
 	deliveryZoneRepo := postgres.NewDeliveryZoneRepo(db)
 	riderOfferRepo := postgres.NewRiderJobOfferRepo(db)
+	platformSettingsRepo := postgres.NewPlatformSettingsRepo(db)
 
 	// Initialize services
 	walletService := service.NewWalletService(walletRepo, walletTxRepo, log)
-	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, nil, cfg, log)
+	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, platformSettingsRepo, nil, cfg, log)
 	escrowService := service.NewEscrowService(escrowRepo, walletService, feeCalculator, cfg, log)
+
 
 	// Initialize distributed lock
 	distributedLock := redisrepo.NewDistributedLock(redisClient.Client)

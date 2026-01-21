@@ -395,14 +395,6 @@ type JobOfferResponse struct {
 	OfferedAt     string    `json:"offered_at"`
 }
 
-func jobOfferToResponse(o *domain.RiderJobOffer) JobOfferResponse {
-	return JobOfferResponse{
-		ID:            o.ID,
-		DeliveryJobID: o.DeliveryJobID,
-		DistanceKM:    o.DistanceKM,
-		OfferedAt:     o.OfferedAt.Format("2006-01-02T15:04:05Z07:00"),
-	}
-}
 
 type DeliveryJobResponse struct {
 	ID                  uuid.UUID                  `json:"id"`

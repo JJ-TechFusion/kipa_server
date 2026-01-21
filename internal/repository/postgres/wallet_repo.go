@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"time"
+
+	"kipa/internal/domain"
+	"kipa/internal/repository"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"kipa/internal/domain"
-	"kipa/internal/repository"
 )
 type WalletRepo struct {
 	db *sqlx.DB
@@ -234,4 +237,37 @@ func (r *WalletTransactionRepo) IdempotencyKeyExists(ctx context.Context, key st
 	query := `SELECT EXISTS(SELECT 1 FROM wallet_transactions WHERE idempotency_key = $1)`
 	err := r.db.GetContext(ctx, &exists, query, key)
 	return exists, err
+}
+
+func (r *WalletTransactionRepo) GetRevenueAnalytics(ctx context.Context, startDate, endDate *time.Time) (*repository.RevenueAnalytics, error) {
+	query := `
+		SELECT 
+			COALESCE(SUM(CASE WHEN type = 'platform_fee' THEN amount ELSE 0 END), 0) as total_revenue,
+			COALESCE(SUM(CASE WHEN type = 'platform_fee' AND reference_type = 'buyer_fee' THEN amount ELSE 0 END), 0) as buyer_fees,
+			COALESCE(SUM(CASE WHEN type = 'platform_fee' AND reference_type = 'seller_fee' THEN amount ELSE 0 END), 0) as seller_fees,
+			COALESCE(SUM(CASE WHEN type = 'delivery_payout' THEN amount ELSE 0 END), 0) as delivery_fees,
+			COUNT(CASE WHEN type = 'platform_fee' THEN 1 END) as total_transactions
+		FROM wallet_transactions
+		WHERE 1=1`
+
+	args := []interface{}{}
+	argNum := 1
+
+	if startDate != nil {
+		query += fmt.Sprintf(" AND created_at >= $%d", argNum)
+		args = append(args, *startDate)
+		argNum++
+	}
+	if endDate != nil {
+		query += fmt.Sprintf(" AND created_at <= $%d", argNum)
+		args = append(args, *endDate)
+	}
+
+	var analytics repository.RevenueAnalytics
+	err := r.db.GetContext(ctx, &analytics, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return &analytics, nil
 }

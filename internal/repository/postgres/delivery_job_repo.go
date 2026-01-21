@@ -332,6 +332,24 @@ func (r *DeliveryJobRepo) GetDropoffCoordinates(ctx context.Context, jobID uuid.
 
 	return &coords, nil
 }
+
+func (r *DeliveryJobRepo) GetCompletedTodayByRiderID(ctx context.Context, riderID uuid.UUID) (int, error) {
+	var count int
+	query := `
+		SELECT COUNT(*) FROM delivery_jobs
+		WHERE rider_id = $1
+		AND status = 'delivered'
+		AND delivered_at >= CURRENT_DATE
+		AND delivered_at < CURRENT_DATE + INTERVAL '1 day'`
+
+	err := r.db.GetContext(ctx, &count, query, riderID)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
 type RiderJobOfferRepo struct {
 	db *sqlx.DB
 }

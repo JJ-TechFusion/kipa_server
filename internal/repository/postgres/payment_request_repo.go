@@ -306,7 +306,21 @@ func (r *PaymentRequestRepo) IncrementCurrentUses(ctx context.Context, id uuid.U
 
 	return nil
 }
+
+func (r *PaymentRequestRepo) GetAll(ctx context.Context, limit, offset int) ([]*domain.PaymentRequest, error) {
+	var requests []*domain.PaymentRequest
+	query := `SELECT * FROM payment_requests ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+
+	err := r.db.SelectContext(ctx, &requests, query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	return requests, nil
+}
+
 type PaymentRequestEventRepo struct {
+
 	db *sqlx.DB
 }
 

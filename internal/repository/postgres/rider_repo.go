@@ -229,6 +229,44 @@ func (r *RiderProfileRepo) RecordCommissionPayment(ctx context.Context, id uuid.
 	_, err := r.db.ExecContext(ctx, query, id, now)
 	return err
 }
+
+// Admin methods
+
+func (r *RiderProfileRepo) GetByStatus(ctx context.Context, status domain.RiderStatus, limit, offset int) ([]*domain.RiderProfile, error) {
+	query := `
+		SELECT * FROM rider_profiles 
+		WHERE status = $1 
+		ORDER BY created_at DESC 
+		LIMIT $2 OFFSET $3
+	`
+	var profiles []*domain.RiderProfile
+	err := r.db.SelectContext(ctx, &profiles, query, status, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return profiles, nil
+}
+
+func (r *RiderProfileRepo) GetStatistics(ctx context.Context) (*repository.RiderStatistics, error) {
+	query := `
+		SELECT 
+			COUNT(*) as total_riders,
+			COUNT(*) FILTER (WHERE status = 'verified') as verified_riders,
+			COUNT(*) FILTER (WHERE status = 'pending_verification') as pending_riders,
+			COUNT(*) FILTER (WHERE status = 'suspended') as suspended_riders,
+			COUNT(*) FILTER (WHERE is_online = true AND status = 'verified') as online_riders,
+			COALESCE(AVG(rating) FILTER (WHERE total_deliveries > 0), 0) as average_rating,
+			COALESCE(SUM(total_deliveries), 0) as total_deliveries
+		FROM rider_profiles
+	`
+	var stats repository.RiderStatistics
+	err := r.db.GetContext(ctx, &stats, query)
+	if err != nil {
+		return nil, err
+	}
+	return &stats, nil
+}
+
 type DeliveryZoneRepo struct {
 	db *sqlx.DB
 }

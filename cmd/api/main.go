@@ -77,6 +77,7 @@ func main() {
 	riderProfileRepo := postgres.NewRiderProfileRepo(pgClient.DB)
 	riderJobOfferRepo := postgres.NewRiderJobOfferRepo(pgClient.DB)
 	deliveryZoneRepo := postgres.NewDeliveryZoneRepo(pgClient.DB)
+	platformSettingsRepo := postgres.NewPlatformSettingsRepo(pgClient.DB)
 
 	// Bank/wallet funding repositories
 	bankAccountRepo := postgres.NewBankAccountRepo(pgClient.DB)
@@ -133,8 +134,8 @@ func main() {
 		}, logger)
 	}
 
-	// Fee calculator service (uses Google Maps for road distance)
-	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, mapsClient, cfg, logger)
+	// Fee calculator service (uses Google Maps for road distance + DB settings)
+	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, platformSettingsRepo, mapsClient, cfg, logger)
 
 	// Wallet service
 	walletService := service.NewWalletService(walletRepo, walletTxRepo, logger)
@@ -219,9 +220,33 @@ func main() {
 	// Upload service
 	uploadService := service.NewUploadService(s3Client, logger)
 
+	// Audit log repository
+	auditLogRepo := postgres.NewAuditLogRepo(pgClient.DB)
+
+	// Dispute repository
+	disputeRepo := postgres.NewDisputeRepo(pgClient.DB)
+
+	// Admin service
+	adminService := service.NewAdminService(
+		userRepo,
+		riderProfileRepo,
+		platformSettingsRepo,
+		walletTxRepo,
+		walletRepo,
+		prRepo,
+		deliveryJobRepo,
+		auditLogRepo,
+		disputeRepo,
+		escrowRepo,
+		logger,
+	)
+
+
+
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
+	adminMiddleware := middleware.NewAdminMiddleware(userRepo)
 
 	// New handlers for platform features
 	prHandler := handler.NewPaymentRequestHandler(prService)
@@ -241,6 +266,7 @@ func main() {
 	sellerHandler := handler.NewSellerHandler(orderService, prService, escrowService, deliveryJobRepo)
 	errandHandler := handler.NewErrandHandler(errandService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
+	adminHandler := handler.NewAdminHandler(adminService)
 
 	// Setup Gin router
 	if cfg.Server.Environment == "production" {
@@ -271,6 +297,7 @@ func main() {
 	walletFundingHandler.RegisterRoutes(v1, authMiddleware)
 	webhookHandler.RegisterRoutes(v1)
 	uploadHandler.RegisterRoutes(v1, authMiddleware)
+	adminHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 
 	// WebSocket handler
 	wsHub := websocket.NewHub(logger)
