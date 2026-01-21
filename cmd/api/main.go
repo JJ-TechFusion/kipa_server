@@ -18,6 +18,7 @@ import (
 	"kipa/internal/database"
 	"kipa/internal/handler"
 	"kipa/internal/handler/middleware"
+	"kipa/internal/integration/fcm"
 	"kipa/internal/integration/maps"
 	"kipa/internal/integration/paystack"
 	"kipa/internal/integration/sms"
@@ -95,6 +96,10 @@ func main() {
 	// Errand repository
 	errandRepo := postgres.NewErrandRepo(pgClient.DB)
 
+	// Notification repositories
+	deviceTokenRepo := postgres.NewDeviceTokenRepo(pgClient.DB)
+	notificationLogRepo := postgres.NewNotificationLogRepo(pgClient.DB)
+
 	// Initialize utilities
 	hasher := util.NewBcryptHasher(cfg.OTP.BcryptCost)
 	otpGenerator := util.NewSecureOTPGenerator()
@@ -110,6 +115,17 @@ func main() {
 	s3Client, err := storage.NewS3Client(&cfg.S3)
 	if err != nil {
 		logger.Warn("Failed to initialize S3 client, uploads will be disabled", zap.Error(err))
+	}
+
+	// Initialize FCM client (optional - if credentials not available, notifications will be logged only)
+	var fcmClient *fcm.Client
+	if cfg.Firebase.CredentialsPath != "" {
+		fcmClient, err = fcm.NewClient(cfg.Firebase.CredentialsPath, logger)
+		if err != nil {
+			logger.Warn("Failed to initialize FCM client, push notifications will be disabled", zap.Error(err))
+		}
+	} else {
+		logger.Info("FCM credentials not configured, push notifications disabled")
 	}
 
 	// Initialize services
@@ -157,7 +173,16 @@ func main() {
 	prService := service.NewPaymentRequestService(prRepo, prEventRepo, userRepo, deliveryJobRepo, feeCalculator, cfg, logger)
 
 	// Escrow service
+	// Escrow service
 	escrowService := service.NewEscrowService(escrowRepo, walletService, feeCalculator, cfg, logger)
+
+	// Notification service
+	notificationService := service.NewNotificationService(
+		fcmClient,
+		deviceTokenRepo,
+		notificationLogRepo,
+		logger,
+	)
 
 	// Order service (for payment processing)
 	orderService := service.NewOrderService(
@@ -166,6 +191,7 @@ func main() {
 		userRepo,
 		escrowService,
 		walletService,
+		notificationService,
 		paystackClient,
 		cfg,
 		logger,
@@ -191,10 +217,15 @@ func main() {
 	// Location service handles location updates, ETA, and storage
 	locationHistoryRepo := postgres.NewLocationHistoryRepo(pgClient.DB)
 	djRepo := deliveryJobRepo.(*postgres.DeliveryJobRepo)
+	// WebSocket hub
+	wsHub := websocket.NewHub(logger)
+	go wsHub.Run()
+
 	locationService := service.NewLocationService(
 		locationHistoryRepo,
 		djRepo,
 		mapsClient,
+		wsHub,
 		&service.LocationServiceConfig{
 			ETAThrottleSeconds: 30,
 			RateLimitMs:        1000,
@@ -202,7 +233,13 @@ func main() {
 		logger,
 	)
 
-	// Rider service
+	// Upload service
+	uploadService := service.NewUploadService(s3Client, logger)
+
+	// Notification service
+
+
+	// Rider service (needs notification service)
 	riderService := service.NewRiderService(
 		riderProfileRepo,
 		deliveryJobRepo,
@@ -213,12 +250,10 @@ func main() {
 		commissionService,
 		errandService,
 		locationService,
+		notificationService,
 		logger,
 		cfg,
 	)
-
-	// Upload service
-	uploadService := service.NewUploadService(s3Client, logger)
 
 	// Audit log repository
 	auditLogRepo := postgres.NewAuditLogRepo(pgClient.DB)
@@ -238,6 +273,7 @@ func main() {
 		auditLogRepo,
 		disputeRepo,
 		escrowRepo,
+		notificationService,
 		logger,
 	)
 
@@ -267,6 +303,7 @@ func main() {
 	errandHandler := handler.NewErrandHandler(errandService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
 	adminHandler := handler.NewAdminHandler(adminService)
+	notificationHandler := handler.NewNotificationHandler(notificationService, logger)
 
 	// Setup Gin router
 	if cfg.Server.Environment == "production" {
@@ -299,9 +336,12 @@ func main() {
 	uploadHandler.RegisterRoutes(v1, authMiddleware)
 	adminHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 
-	// WebSocket handler
-	wsHub := websocket.NewHub(logger)
-	go wsHub.Run()
+	// Notification routes (authenticated users)
+	usersRoutes := v1.Group("/users")
+	usersRoutes.Use(authMiddleware.RequireAuth())
+	notificationHandler.RegisterRoutes(usersRoutes)
+
+
 
 
 

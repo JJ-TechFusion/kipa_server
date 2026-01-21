@@ -53,17 +53,18 @@ type RiderEarnings struct {
 }
 
 type RiderServiceImpl struct {
-	riderRepo         repository.RiderProfileRepository
-	jobRepo           repository.DeliveryJobRepository
-	offerRepo         repository.RiderJobOfferRepository
-	prRepo            repository.PaymentRequestRepository
-	escrowService     EscrowService
-	walletService     WalletService
-	commissionService RiderCommissionService
-	errandService     ErrandService
-	locationService   LocationService
-	logger            *zap.Logger
-	config            *config.Config
+	riderRepo            repository.RiderProfileRepository
+	jobRepo              repository.DeliveryJobRepository
+	offerRepo            repository.RiderJobOfferRepository
+	prRepo               repository.PaymentRequestRepository
+	escrowService        EscrowService
+	walletService        WalletService
+	commissionService    RiderCommissionService
+	errandService        ErrandService
+	locationService      LocationService
+	notificationService  NotificationService
+	logger               *zap.Logger
+	config               *config.Config
 }
 
 func NewRiderService(
@@ -76,21 +77,23 @@ func NewRiderService(
 	commissionService RiderCommissionService,
 	errandService ErrandService,
 	locationService LocationService,
+	notificationService NotificationService,
 	logger *zap.Logger,
 	config *config.Config,
 ) RiderService {
 	return &RiderServiceImpl{
-		riderRepo:         riderRepo,
-		jobRepo:           jobRepo,
-		offerRepo:         offerRepo,
-		prRepo:            prRepo,
-		escrowService:     escrowService,
-		walletService:     walletService,
-		commissionService: commissionService,
-		errandService:     errandService,
-		locationService:   locationService,
-		logger:            logger,
-		config:            config,
+		riderRepo:            riderRepo,
+		jobRepo:              jobRepo,
+		offerRepo:            offerRepo,
+		prRepo:               prRepo,
+		escrowService:        escrowService,
+		walletService:        walletService,
+		commissionService:    commissionService,
+		errandService:        errandService,
+		locationService:      locationService,
+		notificationService:  notificationService,
+		logger:               logger,
+		config:               config,
 	}
 }
 func (s *RiderServiceImpl) UpdateLocation(ctx context.Context, userID uuid.UUID, lat, lng, heading, speed float64) error {
@@ -289,6 +292,18 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 		zap.String("job_id", jobID.String()),
 	)
 
+	// Notify buyer and seller that rider is assigned
+	if s.notificationService != nil {
+		pr, _ := s.prRepo.GetByID(ctx, job.PaymentRequestID)
+		if pr != nil {
+			data := map[string]string{"job_id": jobID.String(), "payment_request_id": pr.ID.String()}
+			if pr.BuyerID != nil {
+				go s.notificationService.SendToUser(ctx, *pr.BuyerID, "Rider Assigned", "A rider is on the way to pick up your order", data, domain.NotificationRiderAssigned)
+			}
+			go s.notificationService.SendToUser(ctx, pr.SellerID, "Rider Assigned", "A rider is on the way to collect the item", data, domain.NotificationRiderAssigned)
+		}
+	}
+
 	return job, nil
 }
 func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, error) {
@@ -350,6 +365,15 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 	s.logger.Info("rider confirmed pickup",
 		zap.String("job_id", jobID.String()),
 	)
+
+	// Notify buyer that order is picked up
+	if s.notificationService != nil {
+		pr, _ := s.prRepo.GetByID(ctx, job.PaymentRequestID)
+		if pr != nil && pr.BuyerID != nil {
+			data := map[string]string{"job_id": jobID.String()}
+			go s.notificationService.SendToUser(ctx, *pr.BuyerID, "Order Picked Up", "Your order is on the way!", data, domain.NotificationOrderPickedUp)
+		}
+	}
 
 	return nil
 }
@@ -432,6 +456,18 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 		zap.String("job_id", jobID.String()),
 		zap.Float64("delivery_fee", job.DeliveryFee),
 	)
+
+	// Notify buyer and seller that order is delivered
+	if s.notificationService != nil {
+		pr, _ := s.prRepo.GetByID(ctx, job.PaymentRequestID)
+		if pr != nil {
+			data := map[string]string{"job_id": jobID.String(), "payment_request_id": pr.ID.String()}
+			if pr.BuyerID != nil {
+				go s.notificationService.SendToUser(ctx, *pr.BuyerID, "Order Delivered", "Your order has been delivered. Please confirm receipt.", data, domain.NotificationOrderDelivered)
+			}
+			go s.notificationService.SendToUser(ctx, pr.SellerID, "Order Delivered", "Your item has been delivered to the buyer", data, domain.NotificationOrderDelivered)
+		}
+	}
 
 	return nil
 }

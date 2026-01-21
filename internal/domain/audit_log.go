@@ -6,7 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// AuditAction represents types of admin actions
 type AuditAction string
 
 const (
@@ -22,9 +21,9 @@ const (
 	AuditActionResolveDispute   AuditAction = "resolve_dispute"
 	AuditActionProcessRefund    AuditAction = "process_refund"
 	AuditActionAdjustWallet     AuditAction = "adjust_wallet"
+	AuditActionBroadcastNotification AuditAction = "broadcast_notification"
 )
 
-// AuditTargetType represents the entity being acted upon
 type AuditTargetType string
 
 const (
@@ -34,9 +33,9 @@ const (
 	AuditTargetDispute        AuditTargetType = "dispute"
 	AuditTargetWallet         AuditTargetType = "wallet"
 	AuditTargetSettings       AuditTargetType = "settings"
+	AuditTargetPlatform       AuditTargetType = "platform"
 )
 
-// AuditLog represents an admin action audit log entry
 type AuditLog struct {
 	ID         uuid.UUID       `json:"id"`
 	AdminID    uuid.UUID       `json:"admin_id"`

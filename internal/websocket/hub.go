@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"kipa/internal/domain"
 )
 type Hub struct {
 	clients map[uuid.UUID]map[*Client]bool
@@ -131,8 +133,8 @@ func (h *Hub) HandleLocationUpdate(client *Client, msg *LocationUpdate) {
 	if h.locationHandler != nil {
 		go h.locationHandler(client.UserID, msg.JobID, msg.Lat, msg.Lng, msg.Heading, msg.Speed)
 	}
-	h.BroadcastToJob(msg.JobID, &RiderLocation{
-		Type:      TypeRiderLocation,
+	h.BroadcastToJob(msg.JobID, &domain.RiderLocation{
+		Type:      domain.TypeRiderLocation,
 		JobID:     msg.JobID,
 		RiderID:   client.UserID.String(),
 		Lat:       msg.Lat,

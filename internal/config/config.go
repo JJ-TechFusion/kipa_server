@@ -19,6 +19,11 @@ type Config struct {
 	Worker     WorkerConfig
 	GoogleMaps GoogleMapsConfig
 	S3         S3Config
+	Firebase   FirebaseConfig
+}
+
+type FirebaseConfig struct {
+	CredentialsPath string
 }
 
 type WorkerConfig struct {

@@ -55,6 +55,7 @@ type OrderServiceImpl struct {
 	escrowService EscrowService
 	walletService WalletService
 	paystack      *paystack.Client
+	notificationService NotificationService
 	config        *config.Config
 	logger        *zap.Logger
 }
@@ -65,6 +66,7 @@ func NewOrderService(
 	userRepo repository.UserRepository,
 	escrowService EscrowService,
 	walletService WalletService,
+	notificationService NotificationService,
 	paystackClient *paystack.Client,
 	cfg *config.Config,
 	logger *zap.Logger,
@@ -75,6 +77,7 @@ func NewOrderService(
 		userRepo:      userRepo,
 		escrowService: escrowService,
 		walletService: walletService,
+		notificationService: notificationService,
 		paystack:      paystackClient,
 		config:        cfg,
 		logger:        logger,
@@ -242,6 +245,24 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 		zap.String("reference", reference),
 	)
 
+	// Notify seller
+	go func() {
+		err := s.notificationService.SendToUser(
+			context.Background(),
+			pr.SellerID,
+			"Payment Received",
+			fmt.Sprintf("You have received a payment of %.2f for %s", order.TotalAmount, pr.ItemName),
+			map[string]string{
+				"order_id": order.ID.String(),
+				"type":     string(domain.NotificationOrderPaid),
+			},
+			domain.NotificationOrderPaid,
+		)
+		if err != nil {
+			s.logger.Warn("failed to notify seller of payment", zap.Error(err))
+		}
+	}()
+
 	return &VerifyPaymentResponse{
 		OrderID:       order.ID,
 		PaymentStatus: string(order.PaymentStatus),
@@ -356,6 +377,24 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 		zap.String("order_id", order.ID.String()),
 		zap.String("escrow_id", escrow.ID.String()),
 	)
+
+	// Notify seller
+	go func() {
+		err := s.notificationService.SendToUser(
+			context.Background(),
+			pr.SellerID,
+			"Payment Received",
+			fmt.Sprintf("You have received a wallet payment of %.2f for %s", order.TotalAmount, pr.ItemName),
+			map[string]string{
+				"order_id": order.ID.String(),
+				"type":     string(domain.NotificationOrderPaid),
+			},
+			domain.NotificationOrderPaid,
+		)
+		if err != nil {
+			s.logger.Warn("failed to notify seller of payment", zap.Error(err))
+		}
+	}()
 
 	return &WalletPaymentResponse{
 		OrderID:  order.ID,

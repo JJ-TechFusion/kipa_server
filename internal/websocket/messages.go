@@ -35,17 +35,7 @@ type Unsubscribe struct {
 	Type  string `json:"type"`
 	JobID string `json:"job_id"`
 }
-type RiderLocation struct {
-	Type      string  `json:"type"`
-	JobID     string  `json:"job_id"`
-	RiderID   string  `json:"rider_id"`
-	Lat       float64 `json:"lat"`
-	Lng       float64 `json:"lng"`
-	Heading   float64 `json:"heading"`
-	Speed     float64 `json:"speed"`
-	ETA       int     `json:"eta_minutes,omitempty"`
-	Timestamp int64   `json:"ts"`
-}
+
 type JobStatusUpdate struct {
 	Type   string `json:"type"`
 	JobID  string `json:"job_id"`

@@ -61,6 +61,9 @@ type AdminService interface {
 	ProcessRefund(ctx context.Context, disputeID uuid.UUID, refundType string, amount float64, reason string, adminID uuid.UUID) error
 	GetDisputeStatistics(ctx context.Context) (*repository.DisputeStatistics, error)
 
+	// Notification Management
+	SendBroadcast(ctx context.Context, title, body, topic string, adminID uuid.UUID) error
+
 	// Commission Management
 	GetCommissionSettings(ctx context.Context) (*domain.CommissionSettings, error)
 	UpdateCommissionSettings(ctx context.Context, settings *domain.CommissionSettings, adminID uuid.UUID) error
@@ -72,44 +75,45 @@ type AdminService interface {
 }
 
 type UserFilters struct {
-	IsSeller   *bool
-	IsBuyer    *bool
-	IsRider    *bool
+	IsSeller    *bool
+	IsBuyer     *bool
+	IsRider     *bool
 	IsSuspended *bool
 	PhoneNumber *string
 }
 
 type RiderStatistics struct {
-	TotalRiders       int     `json:"total_riders"`
-	VerifiedRiders    int     `json:"verified_riders"`
-	PendingRiders     int     `json:"pending_riders"`
-	SuspendedRiders   int     `json:"suspended_riders"`
-	OnlineRiders      int     `json:"online_riders"`
-	AverageRating     float64 `json:"average_rating"`
-	TotalDeliveries   int     `json:"total_deliveries"`
+	TotalRiders     int     `json:"total_riders"`
+	VerifiedRiders  int     `json:"verified_riders"`
+	PendingRiders   int     `json:"pending_riders"`
+	SuspendedRiders int     `json:"suspended_riders"`
+	OnlineRiders    int     `json:"online_riders"`
+	AverageRating   float64 `json:"average_rating"`
+	TotalDeliveries int     `json:"total_deliveries"`
 }
 
 type UserStatistics struct {
-	TotalUsers      int `json:"total_users"`
-	TotalSellers    int `json:"total_sellers"`
-	TotalBuyers     int `json:"total_buyers"`
-	TotalRiders     int `json:"total_riders"`
-	SuspendedUsers  int `json:"suspended_users"`
+	TotalUsers     int `json:"total_users"`
+	TotalSellers   int `json:"total_sellers"`
+	TotalBuyers    int `json:"total_buyers"`
+	TotalRiders    int `json:"total_riders"`
+	SuspendedUsers int `json:"suspended_users"`
 }
 
 type AdminServiceImpl struct {
-	userRepo        repository.UserRepository
-	riderRepo       repository.RiderProfileRepository
-	settingsRepo    repository.PlatformSettingsRepository
-	walletTxRepo    repository.WalletTransactionRepository
-	walletRepo      repository.WalletRepository
-	prRepo          repository.PaymentRequestRepository
-	deliveryJobRepo repository.DeliveryJobRepository
-	auditLogRepo    repository.AuditLogRepository
-	disputeRepo     repository.DisputeRepository
-	escrowRepo      repository.EscrowRepository
-	redisClient     RedisHealthChecker
-	logger          *zap.Logger
+	userRepo            repository.UserRepository
+	riderRepo           repository.RiderProfileRepository
+	settingsRepo        repository.PlatformSettingsRepository
+	walletTxRepo        repository.WalletTransactionRepository
+	walletRepo          repository.WalletRepository
+	prRepo              repository.PaymentRequestRepository
+	deliveryJobRepo     repository.DeliveryJobRepository
+	auditLogRepo        repository.AuditLogRepository
+	disputeRepo         repository.DisputeRepository
+	escrowRepo          repository.EscrowRepository
+	redisClient         RedisHealthChecker
+	notificationService NotificationService
+	logger              *zap.Logger
 }
 
 type RedisHealthChecker interface {
@@ -124,21 +128,20 @@ type ActiveDeliveriesStats struct {
 	AverageDistance float64 `json:"average_distance_km"`
 }
 
-
 type RiderPerformance struct {
-	RiderID          uuid.UUID `json:"rider_id"`
-	RiderName        string    `json:"rider_name"`
-	TotalDeliveries  int       `json:"total_deliveries"`
-	CompletedToday   int       `json:"completed_today"`
-	AverageRating    float64   `json:"average_rating"`
-	TotalEarnings    float64   `json:"total_earnings"`
-	OnlineStatus     bool      `json:"online_status"`
+	RiderID         uuid.UUID `json:"rider_id"`
+	RiderName       string    `json:"rider_name"`
+	TotalDeliveries int       `json:"total_deliveries"`
+	CompletedToday  int       `json:"completed_today"`
+	AverageRating   float64   `json:"average_rating"`
+	TotalEarnings   float64   `json:"total_earnings"`
+	OnlineStatus    bool      `json:"online_status"`
 }
 
 type PaymentRequestFilters struct {
-	Status      *domain.PaymentRequestStatus
-	SellerID    *uuid.UUID
-	BuyerID     *uuid.UUID
+	Status       *domain.PaymentRequestStatus
+	SellerID     *uuid.UUID
+	BuyerID      *uuid.UUID
 	DeliveryType *domain.DeliveryType
 }
 
@@ -165,23 +168,24 @@ func NewAdminService(
 	auditLogRepo repository.AuditLogRepository,
 	disputeRepo repository.DisputeRepository,
 	escrowRepo repository.EscrowRepository,
+	notificationService NotificationService,
 	logger *zap.Logger,
 ) AdminService {
 	return &AdminServiceImpl{
-		userRepo:        userRepo,
-		riderRepo:       riderRepo,
-		settingsRepo:    settingsRepo,
-		walletTxRepo:    walletTxRepo,
-		walletRepo:      walletRepo,
-		prRepo:          prRepo,
-		deliveryJobRepo: deliveryJobRepo,
-		auditLogRepo:    auditLogRepo,
-		disputeRepo:     disputeRepo,
-		escrowRepo:      escrowRepo,
-		logger:          logger,
+		userRepo:            userRepo,
+		riderRepo:           riderRepo,
+		settingsRepo:        settingsRepo,
+		walletTxRepo:        walletTxRepo,
+		walletRepo:          walletRepo,
+		prRepo:              prRepo,
+		deliveryJobRepo:     deliveryJobRepo,
+		auditLogRepo:        auditLogRepo,
+		disputeRepo:         disputeRepo,
+		escrowRepo:          escrowRepo,
+		notificationService: notificationService,
+		logger:              logger,
 	}
 }
-
 
 // Rider Management
 
@@ -198,7 +202,6 @@ func (s *AdminServiceImpl) VerifyRider(ctx context.Context, riderID uuid.UUID, a
 	if err := s.riderRepo.UpdateStatus(ctx, riderID, domain.RiderStatusVerified); err != nil {
 		return fmt.Errorf("failed to update rider status: %w", err)
 	}
-
 
 	if err := s.userRepo.SetIsRider(ctx, rider.UserID); err != nil {
 		s.logger.Warn("failed to set is_rider for verified rider",
@@ -609,7 +612,6 @@ func (s *AdminServiceImpl) GetExpiredPaymentRequests(ctx context.Context, limit,
 	return s.prRepo.GetExpiredLinks(ctx)
 }
 
-
 func (s *AdminServiceImpl) CheckDatabaseHealth(ctx context.Context) (*HealthStatus, error) {
 
 	_, err := s.userRepo.GetStatistics(ctx)
@@ -650,9 +652,9 @@ func (s *AdminServiceImpl) CheckRedisHealth(ctx context.Context) (*HealthStatus,
 
 func (s *AdminServiceImpl) CheckExternalServices(ctx context.Context) (*ExternalServicesHealth, error) {
 	return &ExternalServicesHealth{
-		Paystack: s.checkHTTPEndpoint("https://api.paystack.co"),
+		Paystack:   s.checkHTTPEndpoint("https://api.paystack.co"),
 		GoogleMaps: s.checkHTTPEndpoint("https://maps.googleapis.com"),
-		Termii: s.checkHTTPEndpoint("https://api.ng.termii.com"),
+		Termii:     s.checkHTTPEndpoint("https://api.ng.termii.com"),
 	}, nil
 }
 
@@ -783,6 +785,20 @@ func (s *AdminServiceImpl) ResolveDispute(ctx context.Context, disputeID uuid.UU
 		zap.String("admin_id", adminID.String()),
 	)
 
+	// Notify buyer and seller of dispute resolution
+	if s.notificationService != nil {
+		escrow, _ := s.escrowRepo.GetByID(ctx, dispute.EscrowID)
+		if escrow != nil {
+			data := map[string]string{"dispute_id": disputeID.String(), "outcome": string(outcome)}
+
+			buyerMsg := fmt.Sprintf("Dispute for your order has been resolved: %s", outcome)
+			sellerMsg := fmt.Sprintf("Dispute for an order was resolved: %s", outcome)
+
+			go s.notificationService.SendToUser(ctx, escrow.BuyerID, "Dispute Resolved", buyerMsg, data, domain.NotificationDisputeResolved)
+			go s.notificationService.SendToUser(ctx, escrow.SellerID, "Dispute Resolved", sellerMsg, data, domain.NotificationDisputeResolved)
+		}
+	}
+
 	return nil
 }
 
@@ -819,19 +835,16 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 		newStatus = domain.EscrowStatusPartialRefund
 	}
 
-	
 	if s.walletRepo != nil && s.walletTxRepo != nil {
 		buyerWallet, err := s.walletRepo.GetOrCreate(ctx, escrow.BuyerID)
 		if err != nil {
 			return fmt.Errorf("failed to get or create buyer wallet: %w", err)
 		}
 
-
 		buyerWallet.Credit(refundAmount)
 		if err := s.walletRepo.Update(ctx, buyerWallet); err != nil {
 			return fmt.Errorf("failed to update buyer wallet: %w", err)
 		}
-
 
 		refundDesc := fmt.Sprintf("Refund for dispute: %s", reason)
 		buyerTx := &domain.WalletTransaction{
@@ -846,6 +859,13 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 			return fmt.Errorf("failed to create refund transaction: %w", err)
 		}
 
+		// Notify buyer about refund
+		if s.notificationService != nil {
+			data := map[string]string{"dispute_id": disputeID.String(), "amount": fmt.Sprintf("%.2f", refundAmount)}
+			msg := fmt.Sprintf("A refund of %.2f has been credited to your wallet: %s", refundAmount, reason)
+			go s.notificationService.SendToUser(ctx, escrow.BuyerID, "Refund Processed", msg, data, domain.NotificationRefundProcessed)
+		}
+
 		s.logger.Info("buyer wallet credited with refund",
 			zap.String("buyer_id", escrow.BuyerID.String()),
 			zap.Float64("refund_amount", refundAmount),
@@ -853,7 +873,6 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 		)
 	}
 
-	
 	if err := s.escrowRepo.UpdateStatus(ctx, escrow.ID, newStatus); err != nil {
 		return fmt.Errorf("failed to update escrow status: %w", err)
 	}
@@ -894,6 +913,35 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 	return nil
 }
 
+
+// Notification Management
+
+func (s *AdminServiceImpl) SendBroadcast(ctx context.Context, title, body, topic string, adminID uuid.UUID) error {
+	if s.notificationService == nil {
+		return fmt.Errorf("notification service not configured")
+	}
+
+	if topic == "" {
+		topic = "all_users" // Default topic
+	}
+
+	if err := s.notificationService.SendBroadcast(ctx, topic, title, body, nil); err != nil {
+		return fmt.Errorf("failed to send broadcast: %w", err)
+	}
+
+	s.logAdminAction(ctx, adminID, domain.AuditActionBroadcastNotification, domain.AuditTargetPlatform, nil, map[string]any{
+		"action": "broadcast_notification",
+		"title":  title,
+		"topic":  topic,
+	})
+
+	s.logger.Info("admin sent broadcast notification",
+		zap.String("admin_id", adminID.String()),
+		zap.String("topic", topic),
+	)
+
+	return nil
+}
 
 func (s *AdminServiceImpl) GetDisputeStatistics(ctx context.Context) (*repository.DisputeStatistics, error) {
 	if s.disputeRepo == nil {

@@ -12,8 +12,14 @@ import (
 	"kipa/internal/integration/maps"
 	"kipa/internal/repository/postgres"
 )
+
+type LocationBroadcaster interface {
+	BroadcastToJob(jobID string, msg interface{})
+}
+
 type LocationService interface {
 	HandleLocationUpdate(ctx context.Context, riderID uuid.UUID, jobID string, lat, lng, heading, speed float64)
+	RecordLocation(ctx context.Context, riderID uuid.UUID, jobID string, lat, lng, heading, speed float64)
 	CleanupOldLocations(ctx context.Context, olderThanDays int) (int64, error)
 }
 type LocationServiceImpl struct {
@@ -25,6 +31,7 @@ type LocationServiceImpl struct {
 	etaMu         sync.Mutex
 	lastUpdate map[string]time.Time
 	rateMu     sync.Mutex
+	broadcaster LocationBroadcaster
 
 	logger *zap.Logger
 }
@@ -36,6 +43,7 @@ func NewLocationService(
 	locationHistoryRepo *postgres.LocationHistoryRepo,
 	deliveryJobRepo *postgres.DeliveryJobRepo,
 	mapsClient maps.MapsClient,
+	broadcaster LocationBroadcaster,
 	cfg *LocationServiceConfig,
 	logger *zap.Logger,
 ) LocationService {
@@ -50,13 +58,35 @@ func NewLocationService(
 		locationHistoryRepo: locationHistoryRepo,
 		deliveryJobRepo:     deliveryJobRepo,
 		mapsClient:          mapsClient,
-		etaLastCalc:         make(map[string]time.Time),
 		etaThrottleMs:       cfg.ETAThrottleSeconds * 1000,
 		lastUpdate:          make(map[string]time.Time),
+		broadcaster:         broadcaster,
 		logger:              logger,
 	}
 }
+
+// HandleLocationUpdate handles location updates from external sources (e.g. HTTP)
+// It checks rate limits, calculates ETA, saves to DB, AND broadcasts to WebSocket
 func (s *LocationServiceImpl) HandleLocationUpdate(ctx context.Context, riderID uuid.UUID, jobID string, lat, lng, heading, speed float64) {
+	s.RecordLocation(ctx, riderID, jobID, lat, lng, heading, speed)
+
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastToJob(jobID, &domain.RiderLocation{
+			Type:      domain.TypeRiderLocation,
+			JobID:     jobID,
+			RiderID:   riderID.String(),
+			Lat:       lat,
+			Lng:       lng,
+			Heading:   heading,
+			Speed:     speed,
+			Timestamp: time.Now().Unix(),
+		})
+	}
+}
+
+// RecordLocation handles location logic: rate limiting, ETA calculation, and DB storage
+// This is called by HandleLocationUpdate (HTTP) and directly by the WebSocket Hub (to avoid loops)
+func (s *LocationServiceImpl) RecordLocation(ctx context.Context, riderID uuid.UUID, jobID string, lat, lng, heading, speed float64) {
 	clientKey := riderID.String()
 	s.rateMu.Lock()
 	lastUpdate, exists := s.lastUpdate[clientKey]

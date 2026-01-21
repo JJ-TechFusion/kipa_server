@@ -169,7 +169,19 @@ Running Migrations
   docker compose up -d
 
   # View logs
-  docker compose logs -f api
+  cd deployments/docker && docker compose logs -f api
+
+  # Start services
+cd deployments/docker && docker-compose up -d
+
+# Or from root with -f flag
+docker-compose -f deployments/docker/docker-compose.yml up -d
+
+# View logs
+cd deployments/docker && docker-compose logs api
+
+# Stop services
+cd deployments/docker && docker-compose down
 
   # Stop everything
   docker compose down

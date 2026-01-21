@@ -36,6 +36,9 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			riders.GET("/statistics", h.GetRiderStatistics)
 		}
 
+		// Notification Management
+		admin.POST("/notifications/broadcast", h.BroadcastNotification)
+
 		// User Management
 		users := admin.Group("/users")
 		{
@@ -785,4 +788,31 @@ func (h *AdminHandler) GetWalletTransactions(c *gin.Context) {
 		"transactions": transactions,
 		"count":        len(transactions),
 	})
+}
+
+type BroadcastNotificationRequest struct {
+	Title string `json:"title" binding:"required"`
+	Body  string `json:"body" binding:"required"`
+	Topic string `json:"topic"` // e.g. "all_users", "all_riders", "all_sellers"
+}
+
+func (h *AdminHandler) BroadcastNotification(c *gin.Context) {
+	adminID, exists := c.Get("user_id")
+	if !exists {
+		h.handleError(c, domain.ErrUnauthorized)
+		return
+	}
+
+	var req BroadcastNotificationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.adminService.SendBroadcast(c.Request.Context(), req.Title, req.Body, req.Topic, adminID.(uuid.UUID)); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Broadcast sent successfully"})
 }

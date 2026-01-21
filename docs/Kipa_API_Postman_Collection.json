@@ -235,6 +235,74 @@
 			]
 		},
 		{
+			"name": "Notifications",
+			"item": [
+				{
+					"name": "Register Device Token",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"fcm_device_token_here\",\n  \"platform\": \"android\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/device-token",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "device-token"]
+						},
+						"description": "Register FCM device token for push notifications"
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Device Token",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/users/device-token?token=fcm_device_token_here",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "users", "device-token"],
+							"query": [
+								{
+									"key": "token",
+									"value": "fcm_device_token_here"
+								}
+							]
+						},
+						"description": "Remove FCM device token (e.g. on logout)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
 			"name": "Payment Requests (Seller)",
 			"item": [
 				{
@@ -2276,6 +2344,41 @@
 						{"name": "Adjust User Wallet", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"adjustment_type\": \"credit\", \"amount\": 5000.0, \"reason\": \"Customer service compensation\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/wallets/user/{{target_user_id}}/adjust", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "wallets", "user", "{{target_user_id}}", "adjust"]}}, "response": []},
 						{"name": "Get Wallet Transactions", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/wallets/user/{{target_user_id}}/transactions", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "wallets", "user", "{{target_user_id}}", "transactions"]}}, "response": []}
 					]
+				},
+				{
+					"name": "Notification Management",
+					"item": [
+						{"name": "Broadcast Notification", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"title\": \"System Update\", \"body\": \"We will be down for maintenance.\", \"topic\": \"all_users\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/notifications/broadcast", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "notifications", "broadcast"]}}, "response": []}
+					]
+				}
+			]
+		},
+		{
+			"name": "Real-time Tracking",
+			"item": [
+				{
+					"name": "WebSocket Connection",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/ws",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "ws"]
+						},
+						"description": "Connect to WebSocket for real-time updates. Requires Authorization header or query param ?token=..."
+					},
+					"response": []
 				}
 			]
 		}
