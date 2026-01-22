@@ -251,3 +251,11 @@ type ErrandRepository interface {
 	AssignRider(ctx context.Context, errandID, riderID, jobID uuid.UUID) error
 	SetDeliveryJobID(ctx context.Context, errandID, jobID uuid.UUID) error
 }
+type ChatMessageRepository interface {
+	Create(ctx context.Context, msg *domain.ChatMessage) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.ChatMessage, error)
+	GetByJobID(ctx context.Context, jobID uuid.UUID, limit int, beforeID *uuid.UUID) ([]*domain.ChatMessage, error)
+	MarkDelivered(ctx context.Context, id uuid.UUID) error
+	MarkReadByReceiver(ctx context.Context, jobID, receiverID uuid.UUID) error
+	GetUnreadCount(ctx context.Context, jobID, userID uuid.UUID) (int, error)
+}

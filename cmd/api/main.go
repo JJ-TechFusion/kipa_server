@@ -99,6 +99,7 @@ func main() {
 	// Notification repositories
 	deviceTokenRepo := postgres.NewDeviceTokenRepo(pgClient.DB)
 	notificationLogRepo := postgres.NewNotificationLogRepo(pgClient.DB)
+	chatRepo := postgres.NewChatMessageRepo(pgClient.DB)
 
 	// Initialize utilities
 	hasher := util.NewBcryptHasher(cfg.OTP.BcryptCost)
@@ -255,6 +256,16 @@ func main() {
 		cfg,
 	)
 
+	// Chat service
+	chatService := service.NewChatService(
+		chatRepo,
+		deliveryJobRepo,
+		prRepo,
+		riderProfileRepo,
+		notificationService,
+		logger,
+	)
+
 	// Audit log repository
 	auditLogRepo := postgres.NewAuditLogRepo(pgClient.DB)
 
@@ -304,6 +315,7 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(uploadService)
 	adminHandler := handler.NewAdminHandler(adminService)
 	notificationHandler := handler.NewNotificationHandler(notificationService, logger)
+	chatHandler := handler.NewChatHandler(chatService, logger)
 
 	// Setup Gin router
 	if cfg.Server.Environment == "production" {
@@ -335,6 +347,7 @@ func main() {
 	webhookHandler.RegisterRoutes(v1)
 	uploadHandler.RegisterRoutes(v1, authMiddleware)
 	adminHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
+	chatHandler.RegisterRoutes(v1, authMiddleware)
 
 	// Notification routes (authenticated users)
 	usersRoutes := v1.Group("/users")
@@ -348,6 +361,25 @@ func main() {
 	// Set up WebSocket location handler
 	wsHub.SetLocationHandler(func(riderID uuid.UUID, jobID string, lat, lng, heading, speed float64) {
 		locationService.HandleLocationUpdate(context.Background(), riderID, jobID, lat, lng, heading, speed)
+	})
+	
+	wsHub.SetChatHandler(func(senderID uuid.UUID, jobID, content, mediaURL, mediaType string) (string, int64, error) {
+		id, err := uuid.Parse(jobID)
+		if err != nil {
+			return "", 0, fmt.Errorf("invalid job ID")
+		}
+		
+		var mUrl *string
+		if mediaURL != "" {
+			mUrl = &mediaURL
+		}
+		
+		msg, err := chatService.SendMessage(context.Background(), senderID, id, content, mUrl, mediaType)
+		if err != nil {
+			return "", 0, err
+		}
+		
+		return msg.ID.String(), msg.CreatedAt.Unix(), nil
 	})
 
 	wsHandler := websocket.NewHandler(wsHub, authService, logger)

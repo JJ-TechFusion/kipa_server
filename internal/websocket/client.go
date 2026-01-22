@@ -144,6 +144,14 @@ func (c *Client) handleMessage(data []byte) {
 	case TypePing:
 		c.sendPong()
 
+	case TypeChatMessage:
+		var msg ChatMessagePayload
+		if err := json.Unmarshal(data, &msg); err != nil {
+			c.sendError("PARSE_ERROR", "Invalid chat message")
+			return
+		}
+		c.hub.HandleChatMessage(c, &msg)
+
 	default:
 		c.sendError("UNKNOWN_TYPE", "Unknown message type: "+base.Type)
 	}

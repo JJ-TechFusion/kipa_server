@@ -29,6 +29,12 @@ type LogoutRequest struct {
 	AllDevices bool   `json:"all_devices"`
 }
 
+type DevTokenRequest struct {
+	PhoneNumber string `json:"phone_number" binding:"required,e164"`
+	Role        string `json:"role" binding:"required,oneof=buyer seller rider admin"`
+	DeviceID    string `json:"device_id" binding:"required,min=16,max=64"`
+}
+
 type UpdateProfileRequest struct {
 	FirstName       *string `json:"first_name" binding:"omitempty,min=1,max=100"`
 	LastName        *string `json:"last_name" binding:"omitempty,min=1,max=100"`

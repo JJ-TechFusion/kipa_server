@@ -39,6 +39,9 @@ const (
 	NotificationRiderSuspended  NotificationType = "rider_suspended"
 	NotificationUserSuspended   NotificationType = "user_suspended"
 
+	// Chat
+	NotificationChatMessage NotificationType = "chat_message"
+
 	// General
 	NotificationBroadcast NotificationType = "broadcast"
 )

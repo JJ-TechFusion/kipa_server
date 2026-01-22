@@ -18,6 +18,7 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	locationHandler func(riderID uuid.UUID, jobID string, lat, lng, heading, speed float64)
+	chatHandler     func(senderID uuid.UUID, jobID, content, mediaURL, mediaType string) (messageID string, timestamp int64, err error)
 
 	mu     sync.RWMutex
 	logger *zap.Logger
@@ -36,6 +37,10 @@ func NewHub(logger *zap.Logger) *Hub {
 }
 func (h *Hub) SetLocationHandler(handler func(riderID uuid.UUID, jobID string, lat, lng, heading, speed float64)) {
 	h.locationHandler = handler
+}
+
+func (h *Hub) SetChatHandler(handler func(senderID uuid.UUID, jobID, content, mediaURL, mediaType string) (messageID string, timestamp int64, err error)) {
+	h.chatHandler = handler
 }
 func (h *Hub) Run() {
 	for {
@@ -152,6 +157,32 @@ func (h *Hub) BroadcastToJob(jobID string, msg interface{}) {
 	for client := range room {
 		client.Send(msg)
 	}
+}
+
+func (h *Hub) HandleChatMessage(client *Client, msg *ChatMessagePayload) {
+	if h.chatHandler == nil {
+		client.Send(&ErrorMessage{Type: TypeError, Code: "INTERNAL_ERROR", Message: "Chat not configured"})
+		return
+	}
+
+	messageID, timestamp, err := h.chatHandler(client.UserID, msg.JobID, msg.Content, msg.MediaURL, msg.MediaType)
+	if err != nil {
+		client.Send(&ErrorMessage{Type: TypeError, Code: "CHAT_ERROR", Message: err.Error()})
+		return
+	}
+
+	outMsg := &ChatMessagePayload{
+		Type:      TypeChatMessage,
+		JobID:     msg.JobID,
+		Content:   msg.Content,
+		MediaURL:  msg.MediaURL,
+		MediaType: msg.MediaType,
+		MessageID: messageID,
+		SenderID:  client.UserID.String(),
+		Timestamp: timestamp,
+	}
+
+	h.BroadcastToJob(msg.JobID, outMsg)
 }
 func (h *Hub) BroadcastJobStatus(jobID, status string) {
 	h.BroadcastToJob(jobID, &JobStatusUpdate{

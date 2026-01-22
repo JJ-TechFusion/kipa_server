@@ -6,15 +6,16 @@ import (
 	"github.com/google/uuid"
 )
 const (
-	TypeLocationUpdate = "location_update"
-	TypeSubscribe      = "subscribe"
-	TypeUnsubscribe    = "unsubscribe"
-	TypePing           = "ping"
+	TypeLocationUpdate  = "location_update"
+	TypeSubscribe       = "subscribe"
+	TypeUnsubscribe     = "unsubscribe"
+	TypePing            = "ping"
 	TypeRiderLocation   = "rider_location"
 	TypeJobStatus       = "job_status"
 	TypeNewJobAvailable = "new_job_available"
 	TypePong            = "pong"
 	TypeError           = "error"
+	TypeChatMessage     = "chat_message"
 )
 type BaseMessage struct {
 	Type string `json:"type"`
@@ -67,4 +68,15 @@ type LocationRecord struct {
 	ETAMinutes          *int
 	DistanceRemainingKM *float64
 	CreatedAt           time.Time
+}
+
+type ChatMessagePayload struct {
+	Type      string `json:"type"`
+	JobID     string `json:"job_id"`
+	Content   string `json:"content"`
+	MediaURL  string `json:"media_url,omitempty"`
+	MediaType string `json:"media_type"`
+	MessageID string `json:"message_id,omitempty"`
+	SenderID  string `json:"sender_id,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
 }

@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "kipa-api-collection",
 		"name": "Kipa Platform API",
-		"description": "Complete API collection for Kipa - Escrow + Logistics Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header.\nGet the token by calling `/auth/otp/send` and `/auth/otp/verify`.\n\n## Payment Flow\n1. Create payment request (seller)\n2. Configure fulfillment to generate payment link\n3. Initialize payment (buyer) - gets Paystack URL\n4. Complete payment on Paystack\n5. Verify payment to confirm and create escrow\n\n## Variables\nSet these variables in your Postman environment:\n- `base_url`: Your API base URL (e.g., http://localhost:8080)\n- `access_token`: Your JWT access token (obtained from login)\n- `refresh_token`: Your JWT refresh token\n- `payment_code`: Payment code for testing (e.g., KIP-ABC123)\n- `user_id`: Current authenticated user ID\n- `escrow_id`: Test escrow ID\n- `payment_request_id`: Test payment request ID\n- `purchase_id`: Test purchase ID\n- `order_id`: Test order ID\n- `paystack_url`: Paystack payment URL\n- `paystack_reference`: Paystack transaction reference",
+		"description": "Complete API collection for Kipa - Escrow + Logistics Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header.\n\n**Production:** Use `/auth/otp/send` and `/auth/otp/verify` with Twilio SMS verification.\n**Development:** Use `/auth/dev/token` to generate tokens instantly without SMS (requires SERVER_ENVIRONMENT=development).\n\n## Payment Flow\n1. Create payment request (seller)\n2. Configure fulfillment to generate payment link\n3. Initialize payment (buyer) - gets Paystack URL\n4. Complete payment on Paystack\n5. Verify payment to confirm and create escrow\n\n## Chat System\nReal-time chat between buyers, sellers, and riders during delivery:\n1. Connect to WebSocket for real-time messages\n2. Use `/chat/{job_id}/history` to get message history\n3. Use `/chat/{job_id}/read` to mark messages as read\n4. Push notifications sent when users are offline\n\n## Variables\nSet these variables in your Postman environment:\n- `base_url`: Your API base URL (e.g., http://localhost:8080)\n- `access_token`: Your JWT access token (obtained from login)\n- `refresh_token`: Your JWT refresh token\n- `payment_code`: Payment code for testing (e.g., KIP-ABC123)\n- `user_id`: Current authenticated user ID\n- `escrow_id`: Test escrow ID\n- `payment_request_id`: Test payment request ID\n- `purchase_id`: Test purchase ID\n- `order_id`: Test order ID\n- `job_id`: Delivery job ID for chat and tracking\n- `message_id`: Chat message ID for read receipts\n- `paystack_url`: Paystack payment URL\n- `paystack_reference`: Paystack transaction reference",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
@@ -172,6 +172,50 @@
 							"path": ["api", "v1", "auth", "logout"]
 						},
 						"description": "Logout and invalidate session"
+					},
+					"response": []
+				},
+				{
+					"name": "Generate Dev Token (Development Only)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.success && response.data.access_token) {",
+									"        pm.environment.set('access_token', response.data.access_token);",
+									"        pm.environment.set('refresh_token', response.data.refresh_token);",
+									"        pm.environment.set('user_id', response.data.user.id);",
+									"        console.log('Dev token generated and saved to environment');",
+									"        console.log('Role:', pm.request.body.raw ? JSON.parse(pm.request.body.raw).role : 'unknown');",
+									"        console.log('User ID:', response.data.user.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"+2348012345678\",\n  \"role\": \"buyer\",\n  \"device_id\": \"dev-test-device-{{$timestamp}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/dev/token",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "dev", "token"]
+						},
+						"description": "**DEVELOPMENT ONLY** - Generate authentication tokens without SMS verification.\n\n**Available Roles:**\n- `buyer`: Can make purchases and initialize payments\n- `seller`: Can create payment requests and manage sales (auto-verified)\n- `rider`: Can accept delivery jobs and manage deliveries\n- `admin`: Can access admin endpoints and manage platform\n\n**Request Body:**\n- `phone_number`: Valid E.164 format phone number\n- `role`: One of the available roles above\n- `device_id`: Unique device identifier (16-64 characters)\n\n**Response:**\n- `access_token`: JWT token for API authentication\n- `refresh_token`: Token for refreshing access token\n- `user`: User profile with role flags set\n- `is_new_user`: Whether this is a newly created user\n\n**Environment Variables Set:**\n- `access_token`: Automatically saved to environment\n- `refresh_token`: Automatically saved to environment\n- `user_id`: User ID saved to environment\n\n**Note:** This endpoint only works when `SERVER_ENVIRONMENT=development`. In production, it returns 401 Unauthorized."
 					},
 					"response": []
 				},
@@ -1490,6 +1534,80 @@
 			]
 		},
 		{
+			"name": "Chat System",
+			"item": [
+				{
+					"name": "Get Chat History",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat/{{job_id}}/history?limit=50&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat", "{{job_id}}", "history"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Number of messages to retrieve (default: 50)"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Number of messages to skip (default: 0)"
+								}
+							]
+						},
+						"description": "Get chat message history for a delivery job.\n\n**Available to:** All participants (buyer, seller, rider)\n\n**Response:**\n- `messages`: Array of chat messages\n- `total_count`: Total number of messages\n- `has_more`: Whether there are more messages\n\n**Message Format:**\n- `id`: Message ID\n- `sender_id`: User ID of sender\n- `sender_role`: Role of sender (buyer/seller/rider)\n- `message`: Message content\n- `message_type`: Type (text/system/location)\n- `metadata`: Additional data (e.g., location coordinates)\n- `sent_at`: Timestamp\n- `read_at`: When message was read (null if unread)\n\n**Real-time Updates:**\nUse WebSocket connection to receive new messages in real-time."
+					},
+					"response": []
+				},
+				{
+					"name": "Mark Messages as Read",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"last_read_message_id\": \"{{message_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat/{{job_id}}/read",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat", "{{job_id}}", "read"]
+						},
+						"description": "Mark messages as read up to a specific message ID.\n\n**Available to:** All participants (buyer, seller, rider)\n\n**Request Body:**\n- `last_read_message_id`: ID of the last message that was read\n\n**Response:**\n- `messages_marked_read`: Number of messages marked as read\n- `success`: Boolean indicating success\n\n**Note:** This marks ALL messages up to and including the specified message ID as read for the current user.\n\n**Push Notifications:**\nWhen users are offline, they receive push notifications for new messages."
+					},
+					"response": []
+				}
+			]
+		},
+		{
 			"name": "Errands",
 			"item": [
 				{
@@ -1784,7 +1902,7 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "ws"]
 						},
-						"description": "WebSocket endpoint for real-time updates.\n\n**URL:** ws://host/api/v1/ws?token=JWT&role=user|rider&job_id=xxx\n\n**Users:** Receive rider_location and job_status messages\n**Riders:** Send location_update, receive new_job_available"
+						"description": "WebSocket endpoint for real-time updates.\n\n**URL:** ws://host/api/v1/ws?token=JWT&role=user|rider&job_id=xxx\n\n**Message Types:**\n\n**Received by All:**\n- `chat_message`: Real-time chat messages between buyer, seller, and rider\n- `job_status`: Delivery job status updates\n\n**Received by Users:**\n- `rider_location`: Real-time rider location updates during delivery\n\n**Received by Riders:**\n- `new_job_available`: Notification of new delivery jobs\n\n**Sent by Riders:**\n- `location_update`: Send current location during active delivery\n\n**Sent by All (Chat):**\n- `chat_message`: Send chat messages to other participants\n\n**Chat Message Format:**\n```json\n{\n  \"type\": \"chat_message\",\n  \"data\": {\n    \"job_id\": \"uuid\",\n    \"message\": \"Hello, I'm on my way!\",\n    \"message_type\": \"text\",\n    \"metadata\": {}\n  }\n}\n```"
 					},
 					"response": []
 				}

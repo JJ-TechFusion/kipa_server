@@ -3,9 +3,10 @@ package service
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"kipa/internal/dto"
 	"kipa/internal/util"
+
+	"github.com/google/uuid"
 )
 
 type AuthService interface {
@@ -16,4 +17,5 @@ type AuthService interface {
 	ValidateAccessToken(ctx context.Context, token string) (*util.AccessTokenClaims, error)
 	GetUserByID(ctx context.Context, userID uuid.UUID) (*dto.UserResponse, error)
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req *dto.UpdateProfileRequest) (*dto.UserResponse, error)
+	GenerateDevToken(ctx context.Context, req *dto.DevTokenRequest) (*dto.VerifyOTPResponse, error)
 }

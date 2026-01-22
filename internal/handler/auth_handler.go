@@ -4,12 +4,13 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"kipa/internal/domain"
 	"kipa/internal/dto"
 	"kipa/internal/handler/middleware"
 	"kipa/internal/service"
 	"kipa/internal/util"
+
+	"github.com/gin-gonic/gin"
 )
 
 type AuthHandler struct {
@@ -29,6 +30,9 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *mi
 		auth.POST("/logout", authMiddleware.RequireAuth(), h.Logout)
 		auth.GET("/me", authMiddleware.RequireAuth(), h.Me)
 		auth.PATCH("/profile", authMiddleware.RequireAuth(), h.UpdateProfile)
+		
+		// Development only endpoint
+		auth.POST("/dev/token", h.GenerateDevToken)
 	}
 }
 
@@ -131,6 +135,22 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	response, err := h.authService.UpdateProfile(c.Request.Context(), userID, &req)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, response)
+}
+
+func (h *AuthHandler) GenerateDevToken(c *gin.Context) {
+	var req dto.DevTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	response, err := h.authService.GenerateDevToken(c.Request.Context(), &req)
 	if err != nil {
 		h.handleError(c, err)
 		return
