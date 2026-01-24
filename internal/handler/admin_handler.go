@@ -8,16 +8,26 @@ import (
 
 	"kipa/internal/domain"
 	"kipa/internal/handler/middleware"
+	"kipa/internal/repository"
 	"kipa/internal/service"
+	"strconv"
 )
 
 type AdminHandler struct {
-	adminService service.AdminService
+	adminService             service.AdminService
+	disputeResolutionService service.DisputeResolutionService
+	deliveryJobRepo          repository.DeliveryJobRepository
 }
 
-func NewAdminHandler(adminService service.AdminService) *AdminHandler {
+func NewAdminHandler(
+	adminService service.AdminService,
+	disputeResolutionService service.DisputeResolutionService,
+	deliveryJobRepo repository.DeliveryJobRepository,
+) *AdminHandler {
 	return &AdminHandler{
-		adminService: adminService,
+		adminService:             adminService,
+		disputeResolutionService: disputeResolutionService,
+		deliveryJobRepo:          deliveryJobRepo,
 	}
 }
 
@@ -34,6 +44,16 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			riders.POST("/:id/unsuspend", h.UnsuspendRider)
 			riders.GET("/pending", h.GetPendingRiders)
 			riders.GET("/statistics", h.GetRiderStatistics)
+		}
+
+		// Driver Management (Inter-state)
+		drivers := admin.Group("/drivers")
+		{
+			drivers.POST("/:id/verify", h.VerifyDriver)
+			drivers.POST("/:id/suspend", h.SuspendDriver)
+			drivers.POST("/:id/unsuspend", h.UnsuspendDriver)
+			drivers.GET("/pending", h.GetPendingDrivers)
+			drivers.GET("/statistics", h.GetDriverStatistics)
 		}
 
 		// Notification Management
@@ -97,6 +117,14 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			disputes.POST("/:id/resolve", h.ResolveDispute)
 			disputes.POST("/:id/refund", h.ProcessRefund)
 			disputes.GET("/statistics", h.GetDisputeStatistics)
+		}
+
+		// Return Damage Claims (intra-state delivery)
+		returnClaims := admin.Group("/return-claims")
+		{
+			returnClaims.GET("", h.ListReturnDamageClaims)
+			returnClaims.GET("/:id", h.GetReturnDamageClaim)
+			returnClaims.POST("/:id/resolve", h.ResolveReturnDamageClaim)
 		}
 
 		// Commission Management
@@ -203,6 +231,91 @@ func (h *AdminHandler) GetPendingRiders(c *gin.Context) {
 
 func (h *AdminHandler) GetRiderStatistics(c *gin.Context) {
 	stats, err := h.adminService.GetRiderStatistics(c.Request.Context())
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+// Driver Management Handlers
+
+func (h *AdminHandler) VerifyDriver(c *gin.Context) {
+	driverID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid driver ID"})
+		return
+	}
+
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	if err := h.adminService.VerifyDriver(c.Request.Context(), driverID, adminID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "driver verified successfully"})
+}
+
+func (h *AdminHandler) SuspendDriver(c *gin.Context) {
+	driverID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid driver ID"})
+		return
+	}
+
+	var req SuspendRiderRequest // Reuse same request struct as it only contains 'reason'
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	if err := h.adminService.SuspendDriver(c.Request.Context(), driverID, req.Reason, adminID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "driver suspended successfully"})
+}
+
+func (h *AdminHandler) UnsuspendDriver(c *gin.Context) {
+	driverID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid driver ID"})
+		return
+	}
+
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	if err := h.adminService.UnsuspendDriver(c.Request.Context(), driverID, adminID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "driver unsuspended successfully"})
+}
+
+func (h *AdminHandler) GetPendingDrivers(c *gin.Context) {
+	limit := 50
+	offset := 0
+
+	drivers, err := h.adminService.GetPendingDrivers(c.Request.Context(), limit, offset)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"drivers": drivers,
+		"count":   len(drivers),
+	})
+}
+
+func (h *AdminHandler) GetDriverStatistics(c *gin.Context) {
+	stats, err := h.adminService.GetDriverStatistics(c.Request.Context())
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -815,4 +928,133 @@ func (h *AdminHandler) BroadcastNotification(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Broadcast sent successfully"})
+}
+
+// Return Damage Claim Handlers (intra-state delivery)
+
+func (h *AdminHandler) ListReturnDamageClaims(c *gin.Context) {
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		if val, err := strconv.Atoi(l); err == nil && val > 0 {
+			limit = val
+		}
+	}
+
+	offset := 0
+	if o := c.Query("offset"); o != "" {
+		if val, err := strconv.Atoi(o); err == nil && val >= 0 {
+			offset = val
+		}
+	}
+
+	claims, total, err := h.disputeResolutionService.ListPendingDamageClaims(c.Request.Context(), limit, offset)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	responses := make([]ReturnDamageClaimResponse, 0, len(claims))
+	for _, claim := range claims {
+		responses = append(responses, toReturnDamageClaimResponse(claim))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"claims": responses,
+		"total":  total,
+	})
+}
+
+func (h *AdminHandler) GetReturnDamageClaim(c *gin.Context) {
+	claimID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid claim ID"})
+		return
+	}
+
+	// Get the return job
+	returnJob, err := h.deliveryJobRepo.GetByID(c.Request.Context(), claimID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "claim not found"})
+		return
+	}
+
+	if !returnJob.IsReturn || returnJob.Status != domain.DJStatusReturnDamageDisputed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "not a pending damage claim"})
+		return
+	}
+
+	c.JSON(http.StatusOK, toReturnDamageClaimResponse(returnJob))
+}
+
+type ResolveReturnDamageClaimRequest struct {
+	Decision        string   `json:"decision" binding:"required,oneof=full_refund partial_refund release_to_seller"`
+	RefundAmount    *float64 `json:"refund_amount"`
+	ResolutionNotes string   `json:"resolution_notes" binding:"required,min=10,max=2000"`
+}
+
+func (h *AdminHandler) ResolveReturnDamageClaim(c *gin.Context) {
+	claimID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid claim ID"})
+		return
+	}
+
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	var req ResolveReturnDamageClaimRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	serviceReq := &service.ResolveDamageClaimRequest{
+		Decision:        req.Decision,
+		RefundAmount:    req.RefundAmount,
+		ResolutionNotes: req.ResolutionNotes,
+	}
+
+	if err := h.disputeResolutionService.ResolveDamageClaim(c.Request.Context(), claimID, adminID, serviceReq); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "damage claim resolved successfully"})
+}
+
+type ReturnDamageClaimResponse struct {
+	ID                uuid.UUID  `json:"id"`
+	PaymentRequestID  uuid.UUID  `json:"payment_request_id"`
+	OriginalJobID     *uuid.UUID `json:"original_job_id,omitempty"`
+	DisputeID         *uuid.UUID `json:"dispute_id,omitempty"`
+	Status            string     `json:"status"`
+	ReturnCondition   *string    `json:"return_condition,omitempty"`
+	DamageClaimReason *string    `json:"damage_claim_reason,omitempty"`
+	PickupAddress     string     `json:"pickup_address"`
+	DropoffAddress    string     `json:"dropoff_address"`
+	RiderID           *uuid.UUID `json:"rider_id,omitempty"`
+	CreatedAt         string     `json:"created_at"`
+	ReturnConfirmedAt *string    `json:"return_confirmed_at,omitempty"`
+}
+
+func toReturnDamageClaimResponse(job *domain.DeliveryJob) ReturnDamageClaimResponse {
+	resp := ReturnDamageClaimResponse{
+		ID:                job.ID,
+		PaymentRequestID:  job.PaymentRequestID,
+		OriginalJobID:     job.OriginalJobID,
+		DisputeID:         job.DisputeID,
+		Status:            string(job.Status),
+		ReturnCondition:   job.ReturnCondition,
+		DamageClaimReason: job.DamageClaimReason,
+		PickupAddress:     job.PickupAddress,
+		DropoffAddress:    job.DropoffAddress,
+		RiderID:           job.RiderID,
+		CreatedAt:         job.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+
+	if job.ReturnConfirmedAt != nil {
+		t := job.ReturnConfirmedAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.ReturnConfirmedAt = &t
+	}
+
+	return resp
 }

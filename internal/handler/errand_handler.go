@@ -29,6 +29,7 @@ func (h *ErrandHandler) RegisterRoutes(rg *gin.RouterGroup, authMiddleware *midd
 		errands.GET("", h.List)
 		errands.GET("/active", h.GetActive)
 		errands.GET("/:id", h.GetByID)
+		errands.GET("/:id/timeline", h.GetTimeline)
 		errands.POST("/:id/confirm", h.Confirm)
 		errands.POST("/:id/complete", h.Complete)
 		errands.DELETE("/:id", h.Cancel)
@@ -119,12 +120,37 @@ func (h *ErrandHandler) GetByID(c *gin.Context) {
 	}
 
 	feeBreakdown := domain.NewRiderFeeBreakdown(errand.DeliveryFee)
+	timeline := BuildErrandTimeline(errand)
 
 	util.Success(c, http.StatusOK, ErrandResponse{
 		Errand:       errand,
 		FeeBreakdown: feeBreakdown,
+		Timeline:     &timeline,
 	})
 }
+func (h *ErrandHandler) GetTimeline(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	errandID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid errand ID")
+		return
+	}
+
+	errand, err := h.errandService.GetByID(c.Request.Context(), userID, errandID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	timeline := BuildErrandTimeline(errand)
+	util.Success(c, http.StatusOK, timeline)
+}
+
 func (h *ErrandHandler) Confirm(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -230,7 +256,8 @@ func mapErrandErrorToResponse(err error) (int, string, string) {
 }
 
 type ErrandResponse struct {
-	Errand       *domain.Errand           `json:"errand"`
+	Errand       *domain.Errand            `json:"errand"`
 	FeeBreakdown *domain.RiderFeeBreakdown `json:"fee_breakdown,omitempty"`
-	Message      string                   `json:"message,omitempty"`
+	Timeline     *ErrandTimelineResponse   `json:"timeline,omitempty"`
+	Message      string                    `json:"message,omitempty"`
 }

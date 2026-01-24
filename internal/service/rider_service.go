@@ -26,6 +26,11 @@ type RiderService interface {
 	ConfirmDelivery(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 	GetJobHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DeliveryJob, error)
 	GetEarnings(ctx context.Context, userID uuid.UUID) (*RiderEarnings, error)
+
+	// Unavailability handling
+	MarkSellerUnavailable(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) error
+	MarkBuyerUnavailable(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*ForcedReturnInfo, error)
+	CompleteForcedReturn(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 }
 
 type CreateRiderProfileRequest struct {
@@ -50,6 +55,12 @@ type RiderEarnings struct {
 	TotalDeliveries  int     `json:"total_deliveries"`
 	AvailableBalance float64 `json:"available_balance"`
 	Rating           float64 `json:"rating"`
+}
+
+type ForcedReturnInfo struct {
+	ForcedReturnJobID string `json:"forced_return_job_id"`
+	ReturnCode        string `json:"return_code"`
+	RebookDeadline    string `json:"rebook_deadline"`
 }
 
 type RiderServiceImpl struct {
@@ -500,6 +511,287 @@ func (s *RiderServiceImpl) GetEarnings(ctx context.Context, userID uuid.UUID) (*
 		Rating:           profile.Rating,
 	}, nil
 }
+
+func (s *RiderServiceImpl) MarkSellerUnavailable(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) error {
+	profile, err := s.riderRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	job, err := s.jobRepo.GetByID(ctx, jobID)
+	if err != nil {
+		return err
+	}
+
+	if job.RiderID == nil || *job.RiderID != profile.ID {
+		return domain.ErrUnauthorized
+	}
+
+	if !job.CanMarkSellerUnavailable() {
+		return fmt.Errorf("cannot mark seller unavailable in current status: %s", job.Status)
+	}
+
+	now := time.Now()
+	job.Status = domain.DJStatusSellerUnavailable
+	job.UnavailableMarkedAt = &now
+
+	if err := s.jobRepo.Update(ctx, job); err != nil {
+		return fmt.Errorf("failed to update job: %w", err)
+	}
+
+	// Update payment request status and refund buyer
+	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
+	if err != nil {
+		return fmt.Errorf("failed to get payment request: %w", err)
+	}
+
+	if err := s.prRepo.UpdateStatus(ctx, pr.ID, domain.PRStatusCancelledSellerUnavailable); err != nil {
+		s.logger.Error("failed to update payment request status", zap.Error(err))
+	}
+
+	// Full refund to buyer
+	if pr.EscrowID != nil {
+		if err := s.escrowService.Refund(ctx, *pr.EscrowID, "Seller unavailable at pickup"); err != nil {
+			s.logger.Error("failed to refund buyer", zap.Error(err))
+		}
+	}
+
+	s.logger.Info("seller marked unavailable",
+		zap.String("job_id", jobID.String()),
+		zap.String("rider_id", profile.ID.String()),
+	)
+
+	// Notify buyer
+	if s.notificationService != nil && pr.BuyerID != nil {
+		data := map[string]string{"job_id": jobID.String(), "payment_request_id": pr.ID.String()}
+		go s.notificationService.SendToUser(ctx, *pr.BuyerID, "Order Cancelled",
+			"The seller was unavailable for pickup. Your payment has been refunded.",
+			data, domain.NotificationOrderCancelled)
+	}
+
+	return nil
+}
+
+// MarkBuyerUnavailable handles when buyer is not available at dropoff
+// Flow: create forced return job, set pending_rebook, buyer has 24h to rebook
+func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*ForcedReturnInfo, error) {
+	profile, err := s.riderRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	job, err := s.jobRepo.GetByID(ctx, jobID)
+	if err != nil {
+		return nil, err
+	}
+
+	if job.RiderID == nil || *job.RiderID != profile.ID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	if !job.CanMarkBuyerUnavailable() {
+		return nil, fmt.Errorf("cannot mark buyer unavailable in current status: %s", job.Status)
+	}
+
+	now := time.Now()
+	job.Status = domain.DJStatusBuyerUnavailable
+	job.UnavailableMarkedAt = &now
+
+	if err := s.jobRepo.Update(ctx, job); err != nil {
+		return nil, fmt.Errorf("failed to update job: %w", err)
+	}
+
+	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get payment request: %w", err)
+	}
+
+	coords, err := s.jobRepo.GetJobCoordinates(ctx, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job coordinates: %w", err)
+	}
+
+	// Create forced return job (swap pickup/dropoff)
+	returnJob := &domain.DeliveryJob{
+		PaymentRequestID:    job.PaymentRequestID,
+		RiderID:             &profile.ID, // Same rider does the return
+		IsForcedReturn:      true,
+		PickupAddress:       job.DropoffAddress,
+		PickupLat:           coords.DropoffLat,
+		PickupLng:           coords.DropoffLng,
+		DropoffAddress:      job.PickupAddress,
+		DropoffLat:          coords.PickupLat,
+		DropoffLng:          coords.PickupLng,
+		RequiredVehicleType: job.RequiredVehicleType,
+		DeliveryFee:         job.DeliveryFee, // Platform pays this
+		Status:              domain.DJStatusForcedReturn,
+	}
+
+	returnCode := generateVerificationCode()
+	returnJob.DropoffCode = &returnCode
+
+	if err := s.jobRepo.Create(ctx, returnJob); err != nil {
+		return nil, fmt.Errorf("failed to create forced return job: %w", err)
+	}
+
+	// Update payment request
+	rebookDeadline := now.Add(24 * time.Hour)
+	pr.ForcedReturnJobID = &returnJob.ID
+	pr.RebookDeadline = &rebookDeadline
+	pr.Status = domain.PRStatusPendingRebook
+
+	if err := s.prRepo.Update(ctx, pr); err != nil {
+		return nil, fmt.Errorf("failed to update payment request: %w", err)
+	}
+
+	job.Status = domain.DJStatusForcedReturn
+	if err := s.jobRepo.Update(ctx, job); err != nil {
+		return nil, fmt.Errorf("failed to update original job status: %w", err)
+	}
+
+	// Notify buyer and seller
+	if s.notificationService != nil {
+		data := map[string]string{
+			"job_id":             jobID.String(),
+			"payment_request_id": pr.ID.String(),
+			"rebook_deadline":    rebookDeadline.Format(time.RFC3339),
+		}
+		if pr.BuyerID != nil {
+			go s.notificationService.SendToUser(ctx, *pr.BuyerID, "Delivery Attempt Failed",
+				"You were unavailable for delivery. Please rebook within 24 hours or receive a refund minus 5% fee.",
+				data, domain.NotificationDeliveryFailed)
+		}
+		go s.notificationService.SendToUser(ctx, pr.SellerID, "Item Being Returned",
+			"The buyer was unavailable. The rider is returning the item to you.",
+			data, domain.NotificationItemReturning)
+	}
+
+	return &ForcedReturnInfo{
+		ForcedReturnJobID: returnJob.ID.String(),
+		ReturnCode:        returnCode,
+		RebookDeadline:    rebookDeadline.Format("2006-01-02T15:04:05Z07:00"),
+	}, nil
+}
+
+func (s *RiderServiceImpl) CompleteForcedReturn(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error {
+	s.logger.Info("starting complete forced return process",
+		zap.String("user_id", userID.String()),
+		zap.String("job_id", jobID.String()),
+		zap.String("provided_code", code),
+	)
+
+	profile, err := s.riderRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		s.logger.Error("failed to get rider profile", zap.Error(err), zap.String("user_id", userID.String()))
+		return err
+	}
+	s.logger.Info("rider profile retrieved", zap.String("profile_id", profile.ID.String()))
+
+	job, err := s.jobRepo.GetByID(ctx, jobID)
+	if err != nil {
+		s.logger.Error("failed to get delivery job", zap.Error(err), zap.String("job_id", jobID.String()))
+		return err
+	}
+	
+	s.logger.Info("delivery job retrieved",
+		zap.String("job_status", string(job.Status)),
+		zap.Bool("is_forced_return", job.IsForcedReturn),
+		zap.String("payment_request_id", job.PaymentRequestID.String()),
+		zap.Bool("has_rider_id", job.RiderID != nil),
+		zap.Bool("has_dropoff_code", job.DropoffCode != nil),
+	)
+
+	if job.RiderID == nil || *job.RiderID != profile.ID {
+		s.logger.Error("unauthorized rider access",
+			zap.String("job_rider_id", func() string {
+				if job.RiderID != nil {
+					return job.RiderID.String()
+				}
+				return "nil"
+			}()),
+			zap.String("profile_id", profile.ID.String()),
+		)
+		return domain.ErrUnauthorized
+	}
+
+	if !job.IsForcedReturn || job.Status != domain.DJStatusForcedReturn {
+		s.logger.Error("invalid job type or status for forced return completion",
+			zap.Bool("is_forced_return", job.IsForcedReturn),
+			zap.String("current_status", string(job.Status)),
+			zap.String("expected_status", string(domain.DJStatusForcedReturn)),
+		)
+		return fmt.Errorf("not a forced return job or invalid status")
+	}
+
+	if job.DropoffCode == nil || *job.DropoffCode != code {
+		s.logger.Error("invalid dropoff code",
+			zap.String("expected_code", func() string {
+				if job.DropoffCode != nil {
+					return *job.DropoffCode
+				}
+				return "nil"
+			}()),
+			zap.String("provided_code", code),
+		)
+		return domain.ErrInvalidDropoffCode
+	}
+
+	s.logger.Info("validation passed, updating job status to forced return done")
+	
+	now := time.Now()
+	job.Status = domain.DJStatusForcedReturnDone
+	job.DeliveredAt = &now
+
+	s.logger.Info("updating job with completion details",
+		zap.String("new_status", string(job.Status)),
+		zap.Time("delivered_at", now),
+	)
+
+	if err := s.jobRepo.Update(ctx, job); err != nil {
+		s.logger.Error("failed to update job status", zap.Error(err), zap.String("job_id", jobID.String()))
+		return fmt.Errorf("failed to update job: %w", err)
+	}
+	s.logger.Info("job status updated successfully")
+
+	// Platform pays rider for forced return delivery
+	if job.DeliveryFee > 0 {
+		riderTake := domain.CalculateRiderTake(job.DeliveryFee)
+		s.logger.Info("adding rider earnings for forced return",
+			zap.Float64("delivery_fee", job.DeliveryFee),
+			zap.Float64("rider_take", riderTake),
+		)
+		if err := s.riderRepo.AddEarnings(ctx, profile.ID, riderTake); err != nil {
+			s.logger.Error("failed to add rider earnings for forced return", zap.Error(err))
+		} else {
+			s.logger.Info("rider earnings added successfully")
+		}
+	} else {
+		s.logger.Info("no delivery fee to pay rider", zap.Float64("delivery_fee", job.DeliveryFee))
+	}
+
+	s.logger.Info("forced return completed successfully",
+		zap.String("job_id", jobID.String()),
+		zap.String("rider_id", profile.ID.String()),
+	)
+
+
+	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
+	if err != nil {
+		s.logger.Error("failed to get payment request for notification", zap.Error(err), zap.String("payment_request_id", job.PaymentRequestID.String()))
+	} else {
+		if s.notificationService != nil {
+			data := map[string]string{"job_id": jobID.String(), "payment_request_id": pr.ID.String()}
+			go s.notificationService.SendToUser(ctx, pr.SellerID, "Item Returned",
+				"The item has been returned to you. Waiting for buyer to rebook delivery.",
+				data, domain.NotificationItemReturned)
+		} else {
+			s.logger.Warn("notification service not available, skipping seller notification")
+		}
+	}
+
+	return nil
+}
+
 func generateVerificationCode() string {
 	return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
 }

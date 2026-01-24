@@ -36,28 +36,31 @@ type InitializePaymentResponse struct {
 }
 
 type VerifyPaymentResponse struct {
-	OrderID       uuid.UUID  `json:"order_id"`
-	PaymentStatus string     `json:"payment_status"`
-	EscrowID      *uuid.UUID `json:"escrow_id,omitempty"`
-	Status        string     `json:"status"`
+	OrderID             uuid.UUID  `json:"order_id"`
+	PaymentStatus       string     `json:"payment_status"`
+	EscrowID            *uuid.UUID `json:"escrow_id,omitempty"`
+	LogisticsDeliveryID *uuid.UUID `json:"logistics_delivery_id,omitempty"`
+	Status              string     `json:"status"`
 }
 
 type WalletPaymentResponse struct {
-	OrderID  uuid.UUID `json:"order_id"`
-	EscrowID uuid.UUID `json:"escrow_id"`
-	Status   string    `json:"status"`
+	OrderID             uuid.UUID  `json:"order_id"`
+	EscrowID            uuid.UUID  `json:"escrow_id"`
+	LogisticsDeliveryID *uuid.UUID `json:"logistics_delivery_id,omitempty"`
+	Status              string     `json:"status"`
 }
 
 type OrderServiceImpl struct {
-	orderRepo     repository.OrderRepository
-	prRepo        repository.PaymentRequestRepository
-	userRepo      repository.UserRepository
-	escrowService EscrowService
-	walletService WalletService
-	paystack      *paystack.Client
-	notificationService NotificationService
-	config        *config.Config
-	logger        *zap.Logger
+	orderRepo                repository.OrderRepository
+	prRepo                   repository.PaymentRequestRepository
+	userRepo                 repository.UserRepository
+	escrowService            EscrowService
+	walletService            WalletService
+	logisticsDeliveryService LogisticsDeliveryService
+	paystack                 *paystack.Client
+	notificationService      NotificationService
+	config                   *config.Config
+	logger                   *zap.Logger
 }
 
 func NewOrderService(
@@ -66,21 +69,23 @@ func NewOrderService(
 	userRepo repository.UserRepository,
 	escrowService EscrowService,
 	walletService WalletService,
+	logisticsDeliveryService LogisticsDeliveryService,
 	notificationService NotificationService,
 	paystackClient *paystack.Client,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) OrderService {
 	return &OrderServiceImpl{
-		orderRepo:     orderRepo,
-		prRepo:        prRepo,
-		userRepo:      userRepo,
-		escrowService: escrowService,
-		walletService: walletService,
-		notificationService: notificationService,
-		paystack:      paystackClient,
-		config:        cfg,
-		logger:        logger,
+		orderRepo:                orderRepo,
+		prRepo:                   prRepo,
+		userRepo:                 userRepo,
+		escrowService:            escrowService,
+		walletService:            walletService,
+		logisticsDeliveryService: logisticsDeliveryService,
+		notificationService:      notificationService,
+		paystack:                 paystackClient,
+		config:                   cfg,
+		logger:                   logger,
 	}
 }
 func (s *OrderServiceImpl) InitializePayment(ctx context.Context, buyerID uuid.UUID, paymentCode string, req *InitializePaymentRequest) (*InitializePaymentResponse, error) {
@@ -210,6 +215,57 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create escrow: %w", err)
 	}
+
+	// Create logistics delivery for inter-state orders
+	var logisticsDeliveryID *uuid.UUID
+	if pr.IsInterStateDelivery() && s.logisticsDeliveryService != nil {
+		pickupAddress := ""
+		if pr.PickupAddress != nil {
+			pickupAddress = *pr.PickupAddress
+		}
+		dropoffAddress := ""
+		if pr.DropoffAddress != nil {
+			dropoffAddress = *pr.DropoffAddress
+		}
+
+		// Default ship deadline is 72 hours from now
+		shipDeadline := time.Now().Add(72 * time.Hour)
+
+		pickupState := ""
+		if pr.PickupState != nil {
+			pickupState = *pr.PickupState
+		}
+		dropoffState := ""
+		if pr.DropoffState != nil {
+			dropoffState = *pr.DropoffState
+		}
+
+		logisticsReq := &CreateLogisticsDeliveryRequest{
+			PaymentRequestID: pr.ID,
+			EscrowID:         escrow.ID,
+			SellerID:         pr.SellerID,
+			BuyerID:          order.BuyerID,
+			PickupAddress:    pickupAddress,
+			PickupState:      pickupState,
+			DropoffAddress:   dropoffAddress,
+			DropoffState:     dropoffState,
+			ShipDeadline:     shipDeadline,
+			EscrowAmount:     escrow.TotalLocked,
+		}
+
+		logisticsDelivery, err := s.logisticsDeliveryService.Create(ctx, logisticsReq)
+		if err != nil {
+			s.logger.Error("failed to create logistics delivery", zap.Error(err))
+		} else {
+			logisticsDeliveryID = &logisticsDelivery.ID
+			pr.LogisticsDeliveryID = &logisticsDelivery.ID
+			s.logger.Info("logistics delivery created",
+				zap.String("logistics_delivery_id", logisticsDelivery.ID.String()),
+				zap.String("pr_id", pr.ID.String()),
+			)
+		}
+	}
+
 	now := time.Now()
 	order.EscrowID = &escrow.ID
 	order.PaymentStatus = domain.OrderPaymentVerified
@@ -264,10 +320,11 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 	}()
 
 	return &VerifyPaymentResponse{
-		OrderID:       order.ID,
-		PaymentStatus: string(order.PaymentStatus),
-		EscrowID:      &escrow.ID,
-		Status:        string(order.Status),
+		OrderID:             order.ID,
+		PaymentStatus:       string(order.PaymentStatus),
+		EscrowID:            &escrow.ID,
+		LogisticsDeliveryID: logisticsDeliveryID,
+		Status:              string(order.Status),
 	}, nil
 }
 func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uuid.UUID, paymentCode string) (*WalletPaymentResponse, error) {
@@ -344,6 +401,56 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 	if err != nil {
 		return nil, fmt.Errorf("failed to create escrow: %w", err)
 	}
+
+	// Create logistics delivery for inter-state orders
+	var logisticsDeliveryID *uuid.UUID
+	if pr.IsInterStateDelivery() && s.logisticsDeliveryService != nil {
+		pickupAddress := ""
+		if pr.PickupAddress != nil {
+			pickupAddress = *pr.PickupAddress
+		}
+		dropoffAddress := ""
+		if pr.DropoffAddress != nil {
+			dropoffAddress = *pr.DropoffAddress
+		}
+		pickupState := ""
+		if pr.PickupState != nil {
+			pickupState = *pr.PickupState
+		}
+		dropoffState := ""
+		if pr.DropoffState != nil {
+			dropoffState = *pr.DropoffState
+		}
+
+		// Default ship deadline is 72 hours from now
+		shipDeadline := time.Now().Add(72 * time.Hour)
+
+		logisticsReq := &CreateLogisticsDeliveryRequest{
+			PaymentRequestID: pr.ID,
+			EscrowID:         escrow.ID,
+			SellerID:         pr.SellerID,
+			BuyerID:          buyerID,
+			PickupAddress:    pickupAddress,
+			PickupState:      pickupState,
+			DropoffAddress:   dropoffAddress,
+			DropoffState:     dropoffState,
+			ShipDeadline:     shipDeadline,
+			EscrowAmount:     escrow.TotalLocked,
+		}
+
+		logisticsDelivery, err := s.logisticsDeliveryService.Create(ctx, logisticsReq)
+		if err != nil {
+			s.logger.Error("failed to create logistics delivery", zap.Error(err))
+		} else {
+			logisticsDeliveryID = &logisticsDelivery.ID
+			pr.LogisticsDeliveryID = &logisticsDelivery.ID
+			s.logger.Info("logistics delivery created",
+				zap.String("logistics_delivery_id", logisticsDelivery.ID.String()),
+				zap.String("pr_id", pr.ID.String()),
+			)
+		}
+	}
+
 	now := time.Now()
 	order.EscrowID = &escrow.ID
 	order.PaymentStatus = domain.OrderPaymentVerified
@@ -397,9 +504,10 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 	}()
 
 	return &WalletPaymentResponse{
-		OrderID:  order.ID,
-		EscrowID: escrow.ID,
-		Status:   string(order.Status),
+		OrderID:             order.ID,
+		EscrowID:            escrow.ID,
+		LogisticsDeliveryID: logisticsDeliveryID,
+		Status:              string(order.Status),
 	}, nil
 }
 func (s *OrderServiceImpl) GetOrderByID(ctx context.Context, id uuid.UUID) (*domain.Order, error) {
@@ -424,4 +532,5 @@ func (s *OrderServiceImpl) validateLinkUsage(pr *domain.PaymentRequest) error {
 
 	return nil
 }
+
 var _ OrderService = (*OrderServiceImpl)(nil)

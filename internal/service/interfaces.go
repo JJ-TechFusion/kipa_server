@@ -19,3 +19,4 @@ type AuthService interface {
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req *dto.UpdateProfileRequest) (*dto.UserResponse, error)
 	GenerateDevToken(ctx context.Context, req *dto.DevTokenRequest) (*dto.VerifyOTPResponse, error)
 }
+

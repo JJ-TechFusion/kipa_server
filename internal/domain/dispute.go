@@ -21,8 +21,8 @@ type DisputeOutcome string
 
 const (
 	DisputeOutcomePending      DisputeOutcome = "pending"
-	DisputeOutcomeBuyerWins    DisputeOutcome = "buyer_wins"
-	DisputeOutcomeSellerWins   DisputeOutcome = "seller_wins"
+	DisputeOutcomeBuyerWins    DisputeOutcome = "buyer_favor"
+	DisputeOutcomeSellerWins   DisputeOutcome = "seller_favor"
 	DisputeOutcomePartialRefund DisputeOutcome = "partial_refund"
 	DisputeOutcomeMutual       DisputeOutcome = "mutual"
 )

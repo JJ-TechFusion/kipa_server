@@ -17,6 +17,7 @@ type NotificationService interface {
 
 	SendToUsers(ctx context.Context, userIDs []uuid.UUID, title, body string, data map[string]string, notifType domain.NotificationType) error
 	SendBroadcast(ctx context.Context, topic, title, body string, data map[string]string) error
+	SendToAdmins(ctx context.Context, title, body string, data map[string]string) error
 
 	RegisterToken(ctx context.Context, userID uuid.UUID, token string, platform domain.DevicePlatform) error
 
@@ -111,6 +112,10 @@ func (s *NotificationServiceImpl) SendBroadcast(ctx context.Context, topic, titl
 	}
 
 	return s.fcmClient.SendToTopic(ctx, topic, title, body, data)
+}
+
+func (s *NotificationServiceImpl) SendToAdmins(ctx context.Context, title, body string, data map[string]string) error {
+	return s.SendBroadcast(ctx, "admins", title, body, data)
 }
 
 func (s *NotificationServiceImpl) RegisterToken(ctx context.Context, userID uuid.UUID, token string, platform domain.DevicePlatform) error {

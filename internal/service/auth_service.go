@@ -343,77 +343,6 @@ func (s *AuthServiceImpl) UpdateProfile(ctx context.Context, userID uuid.UUID, r
 	return &response, nil
 }
 
-func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevTokenRequest) (*dto.VerifyOTPResponse, error) {
-	// Only allow in development environment
-	if s.config.Server.Environment != "development" {
-		return nil, domain.ErrUnauthorized
-	}
-
-	// Get or create user
-	user, isNewUser, err := s.getOrCreateUser(ctx, req.PhoneNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	// Set user role based on request
-	switch req.Role {
-	case "buyer":
-		user.IsBuyer = true
-	case "seller":
-		user.IsSeller = true
-		user.SellerVerified = true // Auto-verify sellers in dev
-	case "rider":
-		user.IsRider = true
-	case "admin":
-		user.IsAdmin = true
-	}
-
-	// Update user with role
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		return nil, fmt.Errorf("failed to update user role: %w", err)
-	}
-
-	// Generate tokens
-	accessToken, _, err := s.jwtManager.GenerateAccessToken(user.ID, req.DeviceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate access token: %w", err)
-	}
-
-	refreshToken, refreshExpiresAt, err := s.jwtManager.GenerateRefreshToken(user.ID, req.DeviceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
-	}
-
-	// Create session
-	session := &domain.Session{
-		UserID:       user.ID,
-		DeviceID:     req.DeviceID,
-		RefreshToken: refreshToken,
-		ExpiresAt:    refreshExpiresAt,
-	}
-
-	if err := s.sessionRepo.Store(ctx, session); err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-
-	s.logger.Info("dev token generated",
-		zap.String("user_id", user.ID.String()),
-		zap.String("phone", req.PhoneNumber),
-		zap.String("role", req.Role),
-		zap.Bool("is_new_user", isNewUser),
-	)
-
-	userResponse := userToResponse(user)
-	return &dto.VerifyOTPResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresIn:    int(s.config.JWT.AccessTokenExpiry.Seconds()),
-		TokenType:    "Bearer",
-		User:         userResponse,
-		IsNewUser:    isNewUser,
-	}, nil
-}
-
 func (s *AuthServiceImpl) getOrCreateUser(ctx context.Context, phoneNumber string) (*domain.User, bool, error) {
 	user, err := s.userRepo.GetByPhoneNumber(ctx, phoneNumber)
 	if err == nil {
@@ -454,6 +383,105 @@ func userToResponse(user *domain.User) dto.UserResponse {
 		ProfilePhotoURL: user.ProfilePhotoURL,
 		CreatedAt:       user.CreatedAt,
 	}
+}
+
+func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevTokenRequest) (*dto.VerifyOTPResponse, error) {
+	// Only allow in development environment
+	if s.config.Server.Environment != "development" {
+		return nil, domain.ErrUnauthorized
+	}
+
+	// Check if user exists
+	existingUser, err := s.userRepo.GetByPhoneNumber(ctx, req.PhoneNumber)
+	if err != nil && !errors.Is(err, domain.ErrUserNotFound) {
+		return nil, err
+	}
+
+	var user *domain.User
+	if existingUser != nil {
+		// User exists, update their role if needed
+		user = existingUser
+		switch req.Role {
+		case "buyer":
+			user.IsBuyer = true
+		case "seller":
+			user.IsSeller = true
+		case "rider":
+			user.IsRider = true
+		case "admin":
+			user.IsAdmin = true
+		}
+		
+		// Update first and last name
+		user.FirstName = &req.FirstName
+		user.LastName = &req.LastName
+		
+		if err := s.userRepo.Update(ctx, user); err != nil {
+			return nil, err
+		}
+	} else {
+		// Create new user
+		user = &domain.User{
+			ID:            uuid.New(),
+			PhoneNumber:   req.PhoneNumber,
+			FirstName:     &req.FirstName,
+			LastName:      &req.LastName,
+			PhoneVerified: true, // Auto-verify for dev
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+
+		// Set role
+		switch req.Role {
+		case "buyer":
+			user.IsBuyer = true
+		case "seller":
+			user.IsSeller = true
+		case "rider":
+			user.IsRider = true
+		case "admin":
+			user.IsAdmin = true
+		}
+
+		if err := s.userRepo.Create(ctx, user); err != nil {
+			return nil, err
+		}
+	}
+
+	// Generate tokens
+	accessToken, accessExpiresAt, err := s.jwtManager.GenerateAccessToken(user.ID, user.PhoneNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	refreshToken, refreshExpiresAt, err := s.jwtManager.GenerateRefreshToken(user.ID, user.PhoneNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store refresh token
+	session := &domain.Session{
+		UserID:       user.ID,
+		DeviceID:     "dev-session", // Default device ID for dev
+		RefreshToken: refreshToken,
+		UserAgent:    "dev-client",
+		IPAddress:    "127.0.0.1",
+		CreatedAt:    time.Now(),
+		ExpiresAt:    refreshExpiresAt,
+	}
+	if err := s.sessionRepo.Store(ctx, session); err != nil {
+		return nil, err
+	}
+
+	userResponse := userToResponse(user)
+	return &dto.VerifyOTPResponse{
+		User:         userResponse,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    int(time.Until(accessExpiresAt).Seconds()),
+		TokenType:    "Bearer",
+		IsNewUser:    existingUser == nil,
+	}, nil
 }
 
 func generateRequestHash(phoneNumber, verificationID, otpCode string) string {

@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "kipa-api-collection",
 		"name": "Kipa Platform API",
-		"description": "Complete API collection for Kipa - Escrow + Logistics Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header.\n\n**Production:** Use `/auth/otp/send` and `/auth/otp/verify` with Twilio SMS verification.\n**Development:** Use `/auth/dev/token` to generate tokens instantly without SMS (requires SERVER_ENVIRONMENT=development).\n\n## Payment Flow\n1. Create payment request (seller)\n2. Configure fulfillment to generate payment link\n3. Initialize payment (buyer) - gets Paystack URL\n4. Complete payment on Paystack\n5. Verify payment to confirm and create escrow\n\n## Chat System\nReal-time chat between buyers, sellers, and riders during delivery:\n1. Connect to WebSocket for real-time messages\n2. Use `/chat/{job_id}/history` to get message history\n3. Use `/chat/{job_id}/read` to mark messages as read\n4. Push notifications sent when users are offline\n\n## Variables\nSet these variables in your Postman environment:\n- `base_url`: Your API base URL (e.g., http://localhost:8080)\n- `access_token`: Your JWT access token (obtained from login)\n- `refresh_token`: Your JWT refresh token\n- `payment_code`: Payment code for testing (e.g., KIP-ABC123)\n- `user_id`: Current authenticated user ID\n- `escrow_id`: Test escrow ID\n- `payment_request_id`: Test payment request ID\n- `purchase_id`: Test purchase ID\n- `order_id`: Test order ID\n- `job_id`: Delivery job ID for chat and tracking\n- `message_id`: Chat message ID for read receipts\n- `paystack_url`: Paystack payment URL\n- `paystack_reference`: Paystack transaction reference",
+		"description": "Complete API collection for Kipa - Escrow + Logistics Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nMost endpoints require a Bearer token in the Authorization header.\nGet the token by calling `/auth/otp/send` and `/auth/otp/verify`.\n\n## Payment Flow\n1. Create payment request (seller)\n2. Configure fulfillment to generate payment link\n3. Initialize payment (buyer) - gets Paystack URL\n4. Complete payment on Paystack\n5. Verify payment to confirm and create escrow\n\n## Logistics Delivery System\nSecure escrow-based logistics for high-value items:\n1. **Seller ships** with tracking info and receipt\n2. **24-hour delay** before seller can claim delivery\n3. **Buyer confirms** receipt to release funds\n4. **14-day auto-release** if buyer doesn't respond\n5. **Admin approval** required for orders > ₦1M\n6. **Enhanced dispute system** with evidence upload\n7. **Advanced return process** with damage claims\n\n**Enhanced Dispute Flow:**\n\n**For Logistics Deliveries (Inter-state):**\n1. **Dispute opened** → Admin resolves → buyer_wins → `return_required`\n2. **Buyer ships return** → `return_shipped`\n3. **Seller receives return:**\n   - Good condition → `return_received` → auto-refund (low value) or `pending_refund_approval` (high value)\n   - Damaged/incomplete → `return_damage_disputed` (seller provides evidence)\n4. **Admin resolves damage claim:**\n   - `full_refund` → Buyer gets full refund\n   - `partial_refund` → Split based on damage assessment\n   - `release_to_seller` → Seller keeps funds (buyer caused damage)\n\n**For Intra-state Deliveries (Rider-based):**\n1. **Dispute opened** → Admin resolves → buyer_wins → `return_required`\n2. **Buyer initiates return** → Creates return delivery job with swapped coordinates\n3. **Rider pickup/delivery** → Picks up from buyer, delivers to seller\n4. **Seller confirms return:**\n   - Good condition → Automatic refund to buyer\n   - Damaged/incomplete → `return_damage_disputed` → Admin review\n5. **Admin resolves damage claim** → Appropriate fund distribution\n\n**Key Features:**\n- No auto-release without buyer confirmation\n- Full audit trail of all actions\n- Evidence system for disputes\n- High-value order protection\n- Return shipping management\n- Damage claim resolution\n- Timeline tracking with dispute steps\n\n## Chat System\nReal-time chat between buyers, sellers, and riders during delivery:\n1. Connect to WebSocket for real-time messages\n2. Use `/chat/{job_id}/history` to get message history\n3. Use `/chat/{job_id}/read` to mark messages as read\n4. Push notifications sent when users are offline\n\n## Unavailability Handling\nRobust system for handling seller/buyer unavailability during delivery:\n\n**Seller Unavailable (Pickup):**\n1. **Rider marks seller unavailable** → Job cancelled\n2. **Buyer receives full refund** → No payment to rider\n3. **Status:** `seller_unavailable` (DeliveryJob), `cancelled_seller_unavailable` (PaymentRequest)\n\n**Buyer Unavailable (Drop-off):**\n1. **Rider marks buyer unavailable** → Creates forced return job\n2. **Same rider returns item** to seller (platform pays for return)\n3. **PaymentRequest → `pending_rebook`** → Buyer has 24 hours to rebook\n4. **If no rebook:** Refund minus 5% unavailability fee\n5. **If rebook:** New delivery job created with updated address\n\n**Key Features:**\n- Automatic forced return handling\n- 24-hour rebook window\n- Unavailability fee (5%) for no-shows\n- Platform covers return delivery costs\n- Multiple rebook attempts allowed\n- Background job processes rebook expiry\n\n## Variables\nSet these variables in your Postman environment:\n- `base_url`: Your API base URL (e.g., http://localhost:8080)\n- `access_token`: Your JWT access token (obtained from login)\n- `refresh_token`: Your JWT refresh token\n- `payment_code`: Payment code for testing (e.g., KIP-ABC123)\n- `user_id`: Current authenticated user ID\n- `escrow_id`: Test escrow ID\n- `payment_request_id`: Test payment request ID\n- `purchase_id`: Test purchase ID\n- `order_id`: Test order ID\n- `job_id`: Delivery job ID for chat and tracking\n- `message_id`: Chat message ID for read receipts\n- `logistics_delivery_id`: Logistics delivery ID for tracking\n- `return_claim_id`: Return damage claim ID for admin resolution\n- `paystack_url`: Paystack payment URL\n- `paystack_reference`: Paystack transaction reference\n- `driver_id`: Driver profile ID\n- `driver_delivery_id`: Driver delivery ID for inter-state deliveries\n- `trip_id`: Driver trip ID for route management\n- `pickup_code`: 6-digit pickup verification code\n- `dropoff_code`: 6-digit dropoff verification code\n\n## Driver System (Inter-State)\nManual driver delivery system for inter-state packages:\n\n**Key Features:**\n- **No GPS tracking** - Manual status updates (at pickup, departed, arrived)\n- **6-digit verification codes** - Pickup code sent to seller, dropoff code sent to buyer\n- **Capacity management** - Max ₦500k value, 20 packages per trip\n- **Trip-based grouping** - Multiple deliveries per trip on same route\n- **Code lockout** - Max 3 attempts, then admin resolution needed\n- **24h buyer unreachable window** - Buyer has 24h to respond\n\n**Driver Flow:**\n1. **Create profile** → Vehicle info, documents, verification\n2. **Go online** → Specify route (origin_city → destination_city)\n3. **Accept deliveries** → Up to capacity limits per trip\n4. **Manual updates** → At pickup → Verify codes → Depart → Arrive → Deliver\n5. **Handle issues** → Mark buyer unreachable, get admin support\n6. **Complete trip** → Automatic payout after all deliveries confirmed\n\n**Status Flow:**\n- `idle` → `accepting_deliveries` → `at_pickup` → `departed` → `arrived` → `delivering` → `completed`\n- Delivery statuses: `assigned` → `at_pickup` → `picked_up` → `in_transit` → `arrived` → `delivered` → `confirmed`\n\n## Admin Driver Management\nDedicated endpoints for managing drivers (inter-state delivery):\n\n**Driver Management Features:**\n- **Statistics Dashboard** - View driver counts (total, verified, online, suspended)\n- **Verification System** - Review and verify pending driver applications\n- **Account Management** - Suspend/unsuspend drivers and their user accounts\n- **Audit Trail** - All admin actions logged for compliance\n\n**Driver Verification Process:**\n1. **Driver applies** → Submits profile with vehicle info and documents\n2. **Admin reviews** → Uses `/admin/drivers/pending` to see applications\n3. **Admin verifies** → Calls `/admin/drivers/:id/verify` to approve\n4. **Driver activated** → Can now go online and accept deliveries\n\n**Suspension Management:**\n- Suspend drivers for policy violations or complaints\n- Suspension affects both driver profile and user account\n- Forces driver offline and cancels active trips\n- Unsuspend when issues are resolved",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
@@ -105,6 +105,46 @@
 					"response": []
 				},
 				{
+					"name": "Generate Dev Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set('access_token', jsonData.data.access_token);",
+									"    pm.environment.set('refresh_token', jsonData.data.refresh_token);",
+									"    pm.environment.set('user_id', jsonData.data.user.id);",
+									"    console.log('Dev tokens saved to environment');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"+2348147993947\",\n  \"role\": \"buyer\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Buyer\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/dev/token",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "dev", "token"]
+						},
+						"description": "**DEVELOPMENT ONLY** - Generate authentication tokens without SMS verification.\n\n**Request Body:**\n- `phone_number`: User's phone number (required)\n- `role`: User role (required: 'buyer', 'seller', 'rider', 'admin')\n- `first_name`: User's first name (required)\n- `last_name`: User's last name (required)\n\n**Behavior:**\n- Creates user if doesn't exist\n- Updates existing user with new role and name\n- Auto-verifies the user\n- Returns same response as regular OTP verification\n\n**Examples:**\n```json\n// Create/update buyer\n{\n  \"phone_number\": \"+2348147993947\",\n  \"role\": \"buyer\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Buyer\"\n}\n\n// Create/update seller\n{\n  \"phone_number\": \"+2348147993948\",\n  \"role\": \"seller\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Seller\"\n}\n\n// Create/update rider\n{\n  \"phone_number\": \"+2348147993949\",\n  \"role\": \"rider\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Rider\"\n}\n\n// Create/update admin\n{\n  \"phone_number\": \"+2348147993950\",\n  \"role\": \"admin\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"Admin\"\n}\n```\n\n**Available only in development environment**"
+					},
+					"response": []
+				},
+				{
 					"name": "Refresh Token",
 					"event": [
 						{
@@ -172,50 +212,6 @@
 							"path": ["api", "v1", "auth", "logout"]
 						},
 						"description": "Logout and invalidate session"
-					},
-					"response": []
-				},
-				{
-					"name": "Generate Dev Token (Development Only)",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    const response = pm.response.json();",
-									"    if (response.success && response.data.access_token) {",
-									"        pm.environment.set('access_token', response.data.access_token);",
-									"        pm.environment.set('refresh_token', response.data.refresh_token);",
-									"        pm.environment.set('user_id', response.data.user.id);",
-									"        console.log('Dev token generated and saved to environment');",
-									"        console.log('Role:', pm.request.body.raw ? JSON.parse(pm.request.body.raw).role : 'unknown');",
-									"        console.log('User ID:', response.data.user.id);",
-									"    }",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"phone_number\": \"+2348012345678\",\n  \"role\": \"buyer\",\n  \"device_id\": \"dev-test-device-{{$timestamp}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/v1/auth/dev/token",
-							"host": ["{{base_url}}"],
-							"path": ["api", "v1", "auth", "dev", "token"]
-						},
-						"description": "**DEVELOPMENT ONLY** - Generate authentication tokens without SMS verification.\n\n**Available Roles:**\n- `buyer`: Can make purchases and initialize payments\n- `seller`: Can create payment requests and manage sales (auto-verified)\n- `rider`: Can accept delivery jobs and manage deliveries\n- `admin`: Can access admin endpoints and manage platform\n\n**Request Body:**\n- `phone_number`: Valid E.164 format phone number\n- `role`: One of the available roles above\n- `device_id`: Unique device identifier (16-64 characters)\n\n**Response:**\n- `access_token`: JWT token for API authentication\n- `refresh_token`: Token for refreshing access token\n- `user`: User profile with role flags set\n- `is_new_user`: Whether this is a newly created user\n\n**Environment Variables Set:**\n- `access_token`: Automatically saved to environment\n- `refresh_token`: Automatically saved to environment\n- `user_id`: User ID saved to environment\n\n**Note:** This endpoint only works when `SERVER_ENVIRONMENT=development`. In production, it returns 401 Unauthorized."
 					},
 					"response": []
 				},
@@ -604,6 +600,102 @@
 						"description": "List expired, cancelled, completed, and refunded payment requests"
 					},
 					"response": []
+				},
+				{
+					"name": "List Driver Deliveries",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/driver-deliveries",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "driver-deliveries"]
+						},
+						"description": "List all inter-state driver deliveries for seller"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Driver Delivery Details",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/driver-deliveries/{{driver_delivery_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "driver-deliveries", "{{driver_delivery_id}}"]
+						},
+						"description": "Get specific driver delivery details for seller"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Pickup Code",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/driver-deliveries/{{driver_delivery_id}}/pickup-code",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "driver-deliveries", "{{driver_delivery_id}}", "pickup-code"]
+						},
+						"description": "Get 6-digit pickup code for driver verification (only available when driver is at pickup location)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Driver Delivery Timeline",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/driver-deliveries/{{driver_delivery_id}}/timeline",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "driver-deliveries", "{{driver_delivery_id}}", "timeline"]
+						},
+						"description": "Get timeline for driver delivery showing progress steps.\n\n**Normal Flow Steps:**\n1. Order Created\n2. Awaiting Driver\n3. Driver Assigned\n4. Awaiting Handover (seller brings item to driver)\n5. Item Collected\n6. In Transit\n7. Arrived at Destination\n8. Delivered\n9. Completed\n\n**Edge Case Steps (when applicable):**\n- Buyer Unreachable (driver couldn't reach buyer)\n- Returning to Seller (item being returned)\n- Returned to Seller (return completed)\n- Dispute Opened (buyer raised dispute)\n- Refunded (payment refunded)\n- Cancelled (seller cancelled)\n- Expired (no driver found)\n\n**Response includes:**\n- steps[] - All timeline steps with status (completed/current/pending)\n- current_step - The active step\n- item_name, total_amount, origin_city, destination_city\n- pickup_code (for seller when available)\n\n**Available to:** Authenticated sellers"
+					},
+					"response": []
 				}
 			]
 		},
@@ -754,6 +846,63 @@
 							"path": ["api", "v1", "seller", "earnings"]
 						},
 						"description": "Get earnings summary showing pending vs released amounts"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Return Job Status",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/sales/{{order_id}}/return",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "sales", "{{order_id}}", "return"]
+						},
+						"description": "Get return delivery job status.\n\n**Returns:**\n- Return delivery job details\n- Current status and timeline\n- Rider information and tracking\n- Pickup/delivery progress\n- Return condition (if confirmed)\n\n**Available when:** Sale has active return delivery job\n**Available to:** Authenticated sellers"
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Return Receipt",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"condition\": \"good\",\n  \"notes\": \"Item returned in original condition with all accessories and packaging\",\n  \"damage_reason\": null,\n  \"damage_evidence_urls\": []\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/sales/{{order_id}}/confirm-return",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "sales", "{{order_id}}", "confirm-return"]
+						},
+						"description": "Confirm return receipt with condition assessment.\n\n**Request Body:**\n- `condition`: Item condition (required: 'good', 'damaged', 'incomplete')\n- `notes`: Return inspection notes (optional)\n- `damage_reason`: Damage description (required if condition is 'damaged' or 'incomplete')\n- `damage_evidence_urls`: Array of evidence URLs (required if claiming damage)\n\n**Example for Damaged Item:**\n```json\n{\n  \"condition\": \"damaged\",\n  \"notes\": \"Item has significant scratches on screen\",\n  \"damage_reason\": \"Screen damaged during return shipping\",\n  \"damage_evidence_urls\": [\"https://s3.../damage1.jpg\", \"https://s3.../damage2.jpg\"]\n}\n```\n\n**Flow Based on Condition:**\n- **Good:** Automatic refund to buyer, status → return_confirmed\n- **Damaged/Incomplete:** Status → return_damage_disputed, requires admin review\n\n**Available when:** Return delivery status is `return_delivered`\n**Available to:** Authenticated sellers"
 					},
 					"response": []
 				}
@@ -1061,6 +1210,268 @@
 							"path": ["api", "v1", "orders", "{{order_id}}"]
 						},
 						"description": "Get specific order details"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Return Status",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/{{purchase_id}}/return",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "{{purchase_id}}", "return"]
+						},
+						"description": "View return status and track progress.\n\n**Returns:**\n- Return delivery job details\n- Current status (return_required, return_searching_rider, return_in_progress, return_delivered)\n- Rider information (when assigned)\n- Pickup and delivery tracking\n- Return condition (when seller confirms)\n\n**Available when:** Purchase has return_delivery_job_id\n**Available to:** Authenticated buyers"
+					},
+					"response": []
+				},
+				{
+					"name": "Initiate Return",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/{{purchase_id}}/initiate-return",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "{{purchase_id}}", "initiate-return"]
+						},
+						"description": "Buyer initiates return and triggers rider search.\n\n**No request body required.**\n\n**Effects:**\n- Creates return delivery job with swapped coordinates\n- Pickup: Buyer's location (original dropoff)\n- Dropoff: Seller's location (original pickup)\n- Status changes to return_searching_rider\n- Triggers rider search for return pickup\n\n**Available when:** Status is `return_required` (after admin resolves dispute with buyer_wins)\n**Available to:** Authenticated buyers"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Rebook Status",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/{{purchase_id}}/rebook-status",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "{{purchase_id}}", "rebook-status"]
+						},
+						"description": "Get rebook status after buyer unavailability.\n\n**Returns:**\n- `status`: Current payment request status\n- `rebook_deadline`: Deadline to rebook (if applicable)\n- `rebook_attempts`: Number of rebook attempts made\n- `can_rebook`: Whether buyer can still rebook\n- `unavailability_fee`: Fee that will be deducted if not rebooked\n\n**Available when:** Status is `pending_rebook`\n**Available to:** Authenticated buyers"
+					},
+					"response": []
+				},
+				{
+					"name": "Rebook Delivery",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"dropoff_address\": \"123 New Address, Lagos, Nigeria\",\n  \"dropoff_lat\": 6.5244,\n  \"dropoff_lng\": 3.3792\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/{{purchase_id}}/rebook",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "{{purchase_id}}", "rebook"]
+						},
+						"description": "Rebook delivery after buyer unavailability.\n\n**Request Body:**\n- `dropoff_address`: New delivery address (required)\n- `dropoff_lat`: New delivery latitude (required)\n- `dropoff_lng`: New delivery longitude (required)\n\n**Effects:**\n- Creates new delivery job with updated address\n- Status changes to searching_rider\n- Triggers rider search for new delivery\n- Resets rebook attempts counter\n\n**Available when:** Status is `pending_rebook` and within deadline\n**Available to:** Authenticated buyers"
+					},
+					"response": []
+				},
+				{
+					"name": "List Driver Deliveries",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/driver-deliveries",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "driver-deliveries"]
+						},
+						"description": "List all inter-state driver deliveries for buyer"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Driver Delivery Details",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/driver-deliveries/{{driver_delivery_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "driver-deliveries", "{{driver_delivery_id}}"]
+						},
+						"description": "Get specific driver delivery details for buyer"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Driver Delivery Timeline",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/driver-deliveries/{{driver_delivery_id}}/timeline",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "driver-deliveries", "{{driver_delivery_id}}", "timeline"]
+						},
+						"description": "Get timeline for driver delivery showing progress steps.\n\n**Normal Flow Steps:**\n1. Order Created\n2. Awaiting Driver\n3. Driver Assigned\n4. Awaiting Handover (seller brings item to driver)\n5. Item Collected\n6. In Transit\n7. Arrived at Destination\n8. Delivered\n9. Completed\n\n**Edge Case Steps (when applicable):**\n- Buyer Unreachable (driver couldn't reach buyer)\n- Returning to Seller (item being returned)\n- Returned to Seller (return completed)\n- Dispute Opened (buyer raised dispute)\n- Refunded (payment refunded)\n- Cancelled (seller cancelled)\n- Expired (no driver found)\n\n**Response includes:**\n- steps[] - All timeline steps with status (completed/current/pending)\n- current_step - The active step\n- item_name, total_amount, origin_city, destination_city\n- dropoff_code (for buyer when available)\n\n**Available to:** Authenticated buyers"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Dropoff Code",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/driver-deliveries/{{driver_delivery_id}}/dropoff-code",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "driver-deliveries", "{{driver_delivery_id}}", "dropoff-code"]
+						},
+						"description": "Get 6-digit dropoff code for driver verification (only available when driver has arrived at destination)"
+					},
+					"response": []
+				},
+				{
+					"name": "Confirm Driver Delivery",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/driver-deliveries/{{driver_delivery_id}}/confirm",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "driver-deliveries", "{{driver_delivery_id}}", "confirm"]
+						},
+						"description": "Confirm receipt of driver delivery within 24-hour confirmation window.\n\n**Effects:**\n- Releases escrow to seller\n- Credits 85% of driver fee to driver wallet\n- Updates status to 'completed' then 'driver_paid'\n- Triggers payment processing\n\n**Available when:** \n- Status is 'confirmation_window' (after dropoff code verified)\n- Within 24 hours of dropoff verification\n\n**Auto-confirmation:** If not confirmed within 24 hours, delivery is automatically confirmed by background job\n\n**Available to:** Authenticated buyers"
+					},
+					"response": []
+				},
+				{
+					"name": "Dispute Driver Delivery",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Item was damaged during delivery\",\n  \"evidence\": [\"https://example.com/damage1.jpg\", \"https://example.com/damage2.jpg\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/purchases/driver-deliveries/{{driver_delivery_id}}/dispute",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "purchases", "driver-deliveries", "{{driver_delivery_id}}", "dispute"]
+						},
+						"description": "Raise a dispute on driver delivery within 24-hour confirmation window.\n\n**Request Body:**\n- `reason`: Dispute reason (required)\n- `evidence`: Array of evidence URLs (optional)\n\n**Effects:**\n- Updates status to 'disputed'\n- Holds escrow for admin review\n- Prevents automatic confirmation\n- Creates dispute record for admin resolution\n\n**Available when:** \n- Status is 'confirmation_window' (after dropoff code verified)\n- Within 24 hours of dropoff verification\n\n**Available to:** Authenticated buyers"
 					},
 					"response": []
 				}
@@ -1530,6 +1941,97 @@
 						"description": "Pay ALL pending commissions from wallet balance.\n\n**IMPORTANT:** Partial payments are NOT allowed. The full outstanding amount will be deducted from your wallet.\n\n**Success Response:**\n- `amount_paid`: Total amount deducted\n- `commissions_paid`: Number of commission records cleared\n- `new_wallet_balance`: Your new wallet balance\n- `is_now_unblocked`: Whether you can now accept jobs\n\n**Possible Errors:**\n- `INSUFFICIENT_BALANCE`: Not enough wallet balance\n- `NO_COMMISSION_OWED`: No outstanding commission to pay"
 					},
 					"response": []
+				},
+				{
+					"name": "Mark Seller Unavailable",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/jobs/{{job_id}}/mark-seller-unavailable",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "jobs", "{{job_id}}", "mark-seller-unavailable"]
+						},
+						"description": "Mark seller as unavailable during pickup attempt.\n\n**No request body required.**\n\n**Effects:**\n- Job status → seller_unavailable\n- PaymentRequest status → cancelled_seller_unavailable\n- Buyer receives full refund\n- No payment to rider\n- Notifications sent to buyer and seller\n\n**Available when:** Job status is `accepted` or `en_route_pickup`\n**Available to:** Assigned rider only"
+					},
+					"response": []
+				},
+				{
+					"name": "Mark Buyer Unavailable",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/jobs/{{job_id}}/mark-buyer-unavailable",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "jobs", "{{job_id}}", "mark-buyer-unavailable"]
+						},
+						"description": "Mark buyer as unavailable during delivery attempt.\n\n**No request body required.**\n\n**Effects:**\n- Creates forced return job (same rider, swapped coordinates)\n- PaymentRequest status → pending_rebook\n- Buyer has 24 hours to rebook delivery\n- Platform pays rider for return trip\n- If no rebook within 24h → refund minus 5% unavailability fee\n\n**Available when:** Job status is `in_transit` or attempting delivery\n**Available to:** Assigned rider only"
+					},
+					"response": []
+				},
+				{
+					"name": "Complete Forced Return",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"ABC123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/rider/jobs/{{job_id}}/complete-forced-return",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "rider", "jobs", "{{job_id}}", "complete-forced-return"]
+						},
+						"description": "Complete forced return to seller after buyer unavailability.\n\n**Request Body:**\n- `code`: Verification code from seller (required)\n\n**Effects:**\n- Job status → delivered (return completed)\n- Rider receives payment for return trip\n- PaymentRequest remains in pending_rebook status\n- Buyer still has time to rebook (if deadline not passed)\n\n**Available when:** Job is a forced return job and rider has reached seller\n**Available to:** Assigned rider only"
+					},
+					"response": []
 				}
 			]
 		},
@@ -1726,6 +2228,30 @@
 							"path": ["api", "v1", "errands", "{{errand_id}}"]
 						},
 						"description": "Get errand details by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Errand Timeline",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/errands/{{errand_id}}/timeline",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "errands", "{{errand_id}}", "timeline"]
+						},
+						"description": "Get errand timeline showing progress steps.\n\n**Timeline Steps:**\n1. Errand Created\n2. Searching for Rider\n3. Rider Assigned\n4. Rider En Route to Pickup\n5. Item Collected\n6. In Transit\n7. Delivered\n8. Completed\n\n**Edge Case Steps (when applicable):**\n- Cancelled (by user)\n- Expired (no rider found)\n- Failed (delivery issues)\n\n**Response includes:**\n- steps[] - All timeline steps with status (completed/current/pending)\n- current_step - The active step\n- errand_title, pickup_location, dropoff_location\n- dropoff_code (when available)\n- rider_info (when assigned)\n\n**Available to:** Authenticated users (errand creator)"
 					},
 					"response": []
 				},
@@ -2389,6 +2915,105 @@
 					]
 				},
 				{
+					"name": "Driver Management",
+					"item": [
+						{
+							"name": "Get Driver Statistics",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/drivers/statistics",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "drivers", "statistics"]
+								},
+								"description": "Get driver statistics including total, verified, online, and suspended counts.\n\n**Returns:**\n- Total drivers registered\n- Verified drivers count\n- Online drivers count\n- Suspended drivers count\n- Pending verification count\n\n**Available to:** Admin users only"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Pending Drivers",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/drivers/pending",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "drivers", "pending"]
+								},
+								"description": "List drivers awaiting verification.\n\n**Returns:**\n- Driver profiles with is_verified = false\n- Vehicle information and documents\n- Registration details\n- Submission timestamps\n\n**Available to:** Admin users only"
+							},
+							"response": []
+						},
+						{
+							"name": "Verify Driver",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/drivers/{{driver_id}}/verify",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "drivers", "{{driver_id}}", "verify"]
+								},
+								"description": "Verify a pending driver profile.\n\n**Effects:**\n- Sets driver profile is_verified = true\n- Enables driver to go online and accept deliveries\n- Sends verification confirmation notification\n- Records admin action in audit logs\n\n**Available to:** Admin users only\n**Required for:** Driver profiles with is_verified = false"
+							},
+							"response": []
+						},
+						{
+							"name": "Suspend Driver",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Multiple customer complaints about delivery delays\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/drivers/{{driver_id}}/suspend",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "drivers", "{{driver_id}}", "suspend"]
+								},
+								"description": "Suspend a driver profile and their user account.\n\n**Request Body:**\n- `reason`: Suspension reason (required, 10-500 chars)\n\n**Effects:**\n- Sets driver profile is_suspended = true\n- Suspends associated user account\n- Forces driver offline if currently online\n- Cancels any active trips\n- Sends suspension notification\n- Records admin action in audit logs\n\n**Available to:** Admin users only\n**Required for:** Active driver profiles"
+							},
+							"response": []
+						},
+						{
+							"name": "Unsuspend Driver",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/drivers/{{driver_id}}/unsuspend",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "drivers", "{{driver_id}}", "unsuspend"]
+								},
+								"description": "Unsuspend a driver profile and their user account.\n\n**Effects:**\n- Sets driver profile is_suspended = false\n- Unsuspends associated user account\n- Allows driver to go online again\n- Sends unsuspension notification\n- Records admin action in audit logs\n\n**Available to:** Admin users only\n**Required for:** Suspended driver profiles"
+							},
+							"response": []
+						}
+					]
+				},
+				{
 					"name": "User Management",
 					"item": [
 						{"name": "List Users", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "GET", "header": [], "url": {"raw": "{{base_url}}/api/v1/admin/users?limit=50&offset=0", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "users"], "query": [{"key": "limit", "value": "50"}, {"key": "offset", "value": "0"}]}}, "response": []},
@@ -2468,6 +3093,550 @@
 					"item": [
 						{"name": "Broadcast Notification", "request": {"auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]}, "method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{\"title\": \"System Update\", \"body\": \"We will be down for maintenance.\", \"topic\": \"all_users\"}"}, "url": {"raw": "{{base_url}}/api/v1/admin/notifications/broadcast", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "notifications", "broadcast"]}}, "response": []}
 					]
+				},
+				{
+					"name": "Return Claims Management",
+					"item": [
+						{
+							"name": "List Pending Return Claims",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/return-claims?limit=20&offset=0",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "return-claims"],
+									"query": [
+										{"key": "limit", "value": "20", "description": "Number of results (default: 20)"},
+										{"key": "offset", "value": "0", "description": "Pagination offset (default: 0)"}
+									]
+								},
+								"description": "List pending damage claims from sellers.\n\n**Returns:**\n- Return delivery jobs with status `return_damage_disputed`\n- Seller's damage claim reason and evidence\n- Original dispute details\n- Return condition assessment\n- Timeline of events\n\n**Available to:** Admin users only"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Return Claim Details",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/return-claims/{{return_claim_id}}",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "return-claims", "{{return_claim_id}}"]
+								},
+								"description": "Get detailed return claim information.\n\n**Returns:**\n- Complete return delivery job details\n- Original dispute and resolution\n- Seller's damage claim with evidence\n- Return condition and photos\n- All uploaded evidence from both parties\n- Timeline of all events\n\n**Available to:** Admin users only"
+							},
+							"response": []
+						},
+						{
+							"name": "Resolve Return Claim",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"decision\": \"partial_refund\",\n  \"resolution_notes\": \"Item shows minor damage consistent with return shipping. Partial refund of 70% is appropriate based on condition assessment.\",\n  \"refund_amount\": 35000.00\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/return-claims/{{return_claim_id}}/resolve",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "return-claims", "{{return_claim_id}}", "resolve"]
+								},
+								"description": "Resolve seller's damage claim on returned item.\n\n**Request Body:**\n- `decision`: Resolution decision (required: 'full_refund', 'partial_refund', 'release_to_seller')\n- `resolution_notes`: Admin decision notes (required, 10-2000 chars)\n- `refund_amount`: Specific refund amount (required for partial_refund)\n\n**Decisions:**\n- `full_refund`: Buyer gets full refund (seller damage claim rejected)\n- `partial_refund`: Specific refund amount based on damage assessment\n- `release_to_seller`: Seller keeps funds (buyer caused damage during return)\n\n**Effects:**\n- Resolves damage dispute\n- Processes refund according to decision\n- Updates delivery job status to return_refunded\n- Notifies both buyer and seller\n- Records final dispute outcome\n\n**Available to:** Admin users only\n**Required for:** Return jobs with status `return_damage_disputed`"
+							},
+							"response": []
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Logistics Delivery System",
+			"item": [
+				{
+					"name": "Buyer APIs",
+					"item": [
+						{
+							"name": "Get Delivery",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}"]
+								},
+								"description": "Get logistics delivery details.\n\n**Returns:**\n- Delivery info with tracking details\n- Carrier info (name, tracking number, tracking URL)\n- Status and deadlines\n- Available actions for current user\n- Participant info (seller/buyer)\n\n**Available to:** Buyer and Seller"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Delivery Details",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/details",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "details"]
+								},
+								"description": "Get full delivery details including events and evidence.\n\n**Returns:**\n- Complete delivery info\n- Event history (status changes, actions)\n- Uploaded evidence files\n- Dispute information (if any)\n\n**Available to:** Buyer and Seller"
+							},
+							"response": []
+						},
+						{
+							"name": "List Buyer Deliveries",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/buyer?status=shipped&limit=20&offset=0",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "buyer"],
+									"query": [
+										{"key": "status", "value": "shipped", "description": "Filter by status (optional)"},
+										{"key": "limit", "value": "20", "description": "Number of results (default: 20)"},
+										{"key": "offset", "value": "0", "description": "Pagination offset (default: 0)"}
+									]
+								},
+								"description": "List all buyer's logistics deliveries.\n\n**Query Parameters:**\n- `status`: Filter by delivery status (optional)\n- `limit`: Results per page (1-100, default: 20)\n- `offset`: Pagination offset (default: 0)\n\n**Statuses:**\n- `awaiting_shipment` - Waiting for seller to ship\n- `shipped` - Item shipped, tracking available\n- `delivery_claimed` - Seller claims delivered\n- `confirmed` - Buyer confirmed receipt\n- `funds_released` - Payment released to seller\n- `disputed` - Dispute opened\n- `return_required` - Return required (dispute resolved)\n- `return_searching_rider` - Searching for rider to handle return (intra-state)\n- `return_in_progress` - Return pickup/delivery in progress (intra-state)\n- `return_shipped` - Return shipped by buyer (logistics)\n- `return_delivered` - Return delivered to seller\n- `return_received` - Return received in good condition\n- `return_confirmed` - Return confirmed and refunded\n- `return_damage_disputed` - Seller claims return is damaged\n- `return_refunded` - Return process completed with refund\n- `pending_refund_approval` - High-value refund awaiting admin\n- `cancelled` - Order cancelled\n\n**Available to:** Authenticated buyers"
+							},
+							"response": []
+						},
+						{
+							"name": "Confirm Delivery",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"rating\": 5,\n  \"notes\": \"Great service, item arrived in perfect condition!\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/confirm",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "confirm"]
+								},
+								"description": "Confirm delivery receipt and release funds to seller.\n\n**Request Body:**\n- `rating`: Seller rating 1-5 (optional)\n- `notes`: Delivery feedback (optional, max 1000 chars)\n\n**Effects:**\n- Releases escrow funds to seller\n- Marks delivery as confirmed\n- Updates seller rating\n- Sends notification to seller\n\n**Available when:** Status is `delivery_claimed`"
+							},
+							"response": []
+						},
+						{
+							"name": "Cancel Delivery",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Seller exceeded ship deadline and item no longer needed\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/cancel",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "cancel"]
+								},
+								"description": "Cancel delivery and request refund.\n\n**Request Body:**\n- `reason`: Cancellation reason (required, 5-500 chars)\n\n**Requirements:**\n- Ship deadline must be exceeded\n- Item not yet shipped\n\n**Effects:**\n- Cancels the delivery\n- Initiates refund process\n- Notifies seller\n\n**Available when:** Status is `awaiting_shipment` and ship deadline exceeded"
+							},
+							"response": []
+						},
+						{
+							"name": "Mark Return Shipped",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"return_carrier\": \"DHL\",\n  \"return_tracking_number\": \"DHL-RET-789012\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/return-shipped",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "return-shipped"]
+								},
+								"description": "Mark return item as shipped back to seller.\n\n**Request Body:**\n- `return_carrier`: Carrier name (required, max 255 chars)\n- `return_tracking_number`: Tracking number (required, 3-255 chars)\n\n**Effects:**\n- Updates return tracking info\n- Notifies seller of return shipment\n- Changes status to `return_shipped`\n\n**Available when:** Status is `return_required`"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Delivery Timeline",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/timeline",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "timeline"]
+								},
+								"description": "Get delivery timeline with dispute steps.\n\n**Returns:**\n- `steps`: Standard delivery timeline\n- `dispute_steps`: Detailed dispute flow when applicable\n\n**Timeline includes:**\n- Standard flow: awaiting_shipment → shipped → delivery_claimed → confirmed → funds_released\n- Dispute flow: dispute_opened → return_required → return_shipped → return_received/return_damage_disputed → refund\n\n**Dispute Steps Show:**\n- Dispute opened with reason\n- Admin resolution decision\n- Return shipping details\n- Damage claims (if any)\n- Final refund/release outcome\n\n**Available to:** Buyer and Seller"
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Seller APIs",
+					"item": [
+						{
+							"name": "List Seller Deliveries",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/seller?status=awaiting_shipment&limit=20&offset=0",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "seller"],
+									"query": [
+										{"key": "status", "value": "awaiting_shipment", "description": "Filter by status (optional)"},
+										{"key": "limit", "value": "20", "description": "Number of results (default: 20)"},
+										{"key": "offset", "value": "0", "description": "Pagination offset (default: 0)"}
+									]
+								},
+								"description": "List all seller's logistics deliveries.\n\n**Query Parameters:**\n- `status`: Filter by delivery status (optional)\n- `limit`: Results per page (1-100, default: 20)\n- `offset`: Pagination offset (default: 0)\n\n**Available to:** Authenticated sellers"
+							},
+							"response": []
+						},
+						{
+							"name": "Mark Item Shipped",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"carrier\": \"gig_logistics\",\n  \"tracking_number\": \"GIG-123456789\",\n  \"tracking_url\": \"https://giglogistics.com/track/GIG-123456789\",\n  \"shipment_receipt_url\": \"https://s3.amazonaws.com/receipts/shipment-123.jpg\",\n  \"estimated_delivery_at\": \"2026-01-28T10:00:00Z\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/ship",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "ship"]
+								},
+								"description": "Mark item as shipped with tracking information.\n\n**Request Body:**\n- `carrier`: Logistics carrier (required)\n- `carrier_other_name`: Custom carrier name if carrier is 'other' (optional)\n- `tracking_number`: Tracking number (required, 3-255 chars)\n- `tracking_url`: Tracking URL (optional, must be valid URL)\n- `shipment_receipt_url`: Receipt/proof URL (required, must be valid URL)\n- `estimated_delivery_at`: Estimated delivery time (optional, RFC3339 format)\n\n**Supported Carriers:**\n- `gig_logistics` - GIG Logistics\n- `dhl` - DHL Express\n- `fedex` - FedEx\n- `ups` - UPS\n- `aramex` - Aramex\n- `other` - Other carrier (specify in carrier_other_name)\n\n**Effects:**\n- Updates delivery status to `shipped`\n- Sends tracking info to buyer\n- Starts 24-hour claim delay timer\n\n**Available when:** Status is `awaiting_shipment`"
+							},
+							"response": []
+						},
+						{
+							"name": "Update Tracking Info",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "PATCH",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"tracking_number\": \"GIG-987654321\",\n  \"tracking_url\": \"https://giglogistics.com/track/GIG-987654321\",\n  \"estimated_delivery_at\": \"2026-01-29T14:00:00Z\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/tracking",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "tracking"]
+								},
+								"description": "Update tracking information after shipping.\n\n**Request Body:**\n- `tracking_number`: New tracking number (optional, 3-255 chars)\n- `tracking_url`: New tracking URL (optional, must be valid URL)\n- `estimated_delivery_at`: Updated delivery estimate (optional, RFC3339 format)\n\n**Effects:**\n- Updates tracking information\n- Notifies buyer of changes\n\n**Available when:** Status is `shipped` or later"
+							},
+							"response": []
+						},
+						{
+							"name": "Claim Delivery",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"delivery_proof_url\": \"https://s3.amazonaws.com/proofs/delivery-photo-123.jpg\",\n  \"notes\": \"Package delivered to front door as requested\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/claim-delivery",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "claim-delivery"]
+								},
+								"description": "Claim that item has been delivered.\n\n**Request Body:**\n- `delivery_proof_url`: Photo/proof of delivery (optional, must be valid URL)\n- `notes`: Delivery notes (optional, max 1000 chars)\n\n**Requirements:**\n- Must wait 24 hours after shipping\n- Status must be `shipped`\n\n**Effects:**\n- Changes status to `delivery_claimed`\n- Starts 14-day buyer confirmation window\n- Notifies buyer to confirm receipt\n- Auto-releases funds after 14 days if no buyer action\n\n**Available when:** Status is `shipped` and 24+ hours since shipping"
+							},
+							"response": []
+						},
+						{
+							"name": "Confirm Return Received",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"condition\": \"good\",\n  \"notes\": \"Item returned in original condition with all accessories\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/confirm-return",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "confirm-return"]
+								},
+								"description": "Confirm receipt of returned item.\n\n**Request Body:**\n- `condition`: Item condition (required: 'good', 'damaged', 'incomplete')\n- `notes`: Return inspection notes (optional, max 1000 chars)\n\n**Enhanced Flow:**\n- **Good condition:** → `return_received` → auto-refund (low value) or `pending_refund_approval` (high value)\n- **Damaged/incomplete:** → `return_damage_disputed` (seller must provide evidence)\n\n**Available when:** Status is `return_shipped`"
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Dispute & Evidence",
+					"item": [
+						{
+							"name": "Open Dispute",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Item received was significantly different from description. The phone was advertised as new but shows clear signs of use with scratches on the screen.\",\n  \"evidence_urls\": [\n    \"https://s3.amazonaws.com/evidence/item-photo-1.jpg\",\n    \"https://s3.amazonaws.com/evidence/item-photo-2.jpg\",\n    \"https://s3.amazonaws.com/evidence/listing-screenshot.jpg\"\n  ]\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/dispute",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "dispute"]
+								},
+								"description": "Open a dispute for the delivery.\n\n**Request Body:**\n- `reason`: Detailed dispute reason (required, 10-2000 chars)\n- `evidence_urls`: Supporting evidence URLs (optional, max 10 URLs)\n\n**Buyer can dispute when:**\n- Status is `shipped` or `delivery_claimed`\n- No existing dispute\n\n**Seller can dispute when:**\n- Status is `delivery_claimed`\n- 7+ days since buyer was notified\n- Buyer hasn't confirmed or disputed\n\n**Effects:**\n- Changes status to `disputed`\n- Freezes fund release\n- Notifies admin for review\n- Allows evidence upload\n\n**Available to:** Buyer and Seller (conditions apply)"
+							},
+							"response": []
+						},
+						{
+							"name": "Upload Evidence",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"evidence_type\": \"delivery_photo\",\n  \"file_url\": \"https://s3.amazonaws.com/evidence/delivery-proof-123.jpg\",\n  \"description\": \"Photo showing package delivered to correct address\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/logistics/{{logistics_delivery_id}}/evidence",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "logistics", "{{logistics_delivery_id}}", "evidence"]
+								},
+								"description": "Upload evidence for the delivery.\n\n**Request Body:**\n- `evidence_type`: Type of evidence (required)\n- `file_url`: Evidence file URL (required, must be valid URL)\n- `description`: Evidence description (optional, max 500 chars)\n\n**Evidence Types:**\n- `shipment_receipt` - Shipping receipt/label\n- `tracking_screenshot` - Tracking page screenshot\n- `delivery_photo` - Delivery confirmation photo\n- `package_photo` - Package condition photo\n- `damage_photo` - Damage evidence photo\n- `unboxing_video` - Unboxing video\n- `communication_screenshot` - Chat/email screenshot\n- `other` - Other supporting evidence\n\n**Available to:** Buyer and Seller during active delivery"
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Admin APIs",
+					"item": [
+						{
+							"name": "List Pending Admin Approval",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/logistics/pending-approval?limit=20&offset=0",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "logistics", "pending-approval"],
+									"query": [
+										{"key": "limit", "value": "20", "description": "Number of results (default: 20)"},
+										{"key": "offset", "value": "0", "description": "Pagination offset (default: 0)"}
+									]
+								},
+								"description": "List high-value deliveries pending admin approval.\n\n**Returns:**\n- Deliveries with escrow amount > ₦1,000,000\n- Status: `pending_admin_approval`\n- Requires manual admin review before fund release\n\n**Available to:** Admin users only"
+							},
+							"response": []
+						},
+						{
+							"name": "Resolve Dispute",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"outcome\": \"buyer_wins\",\n  \"resolution_notes\": \"Evidence shows item was not as described. Seller failed to provide adequate proof of item condition.\",\n  \"refund_amount\": null,\n  \"return_cost_buyer_share\": null,\n  \"return_cost_seller_share\": null\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/logistics/{{logistics_delivery_id}}/resolve-dispute",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "logistics", "{{logistics_delivery_id}}", "resolve-dispute"]
+								},
+								"description": "Resolve a logistics dispute.\n\n**Request Body:**\n- `outcome`: Resolution outcome (required)\n- `resolution_notes`: Admin decision notes (required, 10-2000 chars)\n- `refund_amount`: Partial refund amount (for partial_refund outcome)\n- `return_cost_buyer_share`: Buyer's return cost % (for return_required)\n- `return_cost_seller_share`: Seller's return cost % (for return_required)\n\n**Outcomes:**\n- `buyer_wins` - Full refund to buyer\n- `seller_wins` - Release funds to seller\n- `partial_refund` - Partial refund (specify amount)\n- `return_required` - Buyer must return item\n\n**Effects:**\n- Resolves dispute\n- Executes outcome (refund/release/return)\n- Notifies both parties\n- Updates delivery status\n\n**Available to:** Admin users only"
+							},
+							"response": []
+						},
+						{
+							"name": "Approve High-Value Release",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"approved\": true,\n  \"notes\": \"Verified delivery confirmation and tracking. Release approved.\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/logistics/{{logistics_delivery_id}}/approve-release",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "logistics", "{{logistics_delivery_id}}", "approve-release"]
+								},
+								"description": "Approve or flag high-value fund release.\n\n**Request Body:**\n- `approved`: Whether to approve release (required)\n- `notes`: Admin review notes (optional, max 1000 chars)\n\n**Effects:**\n- If approved: Releases funds to seller\n- If not approved: Flags for investigation\n- Updates delivery status\n- Notifies seller\n\n**Available to:** Admin users only\n**Required for:** Deliveries with escrow > ₦1,000,000"
+							},
+							"response": []
+						},
+						{
+							"name": "List Damage Claims",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/logistics/damage-claims?limit=20&offset=0",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "logistics", "damage-claims"],
+									"query": [
+										{"key": "limit", "value": "20", "description": "Number of results (default: 20)"},
+										{"key": "offset", "value": "0", "description": "Pagination offset (default: 0)"}
+									]
+								},
+								"description": "List pending damage claims from sellers.\n\n**Returns:**\n- Deliveries with status `return_damage_disputed`\n- Seller's damage claim reason\n- Evidence uploaded by seller\n- Return condition details\n\n**Available to:** Admin users only"
+							},
+							"response": []
+						},
+						{
+							"name": "List Pending Refunds",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/logistics/pending-refunds?limit=20&offset=0",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "logistics", "pending-refunds"],
+									"query": [
+										{"key": "limit", "value": "20", "description": "Number of results (default: 20)"},
+										{"key": "offset", "value": "0", "description": "Pagination offset (default: 0)"}
+									]
+								},
+								"description": "List high-value refunds pending admin approval.\n\n**Returns:**\n- Deliveries with status `pending_refund_approval`\n- High-value refunds (> ₦1,000,000) awaiting approval\n- Return details and condition\n\n**Available to:** Admin users only"
+							},
+							"response": []
+						},
+						{
+							"name": "Resolve Damage Claim",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"outcome\": \"partial_refund\",\n  \"resolution_notes\": \"Item shows minor damage consistent with shipping. Partial refund appropriate.\",\n  \"refund_percentage\": 70.0\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/logistics/{{logistics_delivery_id}}/resolve-damage-claim",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "logistics", "{{logistics_delivery_id}}", "resolve-damage-claim"]
+								},
+								"description": "Resolve seller's damage claim on returned item.\n\n**Request Body:**\n- `outcome`: Resolution outcome (required)\n- `resolution_notes`: Admin decision notes (required, 10-2000 chars)\n- `refund_percentage`: Refund percentage for partial_refund (0-100)\n\n**Outcomes:**\n- `full_refund`: Buyer gets full refund (seller claim rejected)\n- `partial_refund`: Split refund based on damage assessment\n- `release_to_seller`: Seller keeps funds (buyer caused damage)\n\n**Effects:**\n- Resolves damage dispute\n- Processes refund according to outcome\n- Notifies both parties\n- Updates delivery status to final state\n\n**Available to:** Admin users only\n**Required for:** Status `return_damage_disputed`"
+							},
+							"response": []
+						},
+						{
+							"name": "Approve High-Value Refund",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+								},
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"approved\": true,\n  \"notes\": \"Return verified in good condition. High-value refund approved.\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/v1/admin/logistics/{{logistics_delivery_id}}/approve-refund",
+									"host": ["{{base_url}}"],
+									"path": ["api", "v1", "admin", "logistics", "{{logistics_delivery_id}}", "approve-refund"]
+								},
+								"description": "Approve or deny high-value refund.\n\n**Request Body:**\n- `approved`: Whether to approve refund (required)\n- `notes`: Admin review notes (optional, max 1000 chars)\n\n**Effects:**\n- If approved: Processes refund to buyer\n- If denied: Releases funds to seller\n- Updates delivery status\n- Notifies both parties\n\n**Available to:** Admin users only\n**Required for:** High-value refunds (> ₦1,000,000) with status `pending_refund_approval`"
+							},
+							"response": []
+						}
+					]
 				}
 			]
 		},
@@ -2497,6 +3666,378 @@
 						"description": "Connect to WebSocket for real-time updates. Requires Authorization header or query param ?token=..."
 					},
 					"response": []
+				}
+			]
+		},
+		{
+			"name": "Driver System (Inter-State)",
+			"description": "Inter-state driver delivery system with manual status updates and 6-digit verification codes. Drivers handle multiple deliveries per trip on the same route (origin → destination).",
+			"item": [
+				{
+					"name": "Get Driver Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "profile"]
+						}
+					}
+				},
+				{
+					"name": "Create Driver Profile",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"vehicle_type\": \"car\",\n  \"license_plate\": \"ABC-123-XY\",\n  \"nin_number\": \"12345678901\",\n  \"nin_photo_url\": \"https://example.com/nin.jpg\",\n  \"license_number\": \"DRV-123456\",\n  \"license_photo_url\": \"https://example.com/license.jpg\",\n  \"vehicle_photo_url\": \"https://example.com/vehicle.jpg\",\n  \"face_photo_url\": \"https://example.com/face.jpg\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "profile"]
+						}
+					}
+				},
+				{
+					"name": "Update Driver Profile",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"vehicle_type\": \"van\",\n  \"license_plate\": \"NEW-456-ZY\",\n  \"vehicle_photo_url\": \"https://example.com/new-vehicle.jpg\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "profile"]
+						}
+					}
+				},
+				{
+					"name": "Go Online",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"origin_city\": \"Lagos\",\n  \"destination_city\": \"Abuja\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/go-online",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "go-online"]
+						}
+					}
+				},
+				{
+					"name": "Go Offline",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/go-offline",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "go-offline"]
+						}
+					}
+				},
+				{
+					"name": "Get Available Deliveries",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/available-deliveries",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "available-deliveries"]
+						}
+					}
+				},
+				{
+					"name": "Accept Delivery",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/deliveries/{{driver_delivery_id}}/accept",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "deliveries", "{{driver_delivery_id}}", "accept"]
+						}
+					}
+				},
+				{
+					"name": "Get Current Trip",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/trip",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "trip"]
+						}
+					}
+				},
+				{
+					"name": "Get Trip Deliveries",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/trip/deliveries",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "trip", "deliveries"]
+						}
+					}
+				},
+				{
+					"name": "Mark At Pickup Location",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/deliveries/{{driver_delivery_id}}/at-pickup",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "deliveries", "{{driver_delivery_id}}", "at-pickup"]
+						}
+					}
+				},
+				{
+					"name": "Verify Pickup Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"{{pickup_code}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/deliveries/{{driver_delivery_id}}/pickup",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "deliveries", "{{driver_delivery_id}}", "pickup"]
+						}
+					}
+				},
+				{
+					"name": "Mark Departed",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/trip/depart",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "trip", "depart"]
+						}
+					}
+				},
+				{
+					"name": "Mark Arrived",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/trip/arrive",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "trip", "arrive"]
+						}
+					}
+				},
+				{
+					"name": "Verify Dropoff Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"code\": \"{{dropoff_code}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/deliveries/{{driver_delivery_id}}/dropoff",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "deliveries", "{{driver_delivery_id}}", "dropoff"]
+						}
+					}
+				},
+				{
+					"name": "Mark Buyer Unreachable",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/deliveries/{{driver_delivery_id}}/buyer-unreachable",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "deliveries", "{{driver_delivery_id}}", "buyer-unreachable"]
+						}
+					}
+				},
+				{
+					"name": "Get Trip History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/history?limit=10&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "history"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Delivery History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/deliveries/history?limit=10&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "deliveries", "history"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Driver Earnings",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/earnings",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "earnings"]
+						}
+					}
 				}
 			]
 		}
@@ -2594,6 +4135,41 @@
 		},
 		{
 			"key": "dispute_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "logistics_delivery_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "return_claim_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "driver_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "driver_delivery_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "trip_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "pickup_code",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "dropoff_code",
 			"value": "",
 			"type": "string"
 		}

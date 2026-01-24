@@ -18,11 +18,29 @@ const (
 	NotificationEscrowReleased      NotificationType = "escrow_released"
 	NotificationOrderCancelled      NotificationType = "order_cancelled"
 
+	// Unavailability handling
+	NotificationDeliveryFailed NotificationType = "delivery_failed"
+	NotificationItemReturning  NotificationType = "item_returning"
+	NotificationItemReturned   NotificationType = "item_returned"
+	NotificationRebookReminder NotificationType = "rebook_reminder"
+	NotificationRebookExpired  NotificationType = "rebook_expired"
+
 	// Errand lifecycle
 	NotificationErrandAccepted  NotificationType = "errand_accepted"
 	NotificationErrandPickedUp  NotificationType = "errand_picked_up"
 	NotificationErrandDelivered NotificationType = "errand_delivered"
 	NotificationErrandCompleted NotificationType = "errand_completed"
+
+	// Logistics delivery lifecycle
+	NotificationLogisticsShipped          NotificationType = "logistics_shipped"
+	NotificationLogisticsDeliveryClaimed  NotificationType = "logistics_delivery_claimed"
+	NotificationLogisticsConfirmReminder  NotificationType = "logistics_confirm_reminder"
+	NotificationLogisticsConfirmed        NotificationType = "logistics_confirmed"
+	NotificationLogisticsCancelled        NotificationType = "logistics_cancelled"
+	NotificationLogisticsEscalated        NotificationType = "logistics_escalated"
+	NotificationLogisticsReturnRequired   NotificationType = "logistics_return_required"
+	NotificationLogisticsReturnShipped    NotificationType = "logistics_return_shipped"
+	NotificationLogisticsReleased         NotificationType = "logistics_released"
 
 	// Wallet events
 	NotificationTopUpSuccess        NotificationType = "topup_success"

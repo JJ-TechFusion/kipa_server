@@ -32,7 +32,7 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *mi
 		auth.PATCH("/profile", authMiddleware.RequireAuth(), h.UpdateProfile)
 		
 		// Development only endpoint
-		auth.POST("/dev/token", h.GenerateDevToken)
+		auth.POST("/dev/token", h.DevGenerateToken)
 	}
 }
 
@@ -143,22 +143,6 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	util.Success(c, http.StatusOK, response)
 }
 
-func (h *AuthHandler) GenerateDevToken(c *gin.Context) {
-	var req dto.DevTokenRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.ValidationError(c, err)
-		return
-	}
-
-	response, err := h.authService.GenerateDevToken(c.Request.Context(), &req)
-	if err != nil {
-		h.handleError(c, err)
-		return
-	}
-
-	util.Success(c, http.StatusOK, response)
-}
-
 func (h *AuthHandler) handleError(c *gin.Context, err error) {
 	status, code, message := mapErrorToResponse(err)
 	util.Error(c, status, code, message)
@@ -210,4 +194,20 @@ func getClientIP(c *gin.Context) string {
 
 func getUserAgent(c *gin.Context) string {
 	return c.GetHeader("User-Agent")
+}
+
+func (h *AuthHandler) DevGenerateToken(c *gin.Context) {
+	var req dto.DevTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	response, err := h.authService.GenerateDevToken(c.Request.Context(), &req)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, response)
 }

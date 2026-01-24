@@ -30,6 +30,14 @@ type WorkerConfig struct {
 	MaxBackoff        time.Duration // Maximum backoff between restarts
 	JitterPercent     int           // Percentage of jitter to add to intervals (0-100)
 	ReminderCooldownMins int // Minimum minutes between reminder notifications to same seller
+
+	// Logistics delivery jobs
+	LogisticsCheckInterval      time.Duration // Check for exceeded ship deadlines
+	LogisticsReminderInterval   time.Duration // Send confirmation reminders
+	LogisticsEscalationInterval time.Duration // Auto-escalate unresponsive buyers
+
+	// Rebook expiry job
+	RebookExpiryCheckInterval time.Duration // Check for expired rebook deadlines
 }
 func DefaultWorkerConfig() *WorkerConfig {
 	return &WorkerConfig{
@@ -50,17 +58,27 @@ func DefaultWorkerConfig() *WorkerConfig {
 		JitterPercent:  20,              // Add up to 20% jitter
 
 		ReminderCooldownMins: 60, // 1 hour between reminders
+
+		// Logistics delivery jobs
+		LogisticsCheckInterval:      15 * time.Minute, // Check ship deadlines every 15 min
+		LogisticsReminderInterval:   1 * time.Hour,    // Send reminders hourly
+		LogisticsEscalationInterval: 30 * time.Minute, // Check for auto-escalation every 30 min
+
+		// Rebook expiry job
+		RebookExpiryCheckInterval: 5 * time.Minute, // Check expired rebook deadlines every 5 min
 	}
 }
 type DistributedLock interface {
 	Lock(ctx context.Context, name string, ttl time.Duration) (release func(), acquired bool)
 }
 type JobProcessor struct {
-	escrowService EscrowServiceInterface
+	escrowService      EscrowServiceInterface
+	logisticsService   LogisticsServiceInterface
+	driverService      DriverServiceInterface
 	deliveryJobRepo    repository.DeliveryJobRepository
 	paymentRequestRepo repository.PaymentRequestRepository
 	riderOfferRepo     repository.RiderJobOfferRepository
-	lock DistributedLock
+	lock   DistributedLock
 	config *WorkerConfig
 	logger *zap.Logger
 	stopCh chan struct{}
@@ -93,13 +111,26 @@ func NewJobProcessor(
 }
 func (p *JobProcessor) Start(ctx context.Context) {
 	p.logger.Info("starting background job processor")
-	p.wg.Add(5)
+	p.wg.Add(12) // 5 existing + 3 logistics + 1 rebook + 1 driver auto-confirm + 2 driver monitors
 
 	go p.runWithRecovery(ctx, "escrow_timeout", p.runEscrowTimeoutJob)
 	go p.runWithRecovery(ctx, "rider_search_timeout", p.runRiderSearchTimeoutJob)
 	go p.runWithRecovery(ctx, "link_expiry", p.runLinkExpiryJob)
 	go p.runWithRecovery(ctx, "radius_expand", p.runRadiusExpandJob)
 	go p.runWithRecovery(ctx, "timer_expiry", p.runTimerExpiryJob)
+
+	// Logistics delivery jobs
+	go p.runWithRecovery(ctx, "logistics_ship_deadline", p.runLogisticsShipDeadlineJob)
+	go p.runWithRecovery(ctx, "logistics_reminder", p.runLogisticsReminderJob)
+	go p.runWithRecovery(ctx, "logistics_escalation", p.runLogisticsAutoEscalationJob)
+
+	// Rebook expiry job
+	go p.runWithRecovery(ctx, "rebook_expiry", p.runRebookExpiryJob)
+
+	// Driver delivery jobs (Phase 4 + 5)
+	go p.runWithRecovery(ctx, "driver_delivery_auto_confirm", p.runDriverDeliveryAutoConfirmJob)
+	go p.runWithRecovery(ctx, "driver_delivery_monitor", p.runDriverDeliveryMonitorJob)
+	go p.runWithRecovery(ctx, "driver_trip_monitor", p.runDriverTripMonitorJob)
 
 	p.logger.Info("all background jobs started")
 }
@@ -190,6 +221,14 @@ func (p *JobProcessor) addJitter(d time.Duration) time.Duration {
 }
 func (p *JobProcessor) SetEscrowService(svc service.EscrowService) {
 	p.escrowService = svc
+}
+
+func (p *JobProcessor) SetLogisticsService(svc LogisticsServiceInterface) {
+	p.logisticsService = svc
+}
+
+func (p *JobProcessor) SetDriverService(svc DriverServiceInterface) {
+	p.driverService = svc
 }
 func (p *JobProcessor) SetDistributedLock(lock DistributedLock) {
 	p.lock = lock

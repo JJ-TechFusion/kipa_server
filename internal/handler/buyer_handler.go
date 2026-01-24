@@ -15,20 +15,32 @@ import (
 )
 
 type BuyerHandler struct {
-	prService       service.PaymentRequestService
-	orderService    service.OrderService
-	escrowService   service.EscrowService
-	userRepo        repository.UserRepository
-	deliveryJobRepo repository.DeliveryJobRepository
+	prService                service.PaymentRequestService
+	orderService             service.OrderService
+	escrowService            service.EscrowService
+	userRepo                 repository.UserRepository
+	deliveryJobRepo          repository.DeliveryJobRepository
+	disputeResolutionService service.DisputeResolutionService
+	driverService            service.DriverService
 }
 
-func NewBuyerHandler(prService service.PaymentRequestService, orderService service.OrderService, escrowService service.EscrowService, userRepo repository.UserRepository, deliveryJobRepo repository.DeliveryJobRepository) *BuyerHandler {
+func NewBuyerHandler(
+	prService service.PaymentRequestService,
+	orderService service.OrderService,
+	escrowService service.EscrowService,
+	userRepo repository.UserRepository,
+	deliveryJobRepo repository.DeliveryJobRepository,
+	disputeResolutionService service.DisputeResolutionService,
+	driverService service.DriverService,
+) *BuyerHandler {
 	return &BuyerHandler{
-		prService:       prService,
-		orderService:    orderService,
-		escrowService:   escrowService,
-		userRepo:        userRepo,
-		deliveryJobRepo: deliveryJobRepo,
+		prService:                prService,
+		orderService:             orderService,
+		escrowService:            escrowService,
+		userRepo:                 userRepo,
+		deliveryJobRepo:          deliveryJobRepo,
+		disputeResolutionService: disputeResolutionService,
+		driverService:            driverService,
 	}
 }
 
@@ -49,6 +61,22 @@ func (h *BuyerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		purchases.GET("/:id/timeline", h.GetPurchaseTimeline)
 		purchases.POST("/:id/confirm", h.ConfirmDelivery)
 		purchases.POST("/:id/dispute", h.DisputePurchase)
+
+		// Return flow endpoints
+		purchases.GET("/:id/return", h.GetReturnStatus)
+		purchases.POST("/:id/initiate-return", h.InitiateReturn)
+
+		// Rebook endpoints (after buyer unavailability)
+		purchases.GET("/:id/rebook-status", h.GetRebookStatus)
+		purchases.POST("/:id/rebook", h.RebookDelivery)
+
+		// Driver delivery endpoints (inter-state)
+		purchases.GET("/driver-deliveries", h.ListBuyerDriverDeliveries)
+		purchases.GET("/driver-deliveries/:delivery_id", h.GetBuyerDriverDelivery)
+		purchases.GET("/driver-deliveries/:delivery_id/timeline", h.GetDriverDeliveryTimeline)
+		purchases.GET("/driver-deliveries/:delivery_id/dropoff-code", h.GetDropoffCode)
+		purchases.POST("/driver-deliveries/:delivery_id/confirm", h.ConfirmDriverDelivery)
+		purchases.POST("/driver-deliveries/:delivery_id/dispute", h.DisputeDriverDelivery)
 	}
 	orders := router.Group("/orders")
 	orders.Use(authMiddleware.RequireAuth())
@@ -246,7 +274,11 @@ func (h *BuyerHandler) GetPurchase(c *gin.Context) {
 		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
 	}
 
-	util.Success(c, http.StatusOK, orderToPurchaseResponse(order, pr, job))
+	resp := orderToPurchaseResponse(order, pr, job)
+	timeline := BuildTimeline(TimelineViewBuyer, pr, order, job)
+	resp.Timeline = &timeline
+
+	util.Success(c, http.StatusOK, resp)
 }
 func (h *BuyerHandler) ConfirmDelivery(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -469,7 +501,7 @@ func paymentPageToResponse(pr *domain.PaymentRequest) PaymentPageResponse {
 
 type PurchaseResponse struct {
 	ID                   uuid.UUID  `json:"id"`
-	PaymentRequestID     uuid.UUID  `json:"payment_request_id"`                  
+	PaymentRequestID     uuid.UUID  `json:"payment_request_id"`
 	ItemName             string     `json:"item_name"`
 	ItemDescription      *string    `json:"item_description,omitempty"`
 	ItemPrice            float64    `json:"item_price"`
@@ -485,6 +517,7 @@ type PurchaseResponse struct {
 	CreatedAt            string     `json:"created_at"`
 
 	Delivery *PurchaseDeliveryInfo `json:"delivery,omitempty"`
+	Timeline *TimelineResponse     `json:"timeline,omitempty"`
 }
 
 type PurchaseDeliveryInfo struct {
@@ -614,5 +647,434 @@ func (h *BuyerHandler) GetPurchaseTimeline(c *gin.Context) {
 
 	timeline := BuildTimeline(TimelineViewBuyer, pr, order, job)
 
+	util.Success(c, http.StatusOK, timeline)
+}
+
+// GetReturnStatus returns the return job status for a purchase
+func (h *BuyerHandler) GetReturnStatus(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid purchase ID")
+		return
+	}
+
+	order, err := h.orderService.GetOrderByID(c.Request.Context(), id)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	if order.BuyerID != userID {
+		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this purchase")
+		return
+	}
+
+	pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	// Check if return is required or in progress
+	if !pr.Status.IsReturnFlow() && pr.Status != domain.PRStatusReturnRequired {
+		util.Error(c, http.StatusNotFound, "NO_RETURN", "No return required for this purchase")
+		return
+	}
+
+	response := BuyerReturnStatusResponse{
+		PaymentRequestID: pr.ID,
+		Status:           string(pr.Status),
+		DisputeOutcome:   pr.DisputeOutcome,
+		CanInitiate:      pr.Status == domain.PRStatusReturnRequired && pr.ReturnDeliveryJobID == nil,
+	}
+
+	// If there's an active return job, include its details
+	if pr.ReturnDeliveryJobID != nil {
+		returnJob, err := h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ReturnDeliveryJobID)
+		if err == nil {
+			response.ReturnJob = &BuyerReturnJobInfo{
+				ID:             returnJob.ID,
+				Status:         string(returnJob.Status),
+				PickupAddress:  returnJob.PickupAddress,
+				DropoffAddress: returnJob.DropoffAddress,
+				RiderAssigned:  returnJob.RiderID != nil,
+				PickupCode:     returnJob.PickupCode,
+				CreatedAt:      returnJob.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			}
+			if returnJob.AcceptedAt != nil {
+				t := returnJob.AcceptedAt.Format("2006-01-02T15:04:05Z07:00")
+				response.ReturnJob.AcceptedAt = &t
+			}
+			if returnJob.PickedUpAt != nil {
+				t := returnJob.PickedUpAt.Format("2006-01-02T15:04:05Z07:00")
+				response.ReturnJob.PickedUpAt = &t
+			}
+			if returnJob.DeliveredAt != nil {
+				t := returnJob.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
+				response.ReturnJob.DeliveredAt = &t
+			}
+		}
+	}
+
+	util.Success(c, http.StatusOK, response)
+}
+
+// InitiateReturn starts the return process by creating a return delivery job
+func (h *BuyerHandler) InitiateReturn(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid purchase ID")
+		return
+	}
+
+	order, err := h.orderService.GetOrderByID(c.Request.Context(), id)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	if order.BuyerID != userID {
+		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this purchase")
+		return
+	}
+
+	pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	// Verify this purchase requires a return
+	if pr.Status != domain.PRStatusReturnRequired {
+		util.Error(c, http.StatusBadRequest, "INVALID_STATUS", "Return is not required for this purchase")
+		return
+	}
+
+	// Check if return already initiated
+	if pr.ReturnDeliveryJobID != nil {
+		util.Error(c, http.StatusBadRequest, "ALREADY_INITIATED", "Return has already been initiated")
+		return
+	}
+
+	// Create return delivery job
+	returnJob, err := h.disputeResolutionService.CreateReturnDeliveryJob(c.Request.Context(), pr.ID)
+	if err != nil {
+		util.Error(c, http.StatusInternalServerError, "RETURN_FAILED", err.Error())
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message":       "Return initiated successfully. A rider will be dispatched to pick up the item.",
+		"return_job_id": returnJob.ID,
+		"status":        string(returnJob.Status),
+		"pickup_address": returnJob.PickupAddress,
+		"dropoff_address": returnJob.DropoffAddress,
+	})
+}
+
+// Return flow DTOs for buyer
+type BuyerReturnStatusResponse struct {
+	PaymentRequestID uuid.UUID          `json:"payment_request_id"`
+	Status           string             `json:"status"`
+	DisputeOutcome   *string            `json:"dispute_outcome,omitempty"`
+	CanInitiate      bool               `json:"can_initiate"`
+	ReturnJob        *BuyerReturnJobInfo `json:"return_job,omitempty"`
+}
+
+type BuyerReturnJobInfo struct {
+	ID             uuid.UUID `json:"id"`
+	Status         string    `json:"status"`
+	PickupAddress  string    `json:"pickup_address"`
+	DropoffAddress string    `json:"dropoff_address"`
+	RiderAssigned  bool      `json:"rider_assigned"`
+	PickupCode     *string   `json:"pickup_code,omitempty"`
+	CreatedAt      string    `json:"created_at"`
+	AcceptedAt     *string   `json:"accepted_at,omitempty"`
+	PickedUpAt     *string   `json:"picked_up_at,omitempty"`
+	DeliveredAt    *string   `json:"delivered_at,omitempty"`
+}
+
+// GetRebookStatus returns the rebook status for a purchase after buyer unavailability
+func (h *BuyerHandler) GetRebookStatus(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid purchase ID")
+		return
+	}
+
+	order, err := h.orderService.GetOrderByID(c.Request.Context(), id)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	if order.BuyerID != userID {
+		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this purchase")
+		return
+	}
+
+	status, err := h.prService.GetRebookStatus(c.Request.Context(), order.PaymentRequestID, userID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, status)
+}
+
+// RebookDelivery handles buyer rebooking delivery after being unavailable
+func (h *BuyerHandler) RebookDelivery(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid purchase ID")
+		return
+	}
+
+	var req service.RebookDeliveryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	order, err := h.orderService.GetOrderByID(c.Request.Context(), id)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	if order.BuyerID != userID {
+		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this purchase")
+		return
+	}
+
+	job, err := h.prService.RebookDelivery(c.Request.Context(), order.PaymentRequestID, userID, &req)
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "REBOOK_FAILED", err.Error())
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message":    "Delivery rebooked successfully. Searching for rider.",
+		"job_id":     job.ID,
+		"status":     string(job.Status),
+		"pickup_address":  job.PickupAddress,
+		"dropoff_address": job.DropoffAddress,
+		"delivery_fee":    job.DeliveryFee,
+	})
+}
+
+// ============================================
+// Driver Delivery Endpoints (Inter-state)
+// ============================================
+
+func (h *BuyerHandler) ListBuyerDriverDeliveries(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	limit := 20
+	offset := 0
+
+	deliveries, err := h.driverService.GetDeliveriesByBuyer(c.Request.Context(), userID, limit, offset)
+	if err != nil {
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to fetch driver deliveries")
+		return
+	}
+
+	responses := make([]DriverDeliveryResponse, 0, len(deliveries))
+	for _, d := range deliveries {
+		responses = append(responses, driverDeliveryToResponse(d))
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"deliveries": responses,
+		"count":      len(responses),
+	})
+}
+
+func (h *BuyerHandler) GetBuyerDriverDelivery(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("delivery_id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid delivery ID")
+		return
+	}
+
+	delivery, err := h.driverService.GetDeliveryForBuyer(c.Request.Context(), userID, id)
+	if err != nil {
+		if err == domain.ErrUnauthorized {
+			util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this delivery")
+			return
+		}
+		util.Error(c, http.StatusNotFound, "NOT_FOUND", "Delivery not found")
+		return
+	}
+
+	// Get payment request for timeline
+	pr, _ := h.prService.GetByID(c.Request.Context(), delivery.PaymentRequestID)
+
+	resp := driverDeliveryToResponse(delivery)
+	if pr != nil {
+		timeline := BuildDriverDeliveryTimeline(TimelineViewBuyer, delivery, pr)
+		resp.Timeline = &timeline
+	}
+
+	util.Success(c, http.StatusOK, resp)
+}
+
+func (h *BuyerHandler) GetDropoffCode(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("delivery_id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid delivery ID")
+		return
+	}
+
+	code, err := h.driverService.GetDropoffCodeForBuyer(c.Request.Context(), userID, id)
+	if err != nil {
+		if err == domain.ErrUnauthorized {
+			util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this delivery")
+			return
+		}
+		util.Error(c, http.StatusBadRequest, "CODE_ERROR", err.Error())
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"dropoff_code": code,
+		"message":      "Give this code to the driver to confirm delivery",
+	})
+}
+
+func (h *BuyerHandler) ConfirmDriverDelivery(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("delivery_id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid delivery ID")
+		return
+	}
+
+	if err := h.driverService.ConfirmDelivery(c.Request.Context(), userID, id); err != nil {
+		if err == domain.ErrUnauthorized {
+			util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this delivery")
+			return
+		}
+		util.Error(c, http.StatusBadRequest, "CONFIRM_ERROR", err.Error())
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message": "Delivery confirmed. Payment released to seller.",
+	})
+}
+
+func (h *BuyerHandler) DisputeDriverDelivery(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("delivery_id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid delivery ID")
+		return
+	}
+
+	var req DriverDeliveryDisputeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	if err := h.driverService.DisputeDelivery(c.Request.Context(), userID, id, req.Reason); err != nil {
+		if err == domain.ErrUnauthorized {
+			util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this delivery")
+			return
+		}
+		util.Error(c, http.StatusBadRequest, "DISPUTE_ERROR", err.Error())
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message": "Dispute opened. Our team will review your case.",
+	})
+}
+
+type DriverDeliveryDisputeRequest struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
+func (h *BuyerHandler) GetDriverDeliveryTimeline(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("delivery_id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid delivery ID")
+		return
+	}
+
+	delivery, err := h.driverService.GetDeliveryForBuyer(c.Request.Context(), userID, id)
+	if err != nil {
+		if err == domain.ErrUnauthorized {
+			util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this delivery")
+			return
+		}
+		util.Error(c, http.StatusNotFound, "NOT_FOUND", "Delivery not found")
+		return
+	}
+
+	pr, err := h.prService.GetByID(c.Request.Context(), delivery.PaymentRequestID)
+	if err != nil {
+		util.Error(c, http.StatusNotFound, "NOT_FOUND", "Payment request not found")
+		return
+	}
+
+	timeline := BuildDriverDeliveryTimeline(TimelineViewBuyer, delivery, pr)
 	util.Success(c, http.StatusOK, timeline)
 }

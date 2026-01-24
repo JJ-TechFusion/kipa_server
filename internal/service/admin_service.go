@@ -22,6 +22,13 @@ type AdminService interface {
 	GetPendingRiders(ctx context.Context, limit, offset int) ([]*domain.RiderProfile, error)
 	GetRiderStatistics(ctx context.Context) (*RiderStatistics, error)
 
+	// Driver Management (Inter-state)
+	VerifyDriver(ctx context.Context, driverID uuid.UUID, adminID uuid.UUID) error
+	SuspendDriver(ctx context.Context, driverID uuid.UUID, reason string, adminID uuid.UUID) error
+	UnsuspendDriver(ctx context.Context, driverID uuid.UUID, adminID uuid.UUID) error
+	GetPendingDrivers(ctx context.Context, limit, offset int) ([]*domain.DriverProfile, error)
+	GetDriverStatistics(ctx context.Context) (*repository.DriverStatistics, error)
+
 	// User Management
 	ListUsers(ctx context.Context, filters *UserFilters, limit, offset int) ([]*domain.User, error)
 	SuspendUser(ctx context.Context, userID uuid.UUID, reason string, adminID uuid.UUID) error
@@ -103,6 +110,7 @@ type UserStatistics struct {
 type AdminServiceImpl struct {
 	userRepo            repository.UserRepository
 	riderRepo           repository.RiderProfileRepository
+	driverRepo          repository.DriverProfileRepository
 	settingsRepo        repository.PlatformSettingsRepository
 	walletTxRepo        repository.WalletTransactionRepository
 	walletRepo          repository.WalletRepository
@@ -160,6 +168,7 @@ type ExternalServicesHealth struct {
 func NewAdminService(
 	userRepo repository.UserRepository,
 	riderRepo repository.RiderProfileRepository,
+	driverRepo repository.DriverProfileRepository,
 	settingsRepo repository.PlatformSettingsRepository,
 	walletTxRepo repository.WalletTransactionRepository,
 	walletRepo repository.WalletRepository,
@@ -174,6 +183,7 @@ func NewAdminService(
 	return &AdminServiceImpl{
 		userRepo:            userRepo,
 		riderRepo:           riderRepo,
+		driverRepo:          driverRepo,
 		settingsRepo:        settingsRepo,
 		walletTxRepo:        walletTxRepo,
 		walletRepo:          walletRepo,
@@ -294,6 +304,180 @@ func (s *AdminServiceImpl) GetRiderStatistics(ctx context.Context) (*RiderStatis
 		AverageRating:   stats.AverageRating,
 		TotalDeliveries: stats.TotalDeliveries,
 	}, nil
+}
+
+// Driver Management
+
+func (s *AdminServiceImpl) VerifyDriver(ctx context.Context, driverID uuid.UUID, adminID uuid.UUID) error {
+	driver, err := s.driverRepo.GetByID(ctx, driverID)
+	if err != nil {
+		return fmt.Errorf("failed to get driver: %w", err)
+	}
+
+	if driver.IsVerified {
+		return fmt.Errorf("driver already verified")
+	}
+
+	// For drivers, verification involves setting is_verified = true
+	// and potentially updating status from loading/idle
+	// The repo update will handle the fields.
+	// However, we need to construct a robust update or just add a Verify method to repo if not exists.
+	// Looking at driver_repo.go, Create inserts is_verified. Update updates is_verified.
+	// Let's check if there is a specific Verify method or we just use Update.
+	// The repository structure is common. Let's assume we update the profile.
+
+	driver.IsVerified = true
+	driver.Status = domain.DriverStatusIdle // Set to idle so they can start working
+	
+	if err := s.driverRepo.Update(ctx, driver); err != nil {
+		return fmt.Errorf("failed to verify driver: %w", err)
+	}
+
+	s.logger.Info("driver verified by admin",
+		zap.String("driver_id", driverID.String()),
+		zap.String("user_id", driver.UserID.String()),
+		zap.String("admin_id", adminID.String()),
+	)
+
+	return nil
+}
+
+func (s *AdminServiceImpl) SuspendDriver(ctx context.Context, driverID uuid.UUID, reason string, adminID uuid.UUID) error {
+	driver, err := s.driverRepo.GetByID(ctx, driverID)
+	if err != nil {
+		return fmt.Errorf("failed to get driver: %w", err)
+	}
+
+	// We don't have a specific "suspended" status in DriverStatus enum for inter-state drivers in the file viewed earlier?
+	// Checking internal/domain/driver.go:
+	// const (
+	// 	DriverStatusOffline    DriverStatus = "offline"
+	// 	DriverStatusIdle       DriverStatus = "idle"
+	// 	DriverStatusLoading    DriverStatus = "loading"
+	// 	DriverStatusInTransit  DriverStatus = "in_transit"
+	// 	DriverStatusDelivering DriverStatus = "delivering"
+	// )
+	// It appears there is NO "suspended" status for drivers in the domain model I viewed. 
+	// However, usually we suspend the USER account.
+	// But the requirement implies acting on the driver profile. 
+	// Let's re-read the domain/driver.go carefully. 
+	// Ah, I missed if there was a status. 
+	// Wait, I viewed domain/driver.go. 
+	// The available statuses are: Offline, Idle, Loading, InTransit, Delivering.
+	// There is NO Suspended status for driver profile itself in the enum.
+	// AND there is `IsVerified` bool.
+	// BUT, `rider` has `Suspended` status.
+	// For drivers, we might just suspend the USER.
+	// OR, maybe I should add Suspended status to DriverStatus?
+	// Modifying domain enums might be risky if DB has constraints.
+	// The `driver_profiles` table definition in `driver_repo.go` shows: `status type is inferred`.
+	// Let's look at `SuspendRider` implementation. It suspends rider profile AND user.
+	// addressing the user's specific error: "failed to get rider: rider not found" implies they called the RIDER endpoint.
+	// The user wants to manage drivers.
+	// If I cannot set DriverStatus to Suspended, I can at least suspend the User.
+	// OR, I can set IsVerified = false?
+	// Let's err on the side of suspending the USER for now, as that blocks access.
+	// AND updating the plan to reflect 'SuspendUser' reuse or clarify limitation?
+	// No, the user expects parallel functionality. 
+	// Let's look at `driver_repo.go` again to see what `UpdateStatus` accepts. It takes `domain.DriverStatus`.
+	
+	// Assumption: I should add `DriverStatusSuspended` to `domain/driver.go` and `database_schema.sql` if possible?
+	// Altering enum types in Postgres requires migration. I cannot easily do that here without user permission/task for migration.
+	// However, looking at the code, `AdminHandler.SuspendRider` calls `adminService.SuspendRider`.
+	// `VerifyRider` sets `Verified` status.
+	// For Driver, `Verify` sets `IsVerified=true`.
+	// For Suspend, maybe just Suspend the User ID?
+	// Let's check if the USER has `is_rider` flag.
+	// Drivers (inter-state) also use `users` table.
+	// If I suspend the user, they can't log in. That works.
+	// But what about tracking "Suspended Drivers"?
+	// If I can't change the enum, I will just suspend the user.
+	// BUT, for `GetStatistics`, we likely need to count them.
+	// `rider_repo.go` has `COUNT(*) FILTER (WHERE status = 'suspended')`.
+	// `driver_repo.go` has `GetStatistics` query:
+	// `COUNT(*) as total_drivers`
+	// `COUNT(*) FILTER (WHERE is_verified = true) as verified_drivers`
+	// `COUNT(*) FILTER (WHERE status IN ('idle', 'loading')) as online_drivers`
+	// It does NOT have defined count for suspended.
+	
+	// Implementation decision:
+	// `SuspendDriver` will suspend the underlying USER. 
+	// And maybe set `IsVerified = false` as well to prevent them from working even if user is unsuspended?
+	// I will just suspend the user for now.
+	
+	if err := s.userRepo.Suspend(ctx, driver.UserID, reason); err != nil {
+		return fmt.Errorf("failed to suspend driver's user account: %w", err)
+	}
+	
+	// Optionally set status to Offline
+	s.driverRepo.UpdateStatus(ctx, driverID, domain.DriverStatusOffline)
+
+	s.logger.Info("driver suspended by admin (user suspended)",
+		zap.String("driver_id", driverID.String()),
+		zap.String("admin_id", adminID.String()),
+		zap.String("reason", reason),
+	)
+
+	return nil
+}
+
+func (s *AdminServiceImpl) UnsuspendDriver(ctx context.Context, driverID uuid.UUID, adminID uuid.UUID) error {
+	driver, err := s.driverRepo.GetByID(ctx, driverID)
+	if err != nil {
+		return fmt.Errorf("failed to get driver: %w", err)
+	}
+
+	if err := s.userRepo.Unsuspend(ctx, driver.UserID); err != nil {
+		return fmt.Errorf("failed to unsuspend driver's user account: %w", err)
+	}
+
+	s.logger.Info("driver unsuspended by admin",
+		zap.String("driver_id", driverID.String()),
+		zap.String("admin_id", adminID.String()),
+	)
+
+	return nil
+}
+
+func (s *AdminServiceImpl) GetPendingDrivers(ctx context.Context, limit, offset int) ([]*domain.DriverProfile, error) {
+	// Driver profile doesn't have "Pending" status in enum basically.
+	// But it has `IsVerified` boolean. 
+	// A pending driver is likely one where `IsVerified` is false.
+	// `driver_repo.go` does not have a `GetByVerified` method but has `GetByStatus`.
+	// But `GetByStatus` uses the enum.
+	// I need to filter by `is_verified = false`.
+	// `driver_repo.go` does NOT have a method for filtering by `is_verified`.
+	// However, `GetStatistics` uses it.
+	// I should probably add `GetPending` to `driverRepo`?
+	// OR use `GetByStatus` if there is a 'pending' status I missed.
+	// There is NO 'pending' status.
+	// I will add a method to `DriverProfileRepo` to `GetPending(limit, offset)` which queries `WHERE is_verified = false`.
+	// Since I cannot modify repo easily without checking if it exists, I'll assume I need to check `driver_repo.go` again to potentially ADD that method.
+	// I checked `driver_repo.go` and it only has `GetByStatus`.
+	// Wait, I can't add methods to the interface if I don't modify the interface definition too.
+	// The `driverRepo` implementation is in `internal/repository/postgres/driver_repo.go` and interface in `internal/repository/interfaces.go`.
+	
+	// Actually, looking at `driver_repo.go` `GetStatistics`, it counts `is_verified = true`.
+	// So `is_verified = false` IS pending.
+	// But there is no method to fetch them list-wise.
+	// I might have to add it to `driver_repo.go`.
+	// I checked `driver_repo.go` content in previous turn. It does NOT have `GetPending`.
+	// It has `GetByStatus`.
+	
+	// For now, to avoid expanding scope too much, I will rely on the fact that I need to add `GetPending` to `DriverProfileRepository` interface and implementation.
+	// I will do that in a separate tool call.
+	// For this chunk, I will assume the method exists `GetPending(ctx, limit, offset)`.
+	
+	// WAIT, I should modify the repository first? 
+	// Or I can just check in `admin_service.go` if I can use existing methods?
+	// No existing method fits. 
+	// I will add `GetPending` to repo.
+	
+	return s.driverRepo.GetPending(ctx, limit, offset)
+}
+
+func (s *AdminServiceImpl) GetDriverStatistics(ctx context.Context) (*repository.DriverStatistics, error) {
+	return s.driverRepo.GetStatistics(ctx)
 }
 
 // User Management

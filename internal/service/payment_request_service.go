@@ -50,6 +50,24 @@ type PaymentRequestService interface {
 	MarkDelivered(ctx context.Context, prID uuid.UUID) error
 
 	MarkCompleted(ctx context.Context, prID uuid.UUID) error
+
+	// Rebook delivery after buyer unavailability
+	RebookDelivery(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error)
+	GetRebookStatus(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID) (*RebookStatusResponse, error)
+}
+
+type RebookDeliveryRequest struct {
+	DropoffAddress string   `json:"dropoff_address" binding:"required"`
+	DropoffLat     float64  `json:"dropoff_lat" binding:"required"`
+	DropoffLng     float64  `json:"dropoff_lng" binding:"required"`
+}
+
+type RebookStatusResponse struct {
+	Status          string     `json:"status"`
+	RebookDeadline  *time.Time `json:"rebook_deadline,omitempty"`
+	RebookAttempts  int        `json:"rebook_attempts"`
+	CanRebook       bool       `json:"can_rebook"`
+	TimeRemaining   string     `json:"time_remaining,omitempty"`
 }
 
 type CreateDraftRequest struct {
@@ -65,9 +83,11 @@ type CreateDraftRequest struct {
 type ConfigureFulfillmentRequest struct {
 	DeliveryType   domain.DeliveryType `json:"delivery_type" binding:"required"`
 	PickupAddress  string              `json:"pickup_address"`
+	PickupState    string              `json:"pickup_state"`  // Required for inter_state delivery
 	PickupLat      *float64            `json:"pickup_lat"`
 	PickupLng      *float64            `json:"pickup_lng"`
 	DropoffAddress string              `json:"dropoff_address"`
+	DropoffState   string              `json:"dropoff_state"` // Required for inter_state delivery
 	DropoffLat     *float64            `json:"dropoff_lat"`
 	DropoffLng     *float64            `json:"dropoff_lng"`
 	VehicleType    domain.VehicleType  `json:"vehicle_type"` // Optional: motorcycle (default) or car
@@ -154,14 +174,32 @@ func (s *PaymentRequestServiceImpl) CreateDraft(ctx context.Context, sellerID uu
 	return pr, nil
 }
 func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID, req *ConfigureFulfillmentRequest) (*domain.PaymentRequest, error) {
+	s.logger.Info("starting fulfillment configuration", 
+		zap.String("pr_id", prID.String()),
+		zap.String("seller_id", sellerID.String()),
+		zap.String("delivery_type", string(req.DeliveryType)),
+	)
+
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
+		s.logger.Error("failed to get payment request", zap.Error(err), zap.String("pr_id", prID.String()))
 		return nil, err
 	}
+	
+	s.logger.Info("payment request retrieved", zap.String("current_status", string(pr.Status)))
+	
 	if pr.SellerID != sellerID {
+		s.logger.Error("unauthorized seller access", 
+			zap.String("pr_seller_id", pr.SellerID.String()),
+			zap.String("request_seller_id", sellerID.String()),
+		)
 		return nil, domain.ErrUnauthorized
 	}
 	if pr.Status != domain.PRStatusDraft {
+		s.logger.Error("invalid status transition", 
+			zap.String("current_status", string(pr.Status)),
+			zap.String("expected_status", string(domain.PRStatusDraft)),
+		)
 		return nil, domain.ErrInvalidStatusTransition
 	}
 	pr.DeliveryType = req.DeliveryType
@@ -169,15 +207,51 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 	if req.PickupAddress != "" {
 		pr.PickupAddress = &req.PickupAddress
 	}
+	if req.PickupState != "" {
+		pr.PickupState = &req.PickupState
+	}
 	if req.DropoffAddress != "" {
 		pr.DropoffAddress = &req.DropoffAddress
 	}
+	if req.DropoffState != "" {
+		pr.DropoffState = &req.DropoffState
+	}
+	if req.PickupLat != nil && req.PickupLng != nil {
+		pr.PickupLat = *req.PickupLat
+		pr.PickupLng = *req.PickupLng
+	}
+	if req.DropoffLat != nil && req.DropoffLng != nil {
+		pr.DropoffLat = *req.DropoffLat
+		pr.DropoffLng = *req.DropoffLng
+	}
+
+	// Validate state fields for inter-state delivery
+	if req.DeliveryType == domain.DeliveryTypeInterState {
+		if req.PickupState == "" || req.DropoffState == "" {
+			return nil, fmt.Errorf("pickup_state and dropoff_state are required for inter-state delivery")
+		}
+	}
+	
+	s.logger.Info("calculating delivery fees", 
+		zap.String("delivery_type", string(req.DeliveryType)),
+		zap.Bool("has_pickup_coords", req.PickupLat != nil && req.PickupLng != nil),
+		zap.Bool("has_dropoff_coords", req.DropoffLat != nil && req.DropoffLng != nil),
+	)
+
 	if req.DeliveryType == domain.DeliveryTypeIntraState && req.PickupLat != nil && req.DropoffLat != nil {
 		vehicleType := req.VehicleType
 		if vehicleType == "" {
 			vehicleType = domain.VehicleTypeMotorcycle
 		}
 		pr.VehicleType = &vehicleType
+
+		s.logger.Info("calculating intra-state delivery fee", 
+			zap.String("vehicle_type", string(vehicleType)),
+			zap.Float64("pickup_lat", *req.PickupLat),
+			zap.Float64("pickup_lng", *req.PickupLng),
+			zap.Float64("dropoff_lat", *req.DropoffLat),
+			zap.Float64("dropoff_lng", *req.DropoffLng),
+		)
 
 		estimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(ctx, *req.PickupLat, *req.PickupLng, *req.DropoffLat, *req.DropoffLng, vehicleType)
 		if err != nil {
@@ -187,25 +261,39 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 			defaultFee := s.feeCalculator.ApplyVehicleTypeMultiplier(2500.0, vehicleType)
 			pr.EstimatedDeliveryFee = &defaultFee
 		} else {
+			s.logger.Info("delivery fee calculated successfully", zap.Float64("total_fee", estimate.TotalFee))
 			pr.EstimatedDeliveryFee = &estimate.TotalFee
 		}
 	} else if req.DeliveryType == domain.DeliveryTypeInterState {
+		s.logger.Info("using default inter-state fee")
 		defaultInterStateFee := 5000.0
 		pr.EstimatedDeliveryFee = &defaultInterStateFee
 	} else {
+		s.logger.Info("no delivery fee required")
 		zero := 0.0
 		pr.EstimatedDeliveryFee = &zero
 	}
+	s.logger.Info("calculating platform fees", zap.Float64("item_price", pr.ItemPrice))
+	
 	buyerFee := s.feeCalculator.CalculateBuyerFee(pr.ItemPrice)
 	sellerFee := s.feeCalculator.CalculateSellerFee(pr.ItemPrice)
 	pr.BuyerServiceFee = &buyerFee
 	pr.SellerPlatformFee = &sellerFee
+	
+	s.logger.Info("fees calculated", 
+		zap.Float64("buyer_fee", buyerFee),
+		zap.Float64("seller_fee", sellerFee),
+	)
+	
 	deliveryFee := 0.0
 	if pr.EstimatedDeliveryFee != nil {
 		deliveryFee = *pr.EstimatedDeliveryFee
 	}
 	estimatedTotal := s.feeCalculator.CalculateTotalForBuyer(pr.ItemPrice, deliveryFee)
 	pr.EstimatedTotal = &estimatedTotal
+	
+	s.logger.Info("generating payment code and updating status")
+	
 	paymentCode := s.generatePaymentCode()
 	pr.PaymentCode = &paymentCode
 	linkExpiry := time.Now().Add(7 * 24 * time.Hour)
@@ -215,7 +303,10 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 	now := time.Now()
 	pr.LinkGeneratedAt = &now
 
+	s.logger.Info("updating payment request in database", zap.String("pr_id", pr.ID.String()))
+	
 	if err := s.prRepo.Update(ctx, pr); err != nil {
+		s.logger.Error("failed to update payment request in database", zap.Error(err), zap.String("pr_id", pr.ID.String()))
 		return nil, fmt.Errorf("failed to update payment request: %w", err)
 	}
 	s.recordEvent(ctx, pr.ID, &oldStatus, domain.PRStatusLinkActive, "link_generated", nil)
@@ -320,13 +411,18 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 			ID:                  uuid.New(),
 			PaymentRequestID:    pr.ID,
 			PickupAddress:       stringValue(pr.PickupAddress),
+			PickupLat:           pr.PickupLat,
+			PickupLng:           pr.PickupLng,
 			DropoffAddress:      stringValue(pr.DropoffAddress),
+			DropoffLat:          pr.DropoffLat,
+			DropoffLng:          pr.DropoffLng,
 			DeliveryFee:         deliveryFee,
 			RequiredVehicleType: vehicleType,
 			SearchRadiusKM:      5, // Default 5km search radius
 			SearchStartedAt:     &now,
 			Status:              domain.DJStatusSearching,
 		}
+
 
 		if err := s.deliveryJobRepo.Create(ctx, job); err != nil {
 			return nil, fmt.Errorf("failed to create delivery job: %w", err)
@@ -498,4 +594,142 @@ func (s *PaymentRequestServiceImpl) recordEvent(ctx context.Context, prID uuid.U
 		)
 	}
 }
+
+// RebookDelivery handles buyer rebooking delivery after unavailability
+func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error) {
+	pr, err := s.prRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+
+	if pr.BuyerID == nil || *pr.BuyerID != buyerID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	if pr.Status != domain.PRStatusPendingRebook {
+		return nil, fmt.Errorf("payment request is not in pending_rebook status")
+	}
+
+	if pr.RebookDeadline != nil && time.Now().After(*pr.RebookDeadline) {
+		return nil, fmt.Errorf("rebook deadline has passed")
+	}
+
+	// Check max rebook attempts (limit to 1 rebook)
+	if pr.RebookAttempts >= 1 {
+		return nil, fmt.Errorf("maximum rebook attempts reached")
+	}
+
+	// Get seller's pickup address from original request
+	if pr.PickupAddress == nil {
+		return nil, fmt.Errorf("no pickup address found")
+	}
+
+	// Get coordinates for seller's location from forced return job
+	var pickupLat, pickupLng float64
+	if pr.ForcedReturnJobID != nil {
+		coords, err := s.deliveryJobRepo.GetJobCoordinates(ctx, *pr.ForcedReturnJobID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get coordinates: %w", err)
+		}
+		// Seller's location is the dropoff of forced return
+		pickupLat = coords.DropoffLat
+		pickupLng = coords.DropoffLng
+	}
+
+	vehicleType := domain.VehicleTypeMotorcycle
+	if pr.VehicleType != nil {
+		vehicleType = *pr.VehicleType
+	}
+
+	// Create new delivery job
+	newJob := &domain.DeliveryJob{
+		PaymentRequestID:    prID,
+		PickupAddress:       *pr.PickupAddress,
+		PickupLat:           pickupLat,
+		PickupLng:           pickupLng,
+		DropoffAddress:      req.DropoffAddress,
+		DropoffLat:          req.DropoffLat,
+		DropoffLng:          req.DropoffLng,
+		RequiredVehicleType: vehicleType,
+		Status:              domain.DJStatusSearching,
+		SearchRadiusKM:      5,
+	}
+
+	// Calculate delivery fee
+	if s.feeCalculator != nil {
+		estimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(ctx, pickupLat, pickupLng, req.DropoffLat, req.DropoffLng, vehicleType)
+		if err == nil {
+			newJob.DeliveryFee = estimate.TotalFee
+			newJob.DistanceKM = &estimate.DistanceKM
+		} else {
+			newJob.DeliveryFee = 2500.0 // Default
+		}
+	}
+
+	now := time.Now()
+	newJob.SearchStartedAt = &now
+	timeout := now.Add(30 * time.Minute)
+	newJob.SearchTimeoutAt = &timeout
+
+	if err := s.deliveryJobRepo.Create(ctx, newJob); err != nil {
+		return nil, fmt.Errorf("failed to create delivery job: %w", err)
+	}
+
+	// Update payment request
+	oldStatus := pr.Status
+	pr.DeliveryJobID = &newJob.ID
+	pr.Status = domain.PRStatusSearchingRider
+	pr.RebookAttempts++
+	pr.DropoffAddress = &req.DropoffAddress
+
+	if err := s.prRepo.Update(ctx, pr); err != nil {
+		return nil, fmt.Errorf("failed to update payment request: %w", err)
+	}
+
+	s.recordEvent(ctx, prID, &oldStatus, domain.PRStatusSearchingRider, "delivery_rebooked", map[string]interface{}{
+		"new_job_id":      newJob.ID.String(),
+		"rebook_attempt":  pr.RebookAttempts,
+		"dropoff_address": req.DropoffAddress,
+	})
+
+	s.logger.Info("delivery rebooked",
+		zap.String("pr_id", prID.String()),
+		zap.String("new_job_id", newJob.ID.String()),
+		zap.Int("rebook_attempt", pr.RebookAttempts),
+	)
+
+	return newJob, nil
+}
+
+// GetRebookStatus returns the rebook status for a payment request
+func (s *PaymentRequestServiceImpl) GetRebookStatus(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID) (*RebookStatusResponse, error) {
+	pr, err := s.prRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+
+	if pr.BuyerID == nil || *pr.BuyerID != buyerID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	resp := &RebookStatusResponse{
+		Status:         string(pr.Status),
+		RebookDeadline: pr.RebookDeadline,
+		RebookAttempts: pr.RebookAttempts,
+		CanRebook:      false,
+	}
+
+	if pr.Status == domain.PRStatusPendingRebook && pr.RebookDeadline != nil {
+		if time.Now().Before(*pr.RebookDeadline) && pr.RebookAttempts < 1 {
+			resp.CanRebook = true
+			remaining := time.Until(*pr.RebookDeadline)
+			hours := int(remaining.Hours())
+			minutes := int(remaining.Minutes()) % 60
+			resp.TimeRemaining = fmt.Sprintf("%dh %dm", hours, minutes)
+		}
+	}
+
+	return resp, nil
+}
+
 var _ PaymentRequestService = (*PaymentRequestServiceImpl)(nil)

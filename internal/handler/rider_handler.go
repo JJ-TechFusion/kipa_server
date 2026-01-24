@@ -38,6 +38,11 @@ func (h *RiderHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		rider.POST("/jobs/:id/deliver", h.ConfirmDelivery)
 		rider.GET("/jobs/history", h.GetJobHistory)
 		rider.GET("/earnings", h.GetEarnings)
+
+		// Unavailability handling
+		rider.POST("/jobs/:id/mark-seller-unavailable", h.MarkSellerUnavailable)
+		rider.POST("/jobs/:id/mark-buyer-unavailable", h.MarkBuyerUnavailable)
+		rider.POST("/jobs/:id/complete-forced-return", h.CompleteForcedReturn)
 	}
 }
 func (h *RiderHandler) GetProfile(c *gin.Context) {
@@ -313,6 +318,84 @@ func (h *RiderHandler) GetEarnings(c *gin.Context) {
 	}
 
 	util.Success(c, http.StatusOK, earnings)
+}
+
+// MarkSellerUnavailable handles rider marking seller as unavailable at pickup
+func (h *RiderHandler) MarkSellerUnavailable(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid job ID")
+		return
+	}
+
+	if err := h.riderService.MarkSellerUnavailable(c.Request.Context(), userID, jobID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{"message": "Seller marked as unavailable. Job cancelled and buyer will be refunded."})
+}
+
+// MarkBuyerUnavailable handles rider marking buyer as unavailable at dropoff
+func (h *RiderHandler) MarkBuyerUnavailable(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid job ID")
+		return
+	}
+
+	forcedReturnInfo, err := h.riderService.MarkBuyerUnavailable(c.Request.Context(), userID, jobID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message":              "Buyer marked as unavailable. Please return item to seller.",
+		"forced_return_job_id": forcedReturnInfo.ForcedReturnJobID,
+		"return_code":          forcedReturnInfo.ReturnCode,
+		"rebook_deadline":      forcedReturnInfo.RebookDeadline,
+	})
+}
+
+// CompleteForcedReturn handles rider completing forced return to seller
+func (h *RiderHandler) CompleteForcedReturn(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid job ID")
+		return
+	}
+
+	var req VerificationCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	if err := h.riderService.CompleteForcedReturn(c.Request.Context(), userID, jobID, req.Code); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{"message": "Return completed. Payment credited to your wallet."})
 }
 
 func (h *RiderHandler) handleError(c *gin.Context, err error) {

@@ -96,6 +96,12 @@ func main() {
 	// Errand repository
 	errandRepo := postgres.NewErrandRepo(pgClient.DB)
 
+	// Driver repositories (inter-state delivery)
+	driverProfileRepo := postgres.NewDriverProfileRepo(pgClient.DB)
+	driverTripRepo := postgres.NewDriverTripRepo(pgClient.DB)
+	driverDeliveryRepo := postgres.NewDriverDeliveryRepo(pgClient.DB)
+	driverDeliveryEventRepo := postgres.NewDriverDeliveryEventRepo(pgClient.DB)
+
 	// Notification repositories
 	deviceTokenRepo := postgres.NewDeviceTokenRepo(pgClient.DB)
 	notificationLogRepo := postgres.NewNotificationLogRepo(pgClient.DB)
@@ -185,6 +191,29 @@ func main() {
 		logger,
 	)
 
+	// Logistics delivery repositories (needed for order service)
+	logisticsDeliveryRepo := postgres.NewLogisticsDeliveryRepo(pgClient.DB)
+	logisticsEventRepo := postgres.NewLogisticsDeliveryEventRepo(pgClient.DB)
+	logisticsEvidenceRepo := postgres.NewLogisticsEvidenceRepo(pgClient.DB)
+
+	// Dispute repository (needed for logistics service)
+	disputeRepo := postgres.NewDisputeRepo(pgClient.DB)
+
+	// Logistics delivery service (must be created before order service)
+	logisticsService := service.NewLogisticsDeliveryService(
+		logisticsDeliveryRepo,
+		logisticsEventRepo,
+		logisticsEvidenceRepo,
+		escrowRepo,
+		disputeRepo,
+		userRepo,
+		prRepo,
+		walletService,
+		notificationService,
+		cfg,
+		logger,
+	)
+
 	// Order service (for payment processing)
 	orderService := service.NewOrderService(
 		orderRepo,
@@ -192,6 +221,7 @@ func main() {
 		userRepo,
 		escrowService,
 		walletService,
+		logisticsService,
 		notificationService,
 		paystackClient,
 		cfg,
@@ -266,16 +296,28 @@ func main() {
 		logger,
 	)
 
+	// Driver service (inter-state delivery)
+	driverService := service.NewDriverService(
+		driverProfileRepo,
+		driverTripRepo,
+		driverDeliveryRepo,
+		driverDeliveryEventRepo,
+		prRepo,
+		escrowService,
+		walletService,
+		notificationService,
+		cfg,
+		logger,
+	)
+
 	// Audit log repository
 	auditLogRepo := postgres.NewAuditLogRepo(pgClient.DB)
-
-	// Dispute repository
-	disputeRepo := postgres.NewDisputeRepo(pgClient.DB)
 
 	// Admin service
 	adminService := service.NewAdminService(
 		userRepo,
 		riderProfileRepo,
+		driverProfileRepo,
 		platformSettingsRepo,
 		walletTxRepo,
 		walletRepo,
@@ -288,6 +330,20 @@ func main() {
 		logger,
 	)
 
+	// Dispute resolution service (for both intra-state and inter-state returns)
+	disputeResolutionService := service.NewDisputeResolutionService(
+		disputeRepo,
+		escrowRepo,
+		prRepo,
+		deliveryJobRepo,
+		userRepo,
+		walletService,
+		notificationService,
+		feeCalculator,
+		cfg,
+		logger,
+	)
+
 
 
 	// Initialize handlers
@@ -297,7 +353,7 @@ func main() {
 
 	// New handlers for platform features
 	prHandler := handler.NewPaymentRequestHandler(prService)
-	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo)
+	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeResolutionService, driverService)
 	riderHandler := handler.NewRiderHandler(riderService)
 	commissionHandler := handler.NewRiderCommissionHandler(commissionService)
 	walletHandler := handler.NewWalletHandler(walletService)
@@ -310,12 +366,14 @@ func main() {
 		logger,
 	)
 	webhookHandler := handler.NewWebhookHandler(paystackClient, walletFundingService, orderService, logger)
-	sellerHandler := handler.NewSellerHandler(orderService, prService, escrowService, deliveryJobRepo)
+	sellerHandler := handler.NewSellerHandler(orderService, prService, escrowService, deliveryJobRepo, disputeResolutionService, driverService)
 	errandHandler := handler.NewErrandHandler(errandService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
-	adminHandler := handler.NewAdminHandler(adminService)
+	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo)
 	notificationHandler := handler.NewNotificationHandler(notificationService, logger)
 	chatHandler := handler.NewChatHandler(chatService, logger)
+	logisticsHandler := handler.NewLogisticsHandler(logisticsService)
+	driverHandler := handler.NewDriverHandler(driverService)
 
 	// Setup Gin router
 	if cfg.Server.Environment == "production" {
@@ -348,6 +406,8 @@ func main() {
 	uploadHandler.RegisterRoutes(v1, authMiddleware)
 	adminHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 	chatHandler.RegisterRoutes(v1, authMiddleware)
+	logisticsHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
+	driverHandler.RegisterRoutes(v1, authMiddleware)
 
 	// Notification routes (authenticated users)
 	usersRoutes := v1.Group("/users")

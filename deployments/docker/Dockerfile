@@ -56,7 +56,7 @@ COPY --from=builder /app/bin/migrate /app/migrate
 COPY --from=builder /app/bin/worker /app/worker
 
 # Copy migrations
-COPY --from=builder /app/migrations /app/migrations
+COPY --from=builder /app/internal/database/migrations /app/migrations
 
 # Copy Firebase service account file
 COPY --from=builder /app/firebase-service-account.json /app/firebase-service-account.json

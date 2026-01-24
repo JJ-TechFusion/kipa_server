@@ -19,6 +19,27 @@ const (
 	DJStatusTimeout       DeliveryJobStatus = "timeout"
 	DJStatusCancelled     DeliveryJobStatus = "cancelled"
 	DJStatusFailed        DeliveryJobStatus = "failed"
+
+	// Return delivery statuses (for return jobs after dispute)
+	DJStatusReturnDelivered       DeliveryJobStatus = "return_delivered"        // Rider delivered return to seller
+	DJStatusReturnConfirmed       DeliveryJobStatus = "return_confirmed"        // Seller confirmed good condition
+	DJStatusReturnDamageDisputed  DeliveryJobStatus = "return_damage_disputed"  // Seller claims damage
+	DJStatusReturnRefunded        DeliveryJobStatus = "return_refunded"         // Buyer refunded after return
+
+	// Unavailability statuses
+	DJStatusSellerUnavailable DeliveryJobStatus = "seller_unavailable" // Seller not available at pickup
+	DJStatusBuyerUnavailable  DeliveryJobStatus = "buyer_unavailable"  // Buyer not available at dropoff
+	DJStatusForcedReturn      DeliveryJobStatus = "forced_return"      // Forced return in progress
+	DJStatusForcedReturnDone  DeliveryJobStatus = "forced_return_done" // Forced return completed
+)
+
+// ReturnCondition represents the condition of returned items
+type ReturnCondition string
+
+const (
+	ReturnConditionGood       ReturnCondition = "good"
+	ReturnConditionDamaged    ReturnCondition = "damaged"
+	ReturnConditionIncomplete ReturnCondition = "incomplete"
 )
 type RiderOfferResponse string
 
@@ -43,6 +64,19 @@ type DeliveryJob struct {
 	RiderID          *uuid.UUID `db:"rider_id" json:"rider_id,omitempty"`
 	SourceType *string    `db:"source_type" json:"source_type,omitempty"`
 	ErrandID   *uuid.UUID `db:"errand_id" json:"errand_id,omitempty"`
+
+	// Return delivery fields (for return jobs after dispute)
+	IsReturn          bool       `db:"is_return" json:"is_return"`
+	OriginalJobID     *uuid.UUID `db:"original_job_id" json:"original_job_id,omitempty"`
+	ReturnCondition   *string    `db:"return_condition" json:"return_condition,omitempty"`
+	DamageClaimReason *string    `db:"damage_claim_reason" json:"damage_claim_reason,omitempty"`
+	ReturnConfirmedAt *time.Time `db:"return_confirmed_at" json:"return_confirmed_at,omitempty"`
+	DisputeID         *uuid.UUID `db:"dispute_id" json:"dispute_id,omitempty"`
+
+	// Forced return fields (for buyer unavailable scenario)
+	IsForcedReturn       bool       `db:"is_forced_return" json:"is_forced_return"`
+	UnavailableMarkedAt  *time.Time `db:"unavailable_marked_at" json:"unavailable_marked_at,omitempty"`
+
 	PickupAddress   string  `db:"pickup_address" json:"pickup_address"`
 	PickupLat       float64 `db:"-" json:"pickup_lat,omitempty"` // Transient for creation
 	PickupLng       float64 `db:"-" json:"pickup_lng,omitempty"` // Transient for creation
@@ -85,11 +119,22 @@ func (s DeliveryJobStatus) CanTransitionTo(next DeliveryJobStatus) bool {
 		DJStatusCreated:       {DJStatusSearching, DJStatusCancelled},
 		DJStatusSearching:     {DJStatusAccepted, DJStatusTimeout},
 		DJStatusAccepted:      {DJStatusEnRoutePickup, DJStatusCancelled},
-		DJStatusEnRoutePickup: {DJStatusPickedUp, DJStatusCancelled, DJStatusFailed},
+		DJStatusEnRoutePickup: {DJStatusPickedUp, DJStatusCancelled, DJStatusFailed, DJStatusSellerUnavailable},
 		DJStatusPickedUp:      {DJStatusInTransit},
-		DJStatusInTransit:     {DJStatusDelivered, DJStatusFailed},
-		DJStatusDelivered:     {DJStatusPaidOut},
+		DJStatusInTransit:     {DJStatusDelivered, DJStatusFailed, DJStatusBuyerUnavailable},
+		DJStatusDelivered:     {DJStatusPaidOut, DJStatusReturnDelivered}, // Return jobs use ReturnDelivered
 		DJStatusTimeout:       {DJStatusSearching}, // Can retry search
+
+		// Return job flow (after dispute buyer_wins)
+		DJStatusReturnDelivered:      {DJStatusReturnConfirmed, DJStatusReturnDamageDisputed},
+		DJStatusReturnConfirmed:      {DJStatusReturnRefunded},
+		DJStatusReturnDamageDisputed: {DJStatusReturnRefunded, DJStatusReturnConfirmed}, // Admin decides
+
+		// Unavailability flow
+		DJStatusSellerUnavailable: {}, // Terminal - job cancelled, buyer refunded
+		DJStatusBuyerUnavailable:  {DJStatusForcedReturn},
+		DJStatusForcedReturn:      {DJStatusForcedReturnDone},
+		DJStatusForcedReturnDone:  {}, // Terminal - waiting for buyer rebook or refund
 	}
 
 	allowed, exists := transitions[s]
@@ -105,8 +150,14 @@ func (s DeliveryJobStatus) CanTransitionTo(next DeliveryJobStatus) bool {
 	return false
 }
 func (s DeliveryJobStatus) IsTerminal() bool {
-	return s == DJStatusPaidOut || s == DJStatusCancelled || s == DJStatusFailed
+	switch s {
+	case DJStatusPaidOut, DJStatusCancelled, DJStatusFailed, DJStatusReturnRefunded,
+		DJStatusSellerUnavailable, DJStatusForcedReturnDone:
+		return true
+	}
+	return false
 }
+
 func (s DeliveryJobStatus) IsActive() bool {
 	activeStatuses := []DeliveryJobStatus{
 		DJStatusSearching,
@@ -122,9 +173,51 @@ func (s DeliveryJobStatus) IsActive() bool {
 	}
 	return false
 }
+
+func (s DeliveryJobStatus) IsReturnStatus() bool {
+	switch s {
+	case DJStatusReturnDelivered, DJStatusReturnConfirmed, DJStatusReturnDamageDisputed, DJStatusReturnRefunded:
+		return true
+	}
+	return false
+}
+
 func (j *DeliveryJob) HasRider() bool {
 	return j.RiderID != nil
 }
+
 func (j *DeliveryJob) CanBeAccepted() bool {
 	return j.Status == DJStatusSearching && j.RiderID == nil
+}
+
+func (j *DeliveryJob) IsReturnJob() bool {
+	return j.IsReturn
+}
+
+func (j *DeliveryJob) CanSellerConfirmReturn() bool {
+	return j.IsReturn && j.Status == DJStatusReturnDelivered
+}
+
+func (j *DeliveryJob) HasDamageClaim() bool {
+	return j.Status == DJStatusReturnDamageDisputed
+}
+
+func (j *DeliveryJob) IsForcedReturnJob() bool {
+	return j.IsForcedReturn
+}
+
+func (j *DeliveryJob) IsUnavailabilityStatus() bool {
+	switch j.Status {
+	case DJStatusSellerUnavailable, DJStatusBuyerUnavailable, DJStatusForcedReturn, DJStatusForcedReturnDone:
+		return true
+	}
+	return false
+}
+
+func (j *DeliveryJob) CanMarkSellerUnavailable() bool {
+	return j.Status == DJStatusEnRoutePickup || j.Status == DJStatusAccepted
+}
+
+func (j *DeliveryJob) CanMarkBuyerUnavailable() bool {
+	return j.Status == DJStatusInTransit || j.Status == DJStatusPickedUp
 }

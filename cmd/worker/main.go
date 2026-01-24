@@ -67,10 +67,30 @@ func main() {
 	riderOfferRepo := postgres.NewRiderJobOfferRepo(db)
 	platformSettingsRepo := postgres.NewPlatformSettingsRepo(db)
 
+	// Driver delivery repositories (for inter-state auto-confirm job)
+	driverProfileRepo := postgres.NewDriverProfileRepo(db)
+	driverTripRepo := postgres.NewDriverTripRepo(db)
+	driverDeliveryRepo := postgres.NewDriverDeliveryRepo(db)
+	driverDeliveryEventRepo := postgres.NewDriverDeliveryEventRepo(db)
+
 	// Initialize services
 	walletService := service.NewWalletService(walletRepo, walletTxRepo, log)
 	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, platformSettingsRepo, nil, cfg, log)
 	escrowService := service.NewEscrowService(escrowRepo, walletService, feeCalculator, cfg, log)
+
+	// Driver service (for inter-state delivery auto-confirm)
+	driverService := service.NewDriverService(
+		driverProfileRepo,
+		driverTripRepo,
+		driverDeliveryRepo,
+		driverDeliveryEventRepo,
+		paymentRequestRepo,
+		escrowService,
+		walletService,
+		nil, // notification service not needed for auto-confirm in worker
+		cfg,
+		log,
+	)
 
 
 	// Initialize distributed lock
@@ -106,6 +126,9 @@ func main() {
 
 	// Enable distributed locking for multi-instance deployments
 	processor.SetDistributedLock(distributedLock)
+
+	// Set driver service for auto-confirm job
+	processor.SetDriverService(driverService)
 
 	// Create context that can be cancelled
 	ctx, cancel := context.WithCancel(context.Background())

@@ -23,8 +23,10 @@ func (r *PaymentRequestRepo) Create(ctx context.Context, pr *domain.PaymentReque
 	query := `
 		INSERT INTO payment_requests (
 			id, seller_id, item_name, item_description, item_price, item_images,
-			processing_time_hours, delivery_type, status, is_reusable, max_uses, current_uses
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			processing_time_hours, delivery_type, status, is_reusable, max_uses, current_uses,
+			pickup_address, pickup_state, pickup_location,
+			dropoff_address, dropoff_state, dropoff_location
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, ST_SetSRID(ST_MakePoint($15, $16), 4326)::geography, $17, $18, ST_SetSRID(ST_MakePoint($19, $20), 4326)::geography)
 		RETURNING created_at, updated_at`
 
 	if pr.ID == uuid.Nil {
@@ -44,12 +46,26 @@ func (r *PaymentRequestRepo) Create(ctx context.Context, pr *domain.PaymentReque
 		pr.IsReusable,
 		pr.MaxUses,
 		pr.CurrentUses,
+		pr.PickupAddress,              // $13
+		pr.PickupState,                // $14
+		pr.PickupLng, pr.PickupLat,    // $15, $16
+		pr.DropoffAddress,             // $17
+		pr.DropoffState,               // $18
+		pr.DropoffLng, pr.DropoffLat,  // $19, $20
 	).Scan(&pr.CreatedAt, &pr.UpdatedAt)
 }
 
 func (r *PaymentRequestRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentRequest, error) {
 	var pr domain.PaymentRequest
-	query := `SELECT * FROM payment_requests WHERE id = $1`
+	query := `
+		SELECT 
+			*,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM payment_requests 
+		WHERE id = $1`
 
 	err := r.db.GetContext(ctx, &pr, query, id)
 	if err != nil {
@@ -64,7 +80,15 @@ func (r *PaymentRequestRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain
 
 func (r *PaymentRequestRepo) GetByPaymentCode(ctx context.Context, code string) (*domain.PaymentRequest, error) {
 	var pr domain.PaymentRequest
-	query := `SELECT * FROM payment_requests WHERE payment_code = $1`
+	query := `
+		SELECT 
+			*,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM payment_requests 
+		WHERE payment_code = $1`
 
 	err := r.db.GetContext(ctx, &pr, query, code)
 	if err != nil {
@@ -188,26 +212,35 @@ func (r *PaymentRequestRepo) Update(ctx context.Context, pr *domain.PaymentReque
 			delivery_type = $7,
 			vehicle_type = $8,
 			pickup_address = $9,
-			pickup_location = ST_SetSRID(ST_MakePoint($10, $11), 4326)::geography,
-			dropoff_address = $12,
-			dropoff_location = ST_SetSRID(ST_MakePoint($13, $14), 4326)::geography,
-			estimated_delivery_fee = $15,
-			buyer_service_fee = $16,
-			seller_platform_fee = $17,
-			estimated_total = $18,
-			actual_delivery_fee = $19,
-			actual_total = $20,
-			payment_code = $21,
-			link_expires_at = $22,
-			logistics_carrier = $23,
-			tracking_number = $24,
-			tracking_url = $25,
-			status = $26,
-			link_generated_at = $27,
-			paid_at = $28,
-			ready_for_pickup_at = $29,
-			delivered_at = $30,
-			completed_at = $31,
+			pickup_state = $10,
+			pickup_location = ST_SetSRID(ST_MakePoint($11, $12), 4326)::geography,
+			dropoff_address = $13,
+			dropoff_state = $14,
+			dropoff_location = ST_SetSRID(ST_MakePoint($15, $16), 4326)::geography,
+			estimated_delivery_fee = $17,
+			buyer_service_fee = $18,
+			seller_platform_fee = $19,
+			estimated_total = $20,
+			actual_delivery_fee = $21,
+			actual_total = $22,
+			payment_code = $23,
+			link_expires_at = $24,
+			logistics_carrier = $25,
+			tracking_number = $26,
+			tracking_url = $27,
+			status = $28,
+			link_generated_at = $29,
+			paid_at = $30,
+			ready_for_pickup_at = $31,
+			delivered_at = $32,
+			completed_at = $33,
+			forced_return_job_id = $34,
+			rebook_deadline = $35,
+			rebook_attempts = $36,
+			unavailability_fee = $37,
+			buyer_id = $38,
+			escrow_id = $39,
+			logistics_delivery_id = $40,
 			updated_at = NOW()
 		WHERE id = $1`
 
@@ -221,9 +254,11 @@ func (r *PaymentRequestRepo) Update(ctx context.Context, pr *domain.PaymentReque
 		pr.DeliveryType,
 		pr.VehicleType,
 		pr.PickupAddress,
-		0.0, 0.0, // Placeholder for lat/lng - actual values should be extracted
+		pr.PickupState,               // $10
+		pr.PickupLng, pr.PickupLat,   // $11, $12
 		pr.DropoffAddress,
-		0.0, 0.0,
+		pr.DropoffState,              // $14
+		pr.DropoffLng, pr.DropoffLat, // $15, $16
 		pr.EstimatedDeliveryFee,
 		pr.BuyerServiceFee,
 		pr.SellerPlatformFee,
@@ -241,6 +276,13 @@ func (r *PaymentRequestRepo) Update(ctx context.Context, pr *domain.PaymentReque
 		pr.ReadyForPickupAt,
 		pr.DeliveredAt,
 		pr.CompletedAt,
+		pr.ForcedReturnJobID,
+		pr.RebookDeadline,
+		pr.RebookAttempts,
+		pr.UnavailabilityFee,
+		pr.BuyerID,
+		pr.EscrowID,
+		pr.LogisticsDeliveryID,
 	)
 
 	return err
@@ -317,6 +359,44 @@ func (r *PaymentRequestRepo) GetAll(ctx context.Context, limit, offset int) ([]*
 	}
 
 	return requests, nil
+}
+
+// GetExpiredRebookRequests finds payment requests in pending_rebook with expired deadline
+func (r *PaymentRequestRepo) GetExpiredRebookRequests(ctx context.Context) ([]*domain.PaymentRequest, error) {
+	var requests []*domain.PaymentRequest
+	query := `
+		SELECT * FROM payment_requests
+		WHERE status = 'pending_rebook'
+		AND rebook_deadline IS NOT NULL
+		AND rebook_deadline < NOW()
+		ORDER BY rebook_deadline ASC
+		LIMIT 100`
+
+	err := r.db.SelectContext(ctx, &requests, query)
+	if err != nil {
+		return nil, err
+	}
+
+	return requests, nil
+}
+
+// SetUnavailabilityFee sets the unavailability fee for a payment request
+func (r *PaymentRequestRepo) SetUnavailabilityFee(ctx context.Context, id uuid.UUID, fee float64) error {
+	query := `UPDATE payment_requests SET unavailability_fee = $1, updated_at = NOW() WHERE id = $2`
+	result, err := r.db.ExecContext(ctx, query, fee, id)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return domain.ErrPaymentRequestNotFound
+	}
+
+	return nil
 }
 
 type PaymentRequestEventRepo struct {
