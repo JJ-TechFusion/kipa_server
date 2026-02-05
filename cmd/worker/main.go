@@ -72,18 +72,20 @@ func main() {
 	driverTripRepo := postgres.NewDriverTripRepo(db)
 	driverDeliveryRepo := postgres.NewDriverDeliveryRepo(db)
 	driverDeliveryEventRepo := postgres.NewDriverDeliveryEventRepo(db)
+	driverOfferRepo := postgres.NewDriverOfferRepo(db)
 
 	// Initialize services
 	walletService := service.NewWalletService(walletRepo, walletTxRepo, log)
 	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, platformSettingsRepo, nil, cfg, log)
 	escrowService := service.NewEscrowService(escrowRepo, walletService, feeCalculator, cfg, log)
 
-	// Driver service (for inter-state delivery auto-confirm)
+	// Driver service (for inter-state delivery auto-confirm and offer expiry)
 	driverService := service.NewDriverService(
 		driverProfileRepo,
 		driverTripRepo,
 		driverDeliveryRepo,
 		driverDeliveryEventRepo,
+		driverOfferRepo,
 		paymentRequestRepo,
 		escrowService,
 		walletService,
@@ -115,11 +117,13 @@ func main() {
 	}
 
 	// Initialize job processor
+	// Note: broadcaster is nil in worker - WebSocket broadcasts happen only from API server
 	processor := worker.NewJobProcessor(
 		escrowService,
 		deliveryJobRepo,
 		paymentRequestRepo,
 		riderOfferRepo,
+		nil, // broadcaster - not available in worker process
 		workerConfig,
 		log,
 	)

@@ -16,6 +16,7 @@ const (
 	sessionKeyPrefix   = "session:"
 	userSessionsPrefix = "user_sessions:"
 	rateLimitPrefix    = "otp_rate:"
+	lastOTPSentPrefix  = "otp_last_sent:"
 )
 
 type SessionRepo struct {
@@ -159,4 +160,33 @@ func userSessionsKey(userID uuid.UUID) string {
 
 func rateLimitKey(phoneNumber string) string {
 	return fmt.Sprintf("%s%s", rateLimitPrefix, phoneNumber)
+}
+
+func lastOTPSentKey(phoneNumber string) string {
+	return fmt.Sprintf("%s%s", lastOTPSentPrefix, phoneNumber)
+}
+
+func (r *SessionRepo) GetLastOTPSentTime(ctx context.Context, phoneNumber string) (time.Time, error) {
+	key := lastOTPSentKey(phoneNumber)
+
+	timestamp, err := r.client.Get(ctx, key).Int64()
+	if err != nil {
+		if err == redis.Nil {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("failed to get last OTP sent time: %w", err)
+	}
+
+	return time.Unix(timestamp, 0), nil
+}
+
+func (r *SessionRepo) SetLastOTPSentTime(ctx context.Context, phoneNumber string, ttl time.Duration) error {
+	key := lastOTPSentKey(phoneNumber)
+
+	err := r.client.Set(ctx, key, time.Now().Unix(), ttl).Err()
+	if err != nil {
+		return fmt.Errorf("failed to set last OTP sent time: %w", err)
+	}
+
+	return nil
 }

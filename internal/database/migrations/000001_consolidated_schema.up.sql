@@ -1,6 +1,6 @@
 -- ============================================
--- KIPA CONSOLIDATED MIGRATION v1.0
--- Merges original migrations 000001-000007
+-- KIPA CONSOLIDATED MIGRATION v2.0
+-- Complete schema including all driver features
 -- ============================================
 
 -- Extensions
@@ -35,13 +35,13 @@ CREATE TYPE payment_request_status AS ENUM (
     'cancelled',
     'disputed',
     'refunded',
-    'return_required',           -- Added for returns
+    'return_required',
     'return_searching_rider',
     'return_in_progress',
     'return_delivered',
     'return_confirmed',
     'return_damage_disputed',
-    'pending_rebook'             -- Added for unavailability
+    'pending_rebook'
 );
 
 CREATE TYPE delivery_job_status AS ENUM (
@@ -56,14 +56,14 @@ CREATE TYPE delivery_job_status AS ENUM (
     'timeout',
     'cancelled',
     'failed',
-    'return_damage_disputed',    -- Added for returns
-    'buyer_unavailable',         -- Buyer not available at dropoff
-    'seller_unavailable',        -- Seller not available at pickup
-    'forced_return',             -- Forced return in progress
-    'forced_return_done',        -- Forced return completed
-    'return_delivered',          -- Rider delivered return to seller
-    'return_confirmed',          -- Seller confirmed good condition
-    'return_refunded'            -- Buyer refunded after return
+    'return_damage_disputed',
+    'buyer_unavailable',
+    'seller_unavailable',
+    'forced_return',
+    'forced_return_done',
+    'return_delivered',
+    'return_confirmed',
+    'return_refunded'
 );
 
 CREATE TYPE rider_status AS ENUM (
@@ -172,7 +172,6 @@ CREATE TYPE errand_status AS ENUM (
     'cancelled'
 );
 
--- Logistics Enums
 CREATE TYPE logistics_delivery_status AS ENUM (
     'awaiting_shipment',
     'shipped',
@@ -187,8 +186,8 @@ CREATE TYPE logistics_delivery_status AS ENUM (
     'refunded',
     'released_by_admin',
     'cancelled',
-    'return_damage_disputed',    -- Added
-    'pending_refund_approval'    -- Added
+    'return_damage_disputed',
+    'pending_refund_approval'
 );
 
 CREATE TYPE logistics_carrier AS ENUM (
@@ -200,6 +199,73 @@ CREATE TYPE logistics_carrier AS ENUM (
     'dhl',
     'fedex',
     'other'
+);
+
+-- Driver-related enums
+CREATE TYPE driver_status AS ENUM (
+    'offline',
+    'idle',
+    'loading',
+    'in_transit',
+    'delivering'
+);
+
+CREATE TYPE driver_vehicle_type AS ENUM (
+    'car',
+    'van',
+    'bus'
+);
+
+CREATE TYPE driver_trip_status AS ENUM (
+    'accepting',
+    'loading',
+    'in_transit',
+    'arrived',
+    'delivering',
+    'completed',
+    'cancelled'
+);
+
+-- IMPORTANT: awaiting_offers included from start
+CREATE TYPE driver_delivery_status AS ENUM (
+    'awaiting_driver',
+    'awaiting_offers',
+    'driver_assigned',
+    'awaiting_pickup',
+    'picked_up',
+    'in_transit',
+    'arrived',
+    'confirmation_window',
+    'completed',
+    'driver_paid',
+    'disputed',
+    'refunded',
+    'cancelled',
+    'expired',
+    'buyer_unreachable',
+    'return_to_seller',
+    'returned_to_seller',
+    'pickup_code_lockout',
+    'dropoff_code_lockout'
+);
+
+CREATE TYPE driver_delivery_actor_type AS ENUM (
+    'driver',
+    'buyer',
+    'seller',
+    'system',
+    'admin'
+);
+
+CREATE TYPE driver_offer_status AS ENUM (
+    'pending',
+    'accepted',
+    'rejected',
+    'countered',
+    'counter_accepted',
+    'counter_rejected',
+    'expired',
+    'withdrawn'
 );
 
 -- ============================================
@@ -231,7 +297,6 @@ CREATE INDEX idx_users_phone ON users(phone_number);
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_admin ON users(is_admin) WHERE is_admin = TRUE;
 
--- User Device Tokens (from Mig 2)
 CREATE TABLE user_device_tokens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -243,7 +308,6 @@ CREATE TABLE user_device_tokens (
 );
 CREATE INDEX idx_device_tokens_user ON user_device_tokens(user_id);
 
--- Notification Logs (from Mig 2)
 CREATE TABLE notification_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -309,7 +373,7 @@ CREATE INDEX idx_delivery_zones_polygon ON delivery_zones USING GIST(polygon);
 -- CORE BUSINESS TABLES
 -- ============================================
 
--- Forward declaration of tables for circular FKs
+-- Payment requests with state fields and driver_delivery_id included from start
 CREATE TABLE payment_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     seller_id UUID REFERENCES users(id),
@@ -322,8 +386,10 @@ CREATE TABLE payment_requests (
     vehicle_type VARCHAR(20),
     pickup_address TEXT,
     pickup_location GEOGRAPHY(POINT, 4326),
+    pickup_state VARCHAR(100),
     dropoff_address TEXT,
     dropoff_location GEOGRAPHY(POINT, 4326),
+    dropoff_state VARCHAR(100),
     estimated_delivery_fee DECIMAL(18,2),
     buyer_service_fee DECIMAL(18,2),
     seller_platform_fee DECIMAL(18,2),
@@ -339,12 +405,13 @@ CREATE TABLE payment_requests (
     tracking_number VARCHAR(255),
     tracking_url TEXT,
     status payment_request_status DEFAULT 'draft',
-    escrow_id UUID,                     -- FK added later
-    delivery_job_id UUID,               -- FK added later
+    escrow_id UUID,
+    delivery_job_id UUID,
     buyer_id UUID REFERENCES users(id),
-    logistics_delivery_id UUID,         -- FK added later
-    return_delivery_job_id UUID,        -- FK added later
-    forced_return_job_id UUID,          -- FK added later
+    logistics_delivery_id UUID,
+    return_delivery_job_id UUID,
+    forced_return_job_id UUID,
+    driver_delivery_id UUID,
     dispute_outcome VARCHAR(20),
     rebook_deadline TIMESTAMP WITH TIME ZONE,
     rebook_attempts INT DEFAULT 0,
@@ -367,7 +434,7 @@ CREATE INDEX idx_payment_requests_pickup_location ON payment_requests USING GIST
 CREATE INDEX idx_payment_requests_link_expiry ON payment_requests(link_expires_at) WHERE status = 'link_active';
 CREATE INDEX idx_payment_requests_return_flow ON payment_requests(status) WHERE status IN ('return_required', 'return_searching_rider', 'return_in_progress', 'return_delivered', 'return_confirmed', 'return_damage_disputed');
 CREATE INDEX idx_pr_pending_rebook ON payment_requests(status, rebook_deadline) WHERE status = 'pending_rebook';
-
+CREATE INDEX idx_payment_requests_interstate_route ON payment_requests(pickup_state, dropoff_state) WHERE delivery_type = 'inter_state';
 
 CREATE TABLE delivery_jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -392,13 +459,13 @@ CREATE TABLE delivery_jobs (
     eta_updated_at TIMESTAMP WITH TIME ZONE,
     status delivery_job_status DEFAULT 'created',
     source_type VARCHAR(20) DEFAULT 'payment_request',
-    errand_id UUID,                     -- FK added later
+    errand_id UUID,
     is_return BOOLEAN DEFAULT FALSE,
     original_job_id UUID REFERENCES delivery_jobs(id),
     return_condition VARCHAR(20),
     damage_claim_reason TEXT,
     return_confirmed_at TIMESTAMP WITH TIME ZONE,
-    dispute_id UUID,                    -- FK added later
+    dispute_id UUID,
     is_forced_return BOOLEAN DEFAULT FALSE,
     unavailable_marked_at TIMESTAMP WITH TIME ZONE,
     accepted_at TIMESTAMP WITH TIME ZONE,
@@ -432,7 +499,7 @@ CREATE TABLE orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     payment_request_id UUID NOT NULL REFERENCES payment_requests(id),
     buyer_id UUID NOT NULL REFERENCES users(id),
-    escrow_id UUID,                     -- FK added later
+    escrow_id UUID,
     payment_method VARCHAR(20) NOT NULL DEFAULT 'card',
     paystack_reference VARCHAR(255) UNIQUE,
     paystack_access_code VARCHAR(255),
@@ -481,8 +548,6 @@ CREATE INDEX idx_escrows_buyer ON escrows(buyer_id);
 CREATE INDEX idx_escrows_seller ON escrows(seller_id);
 CREATE INDEX idx_escrows_status ON escrows(status);
 
-
--- Disputes
 CREATE TABLE disputes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     escrow_id UUID NOT NULL REFERENCES escrows(id),
@@ -499,14 +564,14 @@ CREATE TABLE disputes (
 CREATE INDEX idx_disputes_escrow ON disputes(escrow_id);
 CREATE INDEX idx_disputes_status ON disputes(status);
 
--- Logistics Deliveries (Mig 4 + 5)
+-- Logistics deliveries with nullable carrier from start
 CREATE TABLE logistics_deliveries (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     payment_request_id UUID NOT NULL REFERENCES payment_requests(id),
     escrow_id UUID NOT NULL REFERENCES escrows(id),
     seller_id UUID NOT NULL REFERENCES users(id),
     buyer_id UUID NOT NULL REFERENCES users(id),
-    carrier logistics_carrier NOT NULL,
+    carrier logistics_carrier,
     carrier_other_name VARCHAR(255),
     tracking_number VARCHAR(255),
     tracking_url TEXT,
@@ -545,7 +610,6 @@ CREATE INDEX idx_logistics_deliveries_escrow ON logistics_deliveries(escrow_id);
 CREATE INDEX idx_logistics_deliveries_damage_claim ON logistics_deliveries(status) WHERE status = 'return_damage_disputed';
 CREATE INDEX idx_logistics_deliveries_pending_refund ON logistics_deliveries(status) WHERE status = 'pending_refund_approval';
 
--- Logistics Events
 CREATE TABLE logistics_delivery_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     logistics_delivery_id UUID NOT NULL REFERENCES logistics_deliveries(id) ON DELETE CASCADE,
@@ -559,7 +623,6 @@ CREATE TABLE logistics_delivery_events (
 );
 CREATE INDEX idx_logistics_delivery_events_delivery ON logistics_delivery_events(logistics_delivery_id);
 
--- Logistics Evidence
 CREATE TABLE logistics_evidence (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     logistics_delivery_id UUID NOT NULL REFERENCES logistics_deliveries(id) ON DELETE CASCADE,
@@ -572,7 +635,6 @@ CREATE TABLE logistics_evidence (
 );
 CREATE INDEX idx_logistics_evidence_delivery ON logistics_evidence(logistics_delivery_id);
 
--- Errands
 CREATE TABLE errands (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id),
@@ -605,6 +667,154 @@ CREATE TABLE errands (
 CREATE INDEX idx_errands_user ON errands(user_id);
 CREATE INDEX idx_errands_status ON errands(status);
 
+-- ============================================
+-- DRIVER TABLES (Inter-state delivery)
+-- ============================================
+
+CREATE TABLE driver_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status driver_status NOT NULL DEFAULT 'offline',
+    max_carrying_value DECIMAL(12,2) NOT NULL DEFAULT 500000,
+    current_carry_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+    max_package_count INT NOT NULL DEFAULT 20,
+    current_package_count INT NOT NULL DEFAULT 0,
+    vehicle_type driver_vehicle_type NOT NULL DEFAULT 'car',
+    license_plate VARCHAR(20) NOT NULL,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    total_deliveries INT NOT NULL DEFAULT 0,
+    total_earnings DECIMAL(12,2) NOT NULL DEFAULT 0,
+    rating DECIMAL(3,2) NOT NULL DEFAULT 5.0,
+    current_trip_id UUID,
+    origin_city VARCHAR(100),
+    destination_city VARCHAR(100),
+    nin_number VARCHAR(20),
+    nin_photo_url TEXT,
+    license_number VARCHAR(50),
+    license_photo_url TEXT,
+    vehicle_photo_url TEXT,
+    face_photo_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_driver_user UNIQUE (user_id),
+    CONSTRAINT unique_driver_license_plate UNIQUE (license_plate)
+);
+
+CREATE TABLE driver_trips (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    driver_id UUID NOT NULL REFERENCES driver_profiles(id) ON DELETE CASCADE,
+    origin_city VARCHAR(100) NOT NULL,
+    destination_city VARCHAR(100) NOT NULL,
+    status driver_trip_status NOT NULL DEFAULT 'accepting',
+    total_packages INT NOT NULL DEFAULT 0,
+    total_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+    total_driver_fee DECIMAL(12,2) NOT NULL DEFAULT 0,
+    accepting_until TIMESTAMP WITH TIME ZONE,
+    departed_at TIMESTAMP WITH TIME ZONE,
+    arrived_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Add FK from driver_profiles to driver_trips
+ALTER TABLE driver_profiles
+ADD CONSTRAINT fk_driver_current_trip
+FOREIGN KEY (current_trip_id) REFERENCES driver_trips(id) ON DELETE SET NULL;
+
+CREATE TABLE driver_deliveries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    payment_request_id UUID NOT NULL REFERENCES payment_requests(id) ON DELETE CASCADE,
+    trip_id UUID REFERENCES driver_trips(id) ON DELETE SET NULL,
+    driver_id UUID REFERENCES driver_profiles(id) ON DELETE SET NULL,
+    origin_city VARCHAR(100) NOT NULL,
+    destination_city VARCHAR(100) NOT NULL,
+    pickup_address TEXT NOT NULL,
+    dropoff_address TEXT NOT NULL,
+    item_value DECIMAL(12,2) NOT NULL,
+    driver_fee DECIMAL(12,2) NOT NULL,
+    pickup_code VARCHAR(6),
+    pickup_code_generated_at TIMESTAMP WITH TIME ZONE,
+    pickup_attempts INT NOT NULL DEFAULT 0,
+    dropoff_code VARCHAR(6),
+    dropoff_code_generated_at TIMESTAMP WITH TIME ZONE,
+    dropoff_attempts INT NOT NULL DEFAULT 0,
+    status driver_delivery_status NOT NULL DEFAULT 'awaiting_driver',
+    driver_assigned_at TIMESTAMP WITH TIME ZONE,
+    at_pickup_at TIMESTAMP WITH TIME ZONE,
+    picked_up_at TIMESTAMP WITH TIME ZONE,
+    departed_at TIMESTAMP WITH TIME ZONE,
+    arrived_at TIMESTAMP WITH TIME ZONE,
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    buyer_unreachable_at TIMESTAMP WITH TIME ZONE,
+    unreachable_deadline TIMESTAMP WITH TIME ZONE,
+    escrow_id UUID REFERENCES escrows(id) ON DELETE SET NULL,
+    seller_id UUID NOT NULL REFERENCES users(id),
+    buyer_id UUID REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE driver_delivery_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    delivery_id UUID NOT NULL REFERENCES driver_deliveries(id) ON DELETE CASCADE,
+    from_status driver_delivery_status,
+    to_status driver_delivery_status NOT NULL,
+    actor_type driver_delivery_actor_type NOT NULL,
+    actor_id UUID,
+    reason VARCHAR(255),
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE driver_offers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    delivery_id UUID NOT NULL REFERENCES driver_deliveries(id),
+    driver_id UUID NOT NULL REFERENCES driver_profiles(id),
+    offered_amount DECIMAL(12,2) NOT NULL,
+    counter_amount DECIMAL(12,2),
+    agreed_amount DECIMAL(12,2),
+    status driver_offer_status NOT NULL DEFAULT 'pending',
+    expires_at TIMESTAMPTZ NOT NULL,
+    counter_expires_at TIMESTAMPTZ,
+    countered_at TIMESTAMPTZ,
+    responded_at TIMESTAMPTZ,
+    driver_note TEXT,
+    seller_note TEXT,
+    offer_count INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Driver indexes
+CREATE INDEX idx_driver_profiles_user ON driver_profiles(user_id);
+CREATE INDEX idx_driver_profiles_status ON driver_profiles(status);
+CREATE INDEX idx_driver_profiles_verified ON driver_profiles(is_verified) WHERE is_verified = TRUE;
+CREATE INDEX idx_driver_profiles_route ON driver_profiles(origin_city, destination_city) WHERE status IN ('idle', 'loading');
+
+CREATE INDEX idx_driver_trips_driver ON driver_trips(driver_id);
+CREATE INDEX idx_driver_trips_status ON driver_trips(status);
+CREATE INDEX idx_driver_trips_route ON driver_trips(origin_city, destination_city, status);
+CREATE INDEX idx_driver_trips_active ON driver_trips(driver_id, status) WHERE status NOT IN ('completed', 'cancelled');
+
+CREATE INDEX idx_driver_deliveries_payment_request ON driver_deliveries(payment_request_id);
+CREATE INDEX idx_driver_deliveries_trip ON driver_deliveries(trip_id);
+CREATE INDEX idx_driver_deliveries_driver ON driver_deliveries(driver_id);
+CREATE INDEX idx_driver_deliveries_status ON driver_deliveries(status);
+CREATE INDEX idx_driver_deliveries_route ON driver_deliveries(origin_city, destination_city, status);
+CREATE INDEX idx_driver_deliveries_awaiting ON driver_deliveries(origin_city, destination_city) WHERE status = 'awaiting_driver';
+CREATE INDEX idx_driver_deliveries_seller ON driver_deliveries(seller_id);
+CREATE INDEX idx_driver_deliveries_buyer ON driver_deliveries(buyer_id);
+CREATE INDEX idx_driver_deliveries_unreachable ON driver_deliveries(unreachable_deadline) WHERE status = 'buyer_unreachable' AND unreachable_deadline IS NOT NULL;
+
+CREATE INDEX idx_driver_delivery_events_delivery ON driver_delivery_events(delivery_id);
+CREATE INDEX idx_driver_delivery_events_created ON driver_delivery_events(created_at);
+
+CREATE INDEX idx_driver_offers_delivery ON driver_offers(delivery_id);
+CREATE INDEX idx_driver_offers_driver ON driver_offers(driver_id);
+CREATE INDEX idx_driver_offers_expiry ON driver_offers(expires_at) WHERE status IN ('pending', 'countered');
+CREATE INDEX idx_driver_offers_status ON driver_offers(status);
 
 -- ============================================
 -- FINANCIAL TABLES
@@ -792,20 +1002,16 @@ CREATE TABLE payment_request_events (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-
-
--- Platform Settings
 CREATE TABLE platform_settings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     setting_key VARCHAR(50) UNIQUE NOT NULL,
     setting_value JSONB NOT NULL,
     description TEXT,
-    updated_by UUID, -- Can be NULL for system defaults
+    updated_by UUID,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Admin Audit Logs
 CREATE TABLE admin_audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     admin_id UUID NOT NULL REFERENCES users(id),
@@ -828,13 +1034,13 @@ INSERT INTO platform_settings (setting_key, setting_value, description) VALUES
 ('commission_settings', '{"max_unpaid_rides": 5, "commission_rate": 0.15}', 'Rider commission settings');
 
 -- ============================================
--- UPDATER SETTERS FOR CIRCULAR DEPENDENCIES
+-- FOREIGN KEY CONSTRAINTS (Circular dependencies)
 -- ============================================
 
-ALTER TABLE payment_requests ADD CONSTRAINT fk_pr_escrow 
+ALTER TABLE payment_requests ADD CONSTRAINT fk_pr_escrow
     FOREIGN KEY (escrow_id) REFERENCES escrows(id);
 
-ALTER TABLE payment_requests ADD CONSTRAINT fk_pr_delivery_job 
+ALTER TABLE payment_requests ADD CONSTRAINT fk_pr_delivery_job
     FOREIGN KEY (delivery_job_id) REFERENCES delivery_jobs(id);
 
 ALTER TABLE payment_requests ADD CONSTRAINT fk_pr_logistics_delivery
@@ -845,6 +1051,9 @@ ALTER TABLE payment_requests ADD CONSTRAINT fk_pr_return_job
 
 ALTER TABLE payment_requests ADD CONSTRAINT fk_pr_forced_return
     FOREIGN KEY (forced_return_job_id) REFERENCES delivery_jobs(id);
+
+ALTER TABLE payment_requests ADD CONSTRAINT fk_pr_driver_delivery
+    FOREIGN KEY (driver_delivery_id) REFERENCES driver_deliveries(id);
 
 ALTER TABLE delivery_jobs ADD CONSTRAINT fk_dj_errand
     FOREIGN KEY (errand_id) REFERENCES errands(id);
@@ -879,3 +1088,7 @@ CREATE TRIGGER update_top_ups_updated_at BEFORE UPDATE ON top_ups FOR EACH ROW E
 CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_errands_updated_at BEFORE UPDATE ON errands FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_logistics_deliveries_updated_at BEFORE UPDATE ON logistics_deliveries FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_driver_profiles_updated_at BEFORE UPDATE ON driver_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_driver_trips_updated_at BEFORE UPDATE ON driver_trips FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_driver_deliveries_updated_at BEFORE UPDATE ON driver_deliveries FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_driver_offers_updated_at BEFORE UPDATE ON driver_offers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

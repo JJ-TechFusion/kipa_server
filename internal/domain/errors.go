@@ -7,6 +7,7 @@ var (
 	ErrOTPExpired             = errors.New("OTP has expired")
 	ErrMaxOTPAttemptsExceeded = errors.New("maximum OTP verification attempts exceeded")
 	ErrOTPRateLimitExceeded   = errors.New("too many OTP requests, please try again later")
+	ErrOTPResendCooldown      = errors.New("please wait before requesting another OTP")
 	ErrOTPAlreadyVerified     = errors.New("OTP already verified")
 	ErrOTPNotFound            = errors.New("OTP verification not found")
 	ErrInvalidToken        = errors.New("invalid or expired token")
@@ -127,6 +128,18 @@ var (
 	ErrDropoffCodeExpired        = errors.New("dropoff code has expired")
 	ErrDeliveryNotCancellable    = errors.New("delivery cannot be cancelled after pickup")
 	ErrRouteMismatch             = errors.New("delivery route does not match driver route")
+
+	// Driver offer errors
+	ErrOfferNotFound              = errors.New("driver offer not found")
+	ErrOfferExpired               = errors.New("driver offer has expired")
+	ErrDriverAlreadyOffered       = errors.New("driver has already made an offer for this delivery")
+	ErrDeliveryNotAcceptingOffers = errors.New("delivery is not accepting offers")
+	ErrMaxOfferAttemptsExceeded   = errors.New("maximum offer attempts exceeded")
+	ErrOfferCannotBeAccepted      = errors.New("offer cannot be accepted in current state")
+	ErrOfferCannotBeRejected      = errors.New("offer cannot be rejected in current state")
+	ErrOfferCannotBeCountered     = errors.New("offer cannot be countered in current state")
+	ErrOfferCannotBeWithdrawn     = errors.New("offer cannot be withdrawn in current state")
+	ErrCounterOfferExpired        = errors.New("counter offer has expired")
 )
 const (
 	CodeInvalidInput   = "INVALID_INPUT"
@@ -134,6 +147,7 @@ const (
 	CodeOTPExpired     = "OTP_EXPIRED"
 	CodeOTPMaxAttempts = "OTP_MAX_ATTEMPTS"
 	CodeOTPRateLimit   = "OTP_RATE_LIMITED"
+	CodeOTPCooldown    = "OTP_COOLDOWN"
 	CodeInvalidToken   = "INVALID_TOKEN"
 	CodeTokenExpired   = "TOKEN_EXPIRED"
 	CodeSessionRevoked = "SESSION_REVOKED"

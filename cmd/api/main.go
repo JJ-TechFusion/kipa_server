@@ -28,6 +28,7 @@ import (
 	"kipa/internal/service"
 	"kipa/internal/util"
 	"kipa/internal/websocket"
+	"kipa/internal/worker"
 )
 
 func main() {
@@ -67,6 +68,7 @@ func main() {
 	otpRepo := postgres.NewOTPRepo(pgClient.DB)
 	idempotencyRepo := postgres.NewIdempotencyRepo(pgClient.DB)
 	sessionRepo := redisrepo.NewSessionRepo(redisClient.Client, cfg.JWT.RefreshTokenExpiry)
+	riderLocationRepo := redisrepo.NewRiderLocationRepo(redisClient.Client)
 
 	// New repositories for platform features
 	walletRepo := postgres.NewWalletRepo(pgClient.DB)
@@ -101,6 +103,7 @@ func main() {
 	driverTripRepo := postgres.NewDriverTripRepo(pgClient.DB)
 	driverDeliveryRepo := postgres.NewDriverDeliveryRepo(pgClient.DB)
 	driverDeliveryEventRepo := postgres.NewDriverDeliveryEventRepo(pgClient.DB)
+	driverOfferRepo := postgres.NewDriverOfferRepo(pgClient.DB)
 
 	// Notification repositories
 	deviceTokenRepo := postgres.NewDeviceTokenRepo(pgClient.DB)
@@ -160,6 +163,10 @@ func main() {
 	// Fee calculator service (uses Google Maps for road distance + DB settings)
 	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, platformSettingsRepo, mapsClient, cfg, logger)
 
+	// WebSocket hub (created early as many services need it for broadcasting)
+	wsHub := websocket.NewHub(logger)
+	go wsHub.Run()
+
 	// Wallet service
 	walletService := service.NewWalletService(walletRepo, walletTxRepo, logger)
 
@@ -177,7 +184,7 @@ func main() {
 	)
 
 	// Payment request service
-	prService := service.NewPaymentRequestService(prRepo, prEventRepo, userRepo, deliveryJobRepo, feeCalculator, cfg, logger)
+	prService := service.NewPaymentRequestService(prRepo, prEventRepo, userRepo, deliveryJobRepo, feeCalculator, wsHub, cfg, logger)
 
 	// Escrow service
 	// Escrow service
@@ -242,15 +249,13 @@ func main() {
 		errandRepo,
 		deliveryJobRepo,
 		feeCalculator,
+		wsHub,
 		logger,
 	)
 
 	// Location service handles location updates, ETA, and storage
 	locationHistoryRepo := postgres.NewLocationHistoryRepo(pgClient.DB)
 	djRepo := deliveryJobRepo.(*postgres.DeliveryJobRepo)
-	// WebSocket hub
-	wsHub := websocket.NewHub(logger)
-	go wsHub.Run()
 
 	locationService := service.NewLocationService(
 		locationHistoryRepo,
@@ -270,7 +275,7 @@ func main() {
 	// Notification service
 
 
-	// Rider service (needs notification service)
+	// Rider service (needs notification service and broadcaster)
 	riderService := service.NewRiderService(
 		riderProfileRepo,
 		deliveryJobRepo,
@@ -282,6 +287,8 @@ func main() {
 		errandService,
 		locationService,
 		notificationService,
+		wsHub,
+		riderLocationRepo,
 		logger,
 		cfg,
 	)
@@ -302,6 +309,7 @@ func main() {
 		driverTripRepo,
 		driverDeliveryRepo,
 		driverDeliveryEventRepo,
+		driverOfferRepo,
 		prRepo,
 		escrowService,
 		walletService,
@@ -340,6 +348,7 @@ func main() {
 		walletService,
 		notificationService,
 		feeCalculator,
+		wsHub,
 		cfg,
 		logger,
 	)
@@ -446,8 +455,19 @@ func main() {
 	wsHandler.RegisterRoutes(v1)
 
 	// Tracking handler for REST-based location queries
-	trackingHandler := handler.NewTrackingHandler(deliveryJobRepo, locationHistoryRepo, errandRepo)
+	trackingHandler := handler.NewTrackingHandler(deliveryJobRepo, locationHistoryRepo, errandRepo, riderProfileRepo, userRepo)
 	trackingHandler.RegisterRoutes(v1, authMiddleware)
+
+	// Start API background jobs (jobs that need WebSocket access)
+	riderLocationAdapter := worker.NewRiderLocationAdapter(riderLocationRepo)
+	apiJobRunner := worker.NewAPIJobRunner(
+		deliveryJobRepo,
+		riderLocationAdapter,
+		wsHub,
+		logger,
+	)
+	apiJobCtx, apiJobCancel := context.WithCancel(context.Background())
+	apiJobRunner.Start(apiJobCtx)
 
 	// Create HTTP server
 	srv := &http.Server{
@@ -474,6 +494,10 @@ func main() {
 	<-quit
 
 	logger.Info("Shutting down server...")
+
+	// Stop API background jobs
+	apiJobCancel()
+	apiJobRunner.Stop()
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

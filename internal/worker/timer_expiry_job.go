@@ -35,6 +35,7 @@ func (p *JobProcessor) processTimerExpiries(ctx context.Context) {
 
 	p.logger.Debug("timer expiry job: processing timer expirations")
 	p.expireStaleRiderOffers(ctx)
+	p.expireStaleDriverOffers(ctx)
 	p.processOverdueProcessingOrders(ctx)
 
 	p.logger.Debug("timer expiry job: completed")
@@ -56,6 +57,18 @@ func (p *JobProcessor) expireStaleRiderOffers(ctx context.Context) {
 		p.logger.Info("timer expiry job: expired stale rider offers",
 			zap.Int64("count", expiredCount),
 			zap.Int("timeout_mins", p.config.RiderOfferTimeoutMins),
+		)
+	}
+}
+
+func (p *JobProcessor) expireStaleDriverOffers(ctx context.Context) {
+	if p.driverService == nil {
+		return
+	}
+
+	if err := p.driverService.ExpireStaleOffers(ctx); err != nil {
+		p.logger.Error("timer expiry job: failed to expire stale driver offers",
+			zap.Error(err),
 		)
 	}
 }

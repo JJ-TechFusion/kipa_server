@@ -49,16 +49,17 @@ type ResolveDamageClaimRequest struct {
 }
 
 type DisputeResolutionServiceImpl struct {
-	disputeRepo       repository.DisputeRepository
-	escrowRepo        repository.EscrowRepository
-	prRepo            repository.PaymentRequestRepository
-	deliveryJobRepo   repository.DeliveryJobRepository
-	userRepo          repository.UserRepository
-	walletService     WalletService
+	disputeRepo         repository.DisputeRepository
+	escrowRepo          repository.EscrowRepository
+	prRepo              repository.PaymentRequestRepository
+	deliveryJobRepo     repository.DeliveryJobRepository
+	userRepo            repository.UserRepository
+	walletService       WalletService
 	notificationService NotificationService
-	feeCalculator     FeeCalculatorService
-	config            *config.Config
-	logger            *zap.Logger
+	feeCalculator       FeeCalculatorService
+	broadcaster         JobStatusBroadcaster
+	config              *config.Config
+	logger              *zap.Logger
 }
 
 func NewDisputeResolutionService(
@@ -70,6 +71,7 @@ func NewDisputeResolutionService(
 	walletService WalletService,
 	notificationService NotificationService,
 	feeCalculator FeeCalculatorService,
+	broadcaster JobStatusBroadcaster,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) DisputeResolutionService {
@@ -82,6 +84,7 @@ func NewDisputeResolutionService(
 		walletService:       walletService,
 		notificationService: notificationService,
 		feeCalculator:       feeCalculator,
+		broadcaster:         broadcaster,
 		config:              cfg,
 		logger:              logger,
 	}
@@ -361,6 +364,10 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 		return nil, err
 	}
 
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(returnJob.ID.String(), string(domain.DJStatusSearching))
+	}
+
 	// Update payment request
 	pr.ReturnDeliveryJobID = &returnJob.ID
 	pr.Status = domain.PRStatusReturnSearchingRider
@@ -417,6 +424,10 @@ func (s *DisputeResolutionServiceImpl) ConfirmReturnReceived(ctx context.Context
 			return err
 		}
 
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastJobStatus(returnJobID.String(), string(domain.DJStatusReturnConfirmed))
+		}
+
 		// Update payment request
 		pr.Status = domain.PRStatusReturnConfirmed
 		if err := s.prRepo.Update(ctx, pr); err != nil {
@@ -435,6 +446,10 @@ func (s *DisputeResolutionServiceImpl) ConfirmReturnReceived(ctx context.Context
 		job.Status = domain.DJStatusReturnDamageDisputed
 		if err := s.deliveryJobRepo.Update(ctx, job); err != nil {
 			return err
+		}
+
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastJobStatus(returnJobID.String(), string(domain.DJStatusReturnDamageDisputed))
 		}
 
 		// Update payment request
@@ -481,6 +496,10 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 	job.Status = domain.DJStatusReturnRefunded
 	if err := s.deliveryJobRepo.Update(ctx, job); err != nil {
 		return err
+	}
+
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusReturnRefunded))
 	}
 
 	// Update escrow
@@ -581,6 +600,10 @@ func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Co
 		return err
 	}
 
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusReturnRefunded))
+	}
+
 	// Update escrow
 	now := time.Now()
 	escrow.SellerPayout = &sellerAmount
@@ -617,6 +640,10 @@ func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job 
 	job.Status = domain.DJStatusReturnConfirmed
 	if err := s.deliveryJobRepo.Update(ctx, job); err != nil {
 		return err
+	}
+
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusReturnConfirmed))
 	}
 
 	// Update escrow

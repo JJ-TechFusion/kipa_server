@@ -86,6 +86,7 @@ type OTPConfig struct {
 	MaxAttempts     int
 	RateLimitCount  int
 	RateLimitWindow time.Duration
+	ResendCooldown  time.Duration
 	BcryptCost      int
 }
 
@@ -169,6 +170,7 @@ func Load() (*Config, error) {
 			MaxAttempts:     viper.GetInt("otp.max_attempts"),
 			RateLimitCount:  viper.GetInt("otp.rate_limit_count"),
 			RateLimitWindow: viper.GetDuration("otp.rate_limit_window"),
+			ResendCooldown:  viper.GetDuration("otp.resend_cooldown"),
 			BcryptCost:      viper.GetInt("otp.bcrypt_cost"),
 		},
 		Twilio: TwilioConfig{
@@ -242,6 +244,7 @@ func setDefaults() {
 	viper.SetDefault("otp.max_attempts", 3)
 	viper.SetDefault("otp.rate_limit_count", 5)
 	viper.SetDefault("otp.rate_limit_window", "1h")
+	viper.SetDefault("otp.resend_cooldown", "60s")
 	viper.SetDefault("otp.bcrypt_cost", 10)
 
 	viper.SetDefault("paystack.base_url", "https://api.paystack.co")

@@ -18,27 +18,120 @@ type TrackingHandler struct {
 	deliveryJobRepo     repository.DeliveryJobRepository
 	locationHistoryRepo *postgres.LocationHistoryRepo
 	errandRepo          repository.ErrandRepository
+	riderProfileRepo    repository.RiderProfileRepository
+	userRepo            repository.UserRepository
 }
+
 func NewTrackingHandler(
 	deliveryJobRepo repository.DeliveryJobRepository,
 	locationHistoryRepo *postgres.LocationHistoryRepo,
 	errandRepo repository.ErrandRepository,
+	riderProfileRepo repository.RiderProfileRepository,
+	userRepo repository.UserRepository,
 ) *TrackingHandler {
 	return &TrackingHandler{
 		deliveryJobRepo:     deliveryJobRepo,
 		locationHistoryRepo: locationHistoryRepo,
 		errandRepo:          errandRepo,
+		riderProfileRepo:    riderProfileRepo,
+		userRepo:            userRepo,
 	}
 }
 func (h *TrackingHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware) {
 	tracking := router.Group("/tracking")
 	tracking.Use(authMiddleware.RequireAuth())
 	{
+		tracking.GET("/jobs/:id", h.GetJobDetails)
 		tracking.GET("/jobs/:id/location", h.GetJobLocation)
 		tracking.GET("/jobs/:id/location/history", h.GetJobLocationHistory)
+		tracking.GET("/jobs/:id/rider", h.GetJobRiderInfo)
 		tracking.GET("/errands/:id/location", h.GetErrandLocation)
 	}
 }
+func (h *TrackingHandler) GetJobDetails(c *gin.Context) {
+	_, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid job ID")
+		return
+	}
+
+	job, err := h.deliveryJobRepo.GetByID(c.Request.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, domain.ErrDeliveryJobNotFound) {
+			util.Error(c, http.StatusNotFound, "NOT_FOUND", "Delivery job not found")
+			return
+		}
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get job")
+		return
+	}
+
+	// Get coordinates from PostGIS
+	coords, _ := h.deliveryJobRepo.GetJobCoordinates(c.Request.Context(), jobID)
+
+	response := JobDetailsResponse{
+		ID:             job.ID,
+		Status:         string(job.Status),
+		PickupAddress:  job.PickupAddress,
+		DropoffAddress: job.DropoffAddress,
+		DistanceKM:     job.DistanceKM,
+		DeliveryFee:    job.DeliveryFee,
+		VehicleType:    string(job.RequiredVehicleType),
+		RiderAssigned:  job.RiderID != nil,
+		CreatedAt:      job.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+
+	if coords != nil {
+		response.PickupLat = coords.PickupLat
+		response.PickupLng = coords.PickupLng
+		response.DropoffLat = coords.DropoffLat
+		response.DropoffLng = coords.DropoffLng
+	}
+
+	if job.RiderID != nil {
+		response.RiderID = job.RiderID
+
+		// Get rider info
+		riderProfile, err := h.riderProfileRepo.GetByID(c.Request.Context(), *job.RiderID)
+		if err == nil {
+			user, err := h.userRepo.GetByID(c.Request.Context(), riderProfile.UserID)
+			if err == nil {
+				response.Rider = &RiderInfoResponse{
+					RiderID:         riderProfile.ID,
+					FirstName:       user.FirstName,
+					LastName:        user.LastName,
+					PhoneNumber:     user.PhoneNumber,
+					ProfilePhotoURL: user.ProfilePhotoURL,
+					VehicleType:     riderProfile.VehicleType,
+					VehiclePlate:    riderProfile.VehiclePlate,
+					Rating:          riderProfile.Rating,
+					TotalDeliveries: riderProfile.TotalDeliveries,
+				}
+			}
+		}
+	}
+
+	if job.AcceptedAt != nil {
+		acceptedAt := job.AcceptedAt.Format("2006-01-02T15:04:05Z07:00")
+		response.AcceptedAt = &acceptedAt
+	}
+	if job.PickedUpAt != nil {
+		pickedUpAt := job.PickedUpAt.Format("2006-01-02T15:04:05Z07:00")
+		response.PickedUpAt = &pickedUpAt
+	}
+	if job.DeliveredAt != nil {
+		deliveredAt := job.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
+		response.DeliveredAt = &deliveredAt
+	}
+
+	util.Success(c, http.StatusOK, response)
+}
+
 func (h *TrackingHandler) GetJobLocation(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -193,6 +286,27 @@ func (h *TrackingHandler) GetErrandLocation(c *gin.Context) {
 	})
 }
 
+type JobDetailsResponse struct {
+	ID             uuid.UUID          `json:"id"`
+	Status         string             `json:"status"`
+	PickupAddress  string             `json:"pickup_address"`
+	PickupLat      float64            `json:"pickup_lat"`
+	PickupLng      float64            `json:"pickup_lng"`
+	DropoffAddress string             `json:"dropoff_address"`
+	DropoffLat     float64            `json:"dropoff_lat"`
+	DropoffLng     float64            `json:"dropoff_lng"`
+	DistanceKM     *float64           `json:"distance_km,omitempty"`
+	DeliveryFee    float64            `json:"delivery_fee"`
+	VehicleType    string             `json:"vehicle_type"`
+	RiderAssigned  bool               `json:"rider_assigned"`
+	RiderID        *uuid.UUID         `json:"rider_id,omitempty"`
+	Rider          *RiderInfoResponse `json:"rider,omitempty"`
+	AcceptedAt     *string            `json:"accepted_at,omitempty"`
+	PickedUpAt     *string            `json:"picked_up_at,omitempty"`
+	DeliveredAt    *string            `json:"delivered_at,omitempty"`
+	CreatedAt      string             `json:"created_at"`
+}
+
 type LocationResponse struct {
 	JobID     string  `json:"job_id"`
 	RiderID   string  `json:"rider_id"`
@@ -210,4 +324,69 @@ type LocationPoint struct {
 	Heading   float64 `json:"heading"`
 	Speed     float64 `json:"speed"`
 	Timestamp string  `json:"timestamp"`
+}
+
+type RiderInfoResponse struct {
+	RiderID         uuid.UUID `json:"rider_id"`
+	FirstName       *string   `json:"first_name,omitempty"`
+	LastName        *string   `json:"last_name,omitempty"`
+	PhoneNumber     string    `json:"phone_number"`
+	ProfilePhotoURL *string   `json:"profile_photo_url,omitempty"`
+	VehicleType     *string   `json:"vehicle_type,omitempty"`
+	VehiclePlate    *string   `json:"vehicle_plate,omitempty"`
+	Rating          float64   `json:"rating"`
+	TotalDeliveries int       `json:"total_deliveries"`
+}
+
+func (h *TrackingHandler) GetJobRiderInfo(c *gin.Context) {
+	_, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid job ID")
+		return
+	}
+
+	job, err := h.deliveryJobRepo.GetByID(c.Request.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, domain.ErrDeliveryJobNotFound) {
+			util.Error(c, http.StatusNotFound, "NOT_FOUND", "Delivery job not found")
+			return
+		}
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get job")
+		return
+	}
+
+	if job.RiderID == nil {
+		util.Error(c, http.StatusBadRequest, "NO_RIDER", "No rider assigned to this job yet")
+		return
+	}
+
+	riderProfile, err := h.riderProfileRepo.GetByID(c.Request.Context(), *job.RiderID)
+	if err != nil {
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get rider profile")
+		return
+	}
+
+	user, err := h.userRepo.GetByID(c.Request.Context(), riderProfile.UserID)
+	if err != nil {
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get rider user info")
+		return
+	}
+
+	util.Success(c, http.StatusOK, RiderInfoResponse{
+		RiderID:         riderProfile.ID,
+		FirstName:       user.FirstName,
+		LastName:        user.LastName,
+		PhoneNumber:     user.PhoneNumber,
+		ProfilePhotoURL: user.ProfilePhotoURL,
+		VehicleType:     riderProfile.VehicleType,
+		VehiclePlate:    riderProfile.VehiclePlate,
+		Rating:          riderProfile.Rating,
+		TotalDeliveries: riderProfile.TotalDeliveries,
+	})
 }

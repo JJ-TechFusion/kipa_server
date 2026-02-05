@@ -25,6 +25,7 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *mi
 	auth := router.Group("/auth")
 	{
 		auth.POST("/otp/send", h.SendOTP)
+		auth.POST("/otp/resend", h.ResendOTP)
 		auth.POST("/otp/verify", h.VerifyOTP)
 		auth.POST("/token/refresh", h.RefreshToken)
 		auth.POST("/logout", authMiddleware.RequireAuth(), h.Logout)
@@ -44,6 +45,22 @@ func (h *AuthHandler) SendOTP(c *gin.Context) {
 	}
 
 	response, err := h.authService.SendOTP(c.Request.Context(), &req, getClientIP(c), getUserAgent(c))
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, response)
+}
+
+func (h *AuthHandler) ResendOTP(c *gin.Context) {
+	var req dto.ResendOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	response, err := h.authService.ResendOTP(c.Request.Context(), &req, getClientIP(c), getUserAgent(c))
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -158,6 +175,8 @@ func mapErrorToResponse(err error) (int, string, string) {
 		return http.StatusUnauthorized, domain.CodeOTPMaxAttempts, "Maximum verification attempts exceeded. Please request a new OTP."
 	case errors.Is(err, domain.ErrOTPRateLimitExceeded):
 		return http.StatusTooManyRequests, domain.CodeOTPRateLimit, "Too many OTP requests. Please try again later."
+	case errors.Is(err, domain.ErrOTPResendCooldown):
+		return http.StatusTooManyRequests, domain.CodeOTPCooldown, "Please wait before requesting another OTP."
 	case errors.Is(err, domain.ErrOTPAlreadyVerified):
 		return http.StatusBadRequest, domain.CodeInvalidOTP, "OTP has already been used"
 	case errors.Is(err, domain.ErrInvalidToken):

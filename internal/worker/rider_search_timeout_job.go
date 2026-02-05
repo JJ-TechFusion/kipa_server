@@ -76,6 +76,10 @@ func (p *JobProcessor) processTimedOutJob(ctx context.Context, job *domain.Deliv
 		return err
 	}
 
+	if p.broadcaster != nil {
+		p.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusTimeout))
+	}
+
 	p.logger.Info("rider search timeout job: marked job as timed out",
 		zap.String("job_id", job.ID.String()),
 		zap.String("payment_request_id", job.PaymentRequestID.String()),

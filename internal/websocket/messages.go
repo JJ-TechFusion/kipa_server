@@ -13,6 +13,7 @@ const (
 	TypeRiderLocation   = "rider_location"
 	TypeJobStatus       = "job_status"
 	TypeNewJobAvailable = "new_job_available"
+	TypeNearbyRiders    = "nearby_riders"
 	TypePong            = "pong"
 	TypeError           = "error"
 	TypeChatMessage     = "chat_message"
@@ -79,4 +80,19 @@ type ChatMessagePayload struct {
 	MessageID string `json:"message_id,omitempty"`
 	SenderID  string `json:"sender_id,omitempty"`
 	Timestamp int64  `json:"timestamp,omitempty"`
+}
+
+type NearbyRiderInfo struct {
+	RiderID    string  `json:"rider_id"`
+	Lat        float64 `json:"lat"`
+	Lng        float64 `json:"lng"`
+	Heading    float64 `json:"heading"`
+	Speed      float64 `json:"speed"`
+	DistanceKM float64 `json:"distance_km"`
+}
+
+type NearbyRidersMessage struct {
+	Type   string            `json:"type"`
+	JobID  string            `json:"job_id"`
+	Riders []NearbyRiderInfo `json:"riders"`
 }

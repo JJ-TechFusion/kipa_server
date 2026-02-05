@@ -696,6 +696,245 @@
 						"description": "Get timeline for driver delivery showing progress steps.\n\n**Normal Flow Steps:**\n1. Order Created\n2. Awaiting Driver\n3. Driver Assigned\n4. Awaiting Handover (seller brings item to driver)\n5. Item Collected\n6. In Transit\n7. Arrived at Destination\n8. Delivered\n9. Completed\n\n**Edge Case Steps (when applicable):**\n- Buyer Unreachable (driver couldn't reach buyer)\n- Returning to Seller (item being returned)\n- Returned to Seller (return completed)\n- Dispute Opened (buyer raised dispute)\n- Refunded (payment refunded)\n- Cancelled (seller cancelled)\n- Expired (no driver found)\n\n**Response includes:**\n- steps[] - All timeline steps with status (completed/current/pending)\n- current_step - The active step\n- item_name, total_amount, origin_city, destination_city\n- pickup_code (for seller when available)\n\n**Available to:** Authenticated sellers"
 					},
 					"response": []
+				},
+				{
+					"name": "Get Offers for Driver Delivery",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/driver-deliveries/{{driver_delivery_id}}/offers",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "driver-deliveries", "{{driver_delivery_id}}", "offers"]
+						},
+						"description": "Get all offers from drivers for a specific delivery."
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Driver Offer",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/driver-deliveries/{{driver_delivery_id}}/offers/{{offer_id}}/accept",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "driver-deliveries", "{{driver_delivery_id}}", "offers", "{{offer_id}}", "accept"]
+						},
+						"description": "Accept a driver's offer for the delivery."
+					},
+					"response": []
+				},
+				{
+					"name": "Reject Driver Offer",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"note\": \"Price too high for this delivery\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/driver-deliveries/{{driver_delivery_id}}/offers/{{offer_id}}/reject",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "driver-deliveries", "{{driver_delivery_id}}", "offers", "{{offer_id}}", "reject"]
+						},
+						"description": "Reject a driver's offer for the delivery."
+					},
+					"response": []
+				},
+				{
+					"name": "Counter Driver Offer",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 15000.00,\n  \"note\": \"Can you do it for ₦15,000?\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/seller/driver-deliveries/{{driver_delivery_id}}/offers/{{offer_id}}/counter",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "seller", "driver-deliveries", "{{driver_delivery_id}}", "offers", "{{offer_id}}", "counter"]
+						},
+						"description": "Make a counter offer to a driver's original offer."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Driver Offer Management",
+			"item": [
+				{
+					"name": "Make Offer for Delivery",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 20000.00,\n  \"note\": \"I can deliver this package safely and on time.\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/deliveries/{{driver_delivery_id}}/offer",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "deliveries", "{{driver_delivery_id}}", "offer"]
+						},
+						"description": "Make an offer to deliver a package for a seller."
+					},
+					"response": []
+				},
+				{
+					"name": "Get My Offers",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/offers?status=pending",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "offers"],
+							"query": [
+								{
+									"key": "status",
+									"value": "pending"
+								}
+							]
+						},
+						"description": "List all my offers with optional status filter."
+					},
+					"response": []
+				},
+				{
+					"name": "Withdraw Offer",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/offers/{{offer_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "offers", "{{offer_id}}"]
+						},
+						"description": "Withdraw a pending offer."
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Counter Offer",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/offers/{{offer_id}}/accept-counter",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "offers", "{{offer_id}}", "accept-counter"]
+						},
+						"description": "Accept seller's counter offer."
+					},
+					"response": []
+				},
+				{
+					"name": "Reject Counter Offer",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/driver/offers/{{offer_id}}/reject-counter",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "driver", "offers", "{{offer_id}}", "reject-counter"]
+						},
+						"description": "Reject seller's counter offer."
+					},
+					"response": []
 				}
 			]
 		},
@@ -4160,6 +4399,11 @@
 		},
 		{
 			"key": "trip_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "offer_id",
 			"value": "",
 			"type": "string"
 		},

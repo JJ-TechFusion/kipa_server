@@ -89,16 +89,96 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 		s.logger.Error("failed to increment rate limit", zap.Error(err))
 	}
 
+	// Track last OTP sent time for resend cooldown
+	if err := s.sessionRepo.SetLastOTPSentTime(ctx, req.PhoneNumber, s.config.OTP.ResendCooldown); err != nil {
+		s.logger.Error("failed to set last OTP sent time", zap.Error(err))
+	}
+
 	s.logger.Info("verification sent successfully",
 		zap.String("phone", req.PhoneNumber),
 		zap.String("status", result.Status),
 	)
 
+	// Generate idempotency key for the client to use during verification
+	idempotencyKey := uuid.New().String() + uuid.New().String()[:8]
+
 	// Use phone number as verification ID since Twilio manages the verification
 	return &dto.SendOTPResponse{
 		VerificationID: req.PhoneNumber,
+		IdempotencyKey: idempotencyKey,
 		ExpiresAt:      time.Now().Add(s.config.OTP.ExpiryDuration),
-		RetryAfter:     60,
+		RetryAfter:     int(s.config.OTP.ResendCooldown.Seconds()),
+	}, nil
+}
+
+func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPRequest, ipAddress, userAgent string) (*dto.SendOTPResponse, error) {
+	// Check resend cooldown
+	lastSent, err := s.sessionRepo.GetLastOTPSentTime(ctx, req.PhoneNumber)
+	if err != nil {
+		s.logger.Error("failed to check last OTP sent time", zap.Error(err))
+		return nil, fmt.Errorf("failed to check cooldown: %w", err)
+	}
+
+	if !lastSent.IsZero() {
+		elapsed := time.Since(lastSent)
+		if elapsed < s.config.OTP.ResendCooldown {
+			remaining := s.config.OTP.ResendCooldown - elapsed
+			s.logger.Warn("OTP resend cooldown not elapsed",
+				zap.String("phone", req.PhoneNumber),
+				zap.Duration("remaining", remaining),
+			)
+			return nil, domain.ErrOTPResendCooldown
+		}
+	}
+
+	// Check overall rate limit
+	count, err := s.sessionRepo.GetRateLimitCount(ctx, req.PhoneNumber)
+	if err != nil {
+		s.logger.Error("failed to check rate limit", zap.Error(err))
+		return nil, fmt.Errorf("failed to check rate limit: %w", err)
+	}
+
+	if count >= s.config.OTP.RateLimitCount {
+		s.logger.Warn("OTP rate limit exceeded",
+			zap.String("phone", req.PhoneNumber),
+			zap.Int("count", count),
+		)
+		return nil, domain.ErrOTPRateLimitExceeded
+	}
+
+	// Send verification via Twilio Verify
+	result, err := s.verifyProvider.SendVerification(ctx, req.PhoneNumber, "sms")
+	if err != nil || !result.Success {
+		s.logger.Error("failed to resend verification",
+			zap.String("phone", req.PhoneNumber),
+			zap.Error(err),
+		)
+		return nil, domain.ErrSMSDeliveryFailed
+	}
+
+	// Increment rate limit
+	if err := s.sessionRepo.IncrementRateLimitCount(ctx, req.PhoneNumber, s.config.OTP.RateLimitWindow); err != nil {
+		s.logger.Error("failed to increment rate limit", zap.Error(err))
+	}
+
+	// Update last OTP sent time
+	if err := s.sessionRepo.SetLastOTPSentTime(ctx, req.PhoneNumber, s.config.OTP.ResendCooldown); err != nil {
+		s.logger.Error("failed to set last OTP sent time", zap.Error(err))
+	}
+
+	s.logger.Info("verification resent successfully",
+		zap.String("phone", req.PhoneNumber),
+		zap.String("status", result.Status),
+	)
+
+	// Generate new idempotency key for the resend
+	idempotencyKey := uuid.New().String() + uuid.New().String()[:8]
+
+	return &dto.SendOTPResponse{
+		VerificationID: req.PhoneNumber,
+		IdempotencyKey: idempotencyKey,
+		ExpiresAt:      time.Now().Add(s.config.OTP.ExpiryDuration),
+		RetryAfter:     int(s.config.OTP.ResendCooldown.Seconds()),
 	}, nil
 }
 

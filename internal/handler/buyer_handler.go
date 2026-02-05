@@ -110,7 +110,14 @@ func (h *BuyerHandler) GetPaymentPage(c *gin.Context) {
 		return
 	}
 
-	util.Success(c, http.StatusOK, paymentPageToResponse(pr))
+	// Get seller information
+	seller, err := h.userRepo.GetByID(c.Request.Context(), pr.SellerID)
+	if err != nil {
+		util.Error(c, http.StatusInternalServerError, "SELLER_NOT_FOUND", "Failed to retrieve seller information")
+		return
+	}
+
+	util.Success(c, http.StatusOK, paymentPageToResponse(pr, seller))
 }
 func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -484,9 +491,12 @@ type PaymentPageResponse struct {
 	BuyerServiceFee      *float64 `json:"buyer_service_fee,omitempty"`
 	EstimatedTotal       *float64 `json:"estimated_total,omitempty"`
 	SellerID             uuid.UUID `json:"seller_id"`
+	SellerName           string   `json:"seller_name"`
+	SellerEmail          *string  `json:"seller_email,omitempty"`
+	SellerPhone          string   `json:"seller_phone"`
 }
 
-func paymentPageToResponse(pr *domain.PaymentRequest) PaymentPageResponse {
+func paymentPageToResponse(pr *domain.PaymentRequest, seller *domain.User) PaymentPageResponse {
 	return PaymentPageResponse{
 		ItemName:             pr.ItemName,
 		ItemDescription:      pr.ItemDescription,
@@ -496,6 +506,9 @@ func paymentPageToResponse(pr *domain.PaymentRequest) PaymentPageResponse {
 		BuyerServiceFee:      pr.BuyerServiceFee,
 		EstimatedTotal:       pr.EstimatedTotal,
 		SellerID:             pr.SellerID,
+		SellerName:           seller.FullName(),
+		SellerEmail:          seller.Email,
+		SellerPhone:          seller.PhoneNumber,
 	}
 }
 
@@ -521,11 +534,12 @@ type PurchaseResponse struct {
 }
 
 type PurchaseDeliveryInfo struct {
-	Status       string  `json:"status"`                  
-	DropoffCode  *string `json:"dropoff_code,omitempty"` 
-	RiderAssigned bool   `json:"rider_assigned"`          
-	PickedUpAt   *string `json:"picked_up_at,omitempty"`
-	DeliveredAt  *string `json:"delivered_at,omitempty"`
+	JobID         *uuid.UUID `json:"job_id,omitempty"`
+	Status        string     `json:"status"`
+	DropoffCode   *string    `json:"dropoff_code,omitempty"`
+	RiderAssigned bool       `json:"rider_assigned"`
+	PickedUpAt    *string    `json:"picked_up_at,omitempty"`
+	DeliveredAt   *string    `json:"delivered_at,omitempty"`
 }
 
 func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job *domain.DeliveryJob) PurchaseResponse {
@@ -552,6 +566,7 @@ func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job
 	}
 	if job != nil {
 		deliveryInfo := &PurchaseDeliveryInfo{
+			JobID:         &job.ID,
 			Status:        string(job.Status),
 			RiderAssigned: job.RiderID != nil,
 		}

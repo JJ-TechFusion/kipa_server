@@ -28,9 +28,25 @@ type DriverService interface {
 	GoOnline(ctx context.Context, userID uuid.UUID, originCity, destinationCity string) (*domain.DriverTrip, error)
 	GoOffline(ctx context.Context, userID uuid.UUID) error
 
-	// Available deliveries
+	// Available deliveries (for direct accept mode - kept for backward compatibility)
 	GetAvailableDeliveries(ctx context.Context, userID uuid.UUID) ([]*domain.DriverDelivery, error)
 	AcceptDelivery(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID) (*domain.DriverDelivery, error)
+
+	// Driver offer/bid actions
+	MakeOffer(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID, req *MakeOfferRequest) (*domain.DriverOffer, error)
+	WithdrawOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) error
+	AcceptCounterOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) (*domain.DriverDelivery, error)
+	RejectCounterOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) error
+	GetMyOffers(ctx context.Context, userID uuid.UUID, status *domain.DriverOfferStatus) ([]*domain.DriverOffer, error)
+
+	// Seller offer actions
+	GetOffersForDelivery(ctx context.Context, sellerID uuid.UUID, deliveryID uuid.UUID) ([]*domain.DriverOffer, error)
+	AcceptOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID) (*domain.DriverDelivery, error)
+	RejectOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID, note string) error
+	CounterOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID, req *CounterOfferRequest) (*domain.DriverOffer, error)
+
+	// Background jobs
+	ExpireStaleOffers(ctx context.Context) error
 
 	// Trip management
 	GetCurrentTrip(ctx context.Context, userID uuid.UUID) (*domain.DriverTrip, error)
@@ -105,12 +121,23 @@ type DriverEarnings struct {
 	Rating          float64 `json:"rating"`
 }
 
+type MakeOfferRequest struct {
+	Amount float64 `json:"amount" binding:"required,gt=0"`
+	Note   string  `json:"note"`
+}
+
+type CounterOfferRequest struct {
+	Amount float64 `json:"amount" binding:"required,gt=0"`
+	Note   string  `json:"note"`
+}
+
 // DriverServiceImpl implements DriverService
 type DriverServiceImpl struct {
 	driverRepo       repository.DriverProfileRepository
 	tripRepo         repository.DriverTripRepository
 	deliveryRepo     repository.DriverDeliveryRepository
 	eventRepo        repository.DriverDeliveryEventRepository
+	offerRepo        repository.DriverOfferRepository
 	prRepo           repository.PaymentRequestRepository
 	escrowService    EscrowService
 	walletService    WalletService
@@ -124,6 +151,7 @@ func NewDriverService(
 	tripRepo repository.DriverTripRepository,
 	deliveryRepo repository.DriverDeliveryRepository,
 	eventRepo repository.DriverDeliveryEventRepository,
+	offerRepo repository.DriverOfferRepository,
 	prRepo repository.PaymentRequestRepository,
 	escrowService EscrowService,
 	walletService WalletService,
@@ -137,6 +165,7 @@ func NewDriverService(
 		deliveryRepo:    deliveryRepo,
 		walletService:   walletService,
 		eventRepo:       eventRepo,
+		offerRepo:       offerRepo,
 		prRepo:          prRepo,
 		escrowService:   escrowService,
 		notificationSvc: notificationSvc,
@@ -1596,6 +1625,496 @@ func (s *DriverServiceImpl) GetAbandonedTrips(ctx context.Context, hoursThreshol
 
 func (s *DriverServiceImpl) GetStaleDepartures(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error) {
 	return s.tripRepo.GetStaleDepartures(ctx, hoursThreshold)
+}
+
+// ============================================
+// DRIVER OFFER/BID SYSTEM
+// ============================================
+
+func (s *DriverServiceImpl) MakeOffer(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID, req *MakeOfferRequest) (*domain.DriverOffer, error) {
+	profile, err := s.driverRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !profile.IsVerified {
+		return nil, domain.ErrDriverNotVerified
+	}
+
+	delivery, err := s.deliveryRepo.GetByID(ctx, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check delivery is accepting offers
+	if !delivery.IsAcceptingOffers() {
+		return nil, domain.ErrDeliveryNotAcceptingOffers
+	}
+
+	// Check for existing pending offer from this driver
+	existingOffer, err := s.offerRepo.GetPendingByDeliveryAndDriver(ctx, deliveryID, profile.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing offer: %w", err)
+	}
+	if existingOffer != nil {
+		return nil, domain.ErrDriverAlreadyOffered
+	}
+
+	// Check offer count limit (max 3 attempts)
+	offerCount, err := s.offerRepo.GetOfferCountByDeliveryAndDriver(ctx, deliveryID, profile.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get offer count: %w", err)
+	}
+	if offerCount >= domain.MaxOfferAttempts {
+		return nil, domain.ErrMaxOfferAttemptsExceeded
+	}
+
+	// Create offer
+	expiresAt := time.Now().Add(domain.OfferExpiryHours * time.Hour)
+	var driverNote *string
+	if req.Note != "" {
+		driverNote = &req.Note
+	}
+
+	offer := &domain.DriverOffer{
+		DeliveryID:    deliveryID,
+		DriverID:      profile.ID,
+		OfferedAmount: req.Amount,
+		Status:        domain.DriverOfferStatusPending,
+		ExpiresAt:     expiresAt,
+		DriverNote:    driverNote,
+		OfferCount:    offerCount + 1,
+	}
+
+	if err := s.offerRepo.Create(ctx, offer); err != nil {
+		return nil, fmt.Errorf("failed to create offer: %w", err)
+	}
+
+	s.logger.Info("driver made offer",
+		zap.String("driver_id", profile.ID.String()),
+		zap.String("delivery_id", deliveryID.String()),
+		zap.Float64("amount", req.Amount),
+		zap.Int("attempt", offerCount+1),
+	)
+
+	// Notify seller
+	if s.notificationSvc != nil {
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			delivery.SellerID,
+			"New Driver Offer",
+			fmt.Sprintf("A driver has offered ₦%.2f for your delivery.", req.Amount),
+			map[string]string{
+				"delivery_id": deliveryID.String(),
+				"offer_id":    offer.ID.String(),
+			},
+			domain.NotificationRiderAssigned,
+		)
+	}
+
+	return offer, nil
+}
+
+func (s *DriverServiceImpl) WithdrawOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) error {
+	profile, err := s.driverRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	offer, err := s.offerRepo.GetByID(ctx, offerID)
+	if err != nil {
+		return err
+	}
+
+	if offer.DriverID != profile.ID {
+		return domain.ErrUnauthorized
+	}
+
+	if !offer.CanBeWithdrawn() {
+		return domain.ErrOfferCannotBeWithdrawn
+	}
+
+	now := time.Now()
+	offer.Status = domain.DriverOfferStatusWithdrawn
+	offer.RespondedAt = &now
+
+	if err := s.offerRepo.Update(ctx, offer); err != nil {
+		return fmt.Errorf("failed to update offer: %w", err)
+	}
+
+	s.logger.Info("driver withdrew offer",
+		zap.String("offer_id", offerID.String()),
+		zap.String("driver_id", profile.ID.String()),
+	)
+
+	return nil
+}
+
+func (s *DriverServiceImpl) AcceptCounterOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) (*domain.DriverDelivery, error) {
+	profile, err := s.driverRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	offer, err := s.offerRepo.GetByID(ctx, offerID)
+	if err != nil {
+		return nil, err
+	}
+
+	if offer.DriverID != profile.ID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	if !offer.CanAcceptCounter() {
+		if offer.IsExpired() {
+			return nil, domain.ErrCounterOfferExpired
+		}
+		return nil, domain.ErrOfferCannotBeAccepted
+	}
+
+	// Get delivery
+	delivery, err := s.deliveryRepo.GetByID(ctx, offer.DeliveryID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set agreed amount to counter amount
+	now := time.Now()
+	offer.Status = domain.DriverOfferStatusCounterAccepted
+	offer.RespondedAt = &now
+	offer.AgreedAmount = offer.CounterAmount
+
+	if err := s.offerRepo.Update(ctx, offer); err != nil {
+		return nil, fmt.Errorf("failed to update offer: %w", err)
+	}
+
+	// Assign driver to delivery
+	return s.assignDriverFromOffer(ctx, delivery, profile, offer)
+}
+
+func (s *DriverServiceImpl) RejectCounterOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) error {
+	profile, err := s.driverRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	offer, err := s.offerRepo.GetByID(ctx, offerID)
+	if err != nil {
+		return err
+	}
+
+	if offer.DriverID != profile.ID {
+		return domain.ErrUnauthorized
+	}
+
+	if !offer.CanRejectCounter() {
+		return domain.ErrOfferCannotBeRejected
+	}
+
+	now := time.Now()
+	offer.Status = domain.DriverOfferStatusCounterRejected
+	offer.RespondedAt = &now
+
+	if err := s.offerRepo.Update(ctx, offer); err != nil {
+		return fmt.Errorf("failed to update offer: %w", err)
+	}
+
+	s.logger.Info("driver rejected counter offer",
+		zap.String("offer_id", offerID.String()),
+		zap.String("driver_id", profile.ID.String()),
+	)
+
+	// Notify seller
+	delivery, _ := s.deliveryRepo.GetByID(ctx, offer.DeliveryID)
+	if s.notificationSvc != nil && delivery != nil {
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			delivery.SellerID,
+			"Counter Offer Rejected",
+			"The driver has rejected your counter offer.",
+			map[string]string{"delivery_id": delivery.ID.String()},
+			domain.NotificationDeliveryFailed,
+		)
+	}
+
+	return nil
+}
+
+func (s *DriverServiceImpl) GetMyOffers(ctx context.Context, userID uuid.UUID, status *domain.DriverOfferStatus) ([]*domain.DriverOffer, error) {
+	profile, err := s.driverRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.offerRepo.GetByDriverID(ctx, profile.ID, status)
+}
+
+// ============================================
+// SELLER OFFER ACTIONS
+// ============================================
+
+func (s *DriverServiceImpl) GetOffersForDelivery(ctx context.Context, sellerID uuid.UUID, deliveryID uuid.UUID) ([]*domain.DriverOffer, error) {
+	delivery, err := s.deliveryRepo.GetByID(ctx, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+
+	if delivery.SellerID != sellerID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	return s.offerRepo.GetByDeliveryID(ctx, deliveryID)
+}
+
+func (s *DriverServiceImpl) AcceptOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID) (*domain.DriverDelivery, error) {
+	offer, err := s.offerRepo.GetByID(ctx, offerID)
+	if err != nil {
+		return nil, err
+	}
+
+	delivery, err := s.deliveryRepo.GetByID(ctx, offer.DeliveryID)
+	if err != nil {
+		return nil, err
+	}
+
+	if delivery.SellerID != sellerID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	if !offer.CanBeAccepted() {
+		if offer.IsExpired() {
+			return nil, domain.ErrOfferExpired
+		}
+		return nil, domain.ErrOfferCannotBeAccepted
+	}
+
+	// Get driver profile
+	driverProfile, err := s.driverRepo.GetByID(ctx, offer.DriverID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get driver profile: %w", err)
+	}
+
+	// Update offer status
+	now := time.Now()
+	offer.Status = domain.DriverOfferStatusAccepted
+	offer.RespondedAt = &now
+	offer.AgreedAmount = &offer.OfferedAmount
+
+	if err := s.offerRepo.Update(ctx, offer); err != nil {
+		return nil, fmt.Errorf("failed to update offer: %w", err)
+	}
+
+	// Reject all other pending offers
+	if err := s.offerRepo.RejectAllPendingExcept(ctx, offer.DeliveryID, offer.ID); err != nil {
+		s.logger.Error("failed to reject other offers", zap.Error(err))
+	}
+
+	// Assign driver to delivery
+	return s.assignDriverFromOffer(ctx, delivery, driverProfile, offer)
+}
+
+func (s *DriverServiceImpl) RejectOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID, note string) error {
+	offer, err := s.offerRepo.GetByID(ctx, offerID)
+	if err != nil {
+		return err
+	}
+
+	delivery, err := s.deliveryRepo.GetByID(ctx, offer.DeliveryID)
+	if err != nil {
+		return err
+	}
+
+	if delivery.SellerID != sellerID {
+		return domain.ErrUnauthorized
+	}
+
+	if !offer.CanBeRejected() {
+		return domain.ErrOfferCannotBeRejected
+	}
+
+	now := time.Now()
+	offer.Status = domain.DriverOfferStatusRejected
+	offer.RespondedAt = &now
+	if note != "" {
+		offer.SellerNote = &note
+	}
+
+	if err := s.offerRepo.Update(ctx, offer); err != nil {
+		return fmt.Errorf("failed to update offer: %w", err)
+	}
+
+	s.logger.Info("seller rejected offer",
+		zap.String("offer_id", offerID.String()),
+		zap.String("seller_id", sellerID.String()),
+	)
+
+	// Notify driver
+	driverProfile, _ := s.driverRepo.GetByID(ctx, offer.DriverID)
+	if s.notificationSvc != nil && driverProfile != nil {
+		canReOffer := offer.OfferCount < domain.MaxOfferAttempts
+		msg := "Your offer was rejected by the seller."
+		if canReOffer {
+			msg = fmt.Sprintf("Your offer was rejected. You can make %d more offer(s).", domain.MaxOfferAttempts-offer.OfferCount)
+		}
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			driverProfile.UserID,
+			"Offer Rejected",
+			msg,
+			map[string]string{"delivery_id": delivery.ID.String()},
+			domain.NotificationDeliveryFailed,
+		)
+	}
+
+	return nil
+}
+
+func (s *DriverServiceImpl) CounterOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID, req *CounterOfferRequest) (*domain.DriverOffer, error) {
+	offer, err := s.offerRepo.GetByID(ctx, offerID)
+	if err != nil {
+		return nil, err
+	}
+
+	delivery, err := s.deliveryRepo.GetByID(ctx, offer.DeliveryID)
+	if err != nil {
+		return nil, err
+	}
+
+	if delivery.SellerID != sellerID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	if !offer.CanBeCountered() {
+		if offer.IsExpired() {
+			return nil, domain.ErrOfferExpired
+		}
+		return nil, domain.ErrOfferCannotBeCountered
+	}
+
+	now := time.Now()
+	counterExpiresAt := now.Add(domain.CounterOfferExpiryHours * time.Hour)
+
+	offer.Status = domain.DriverOfferStatusCountered
+	offer.CounterAmount = &req.Amount
+	offer.CounteredAt = &now
+	offer.CounterExpiresAt = &counterExpiresAt
+	if req.Note != "" {
+		offer.SellerNote = &req.Note
+	}
+
+	if err := s.offerRepo.Update(ctx, offer); err != nil {
+		return nil, fmt.Errorf("failed to update offer: %w", err)
+	}
+
+	s.logger.Info("seller countered offer",
+		zap.String("offer_id", offerID.String()),
+		zap.Float64("counter_amount", req.Amount),
+	)
+
+	// Notify driver
+	driverProfile, _ := s.driverRepo.GetByID(ctx, offer.DriverID)
+	if s.notificationSvc != nil && driverProfile != nil {
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			driverProfile.UserID,
+			"Counter Offer Received",
+			fmt.Sprintf("Seller has countered with ₦%.2f. You have 24 hours to respond.", req.Amount),
+			map[string]string{
+				"delivery_id": delivery.ID.String(),
+				"offer_id":    offer.ID.String(),
+			},
+			domain.NotificationRiderAssigned,
+		)
+	}
+
+	return offer, nil
+}
+
+func (s *DriverServiceImpl) ExpireStaleOffers(ctx context.Context) error {
+	// Expire pending offers past 24h
+	expiredPending, err := s.offerRepo.ExpireStaleOffers(ctx)
+	if err != nil {
+		s.logger.Error("failed to expire stale offers", zap.Error(err))
+		return err
+	}
+	if expiredPending > 0 {
+		s.logger.Info("expired stale driver offers", zap.Int64("count", expiredPending))
+	}
+
+	// Expire counter offers past deadline
+	expiredCounters, err := s.offerRepo.ExpireStaleCounterOffers(ctx)
+	if err != nil {
+		s.logger.Error("failed to expire stale counter offers", zap.Error(err))
+		return err
+	}
+	if expiredCounters > 0 {
+		s.logger.Info("expired stale counter offers", zap.Int64("count", expiredCounters))
+	}
+
+	return nil
+}
+
+// assignDriverFromOffer handles assigning a driver to a delivery after offer acceptance
+func (s *DriverServiceImpl) assignDriverFromOffer(ctx context.Context, delivery *domain.DriverDelivery, profile *domain.DriverProfile, offer *domain.DriverOffer) (*domain.DriverDelivery, error) {
+	now := time.Now()
+
+	// Set driver fee to agreed amount
+	agreedAmount := offer.OfferedAmount
+	if offer.AgreedAmount != nil {
+		agreedAmount = *offer.AgreedAmount
+	}
+	delivery.DriverFee = agreedAmount
+
+	// Assign driver
+	delivery.DriverID = &profile.ID
+	delivery.Status = domain.DDStatusDriverAssigned
+	delivery.DriverAssignedAt = &now
+
+	// Generate pickup code
+	pickupCode := generateDriverCode()
+	delivery.PickupCode = &pickupCode
+	delivery.PickupCodeGeneratedAt = &now
+
+	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
+		return nil, fmt.Errorf("failed to update delivery: %w", err)
+	}
+
+	// Record event
+	s.recordDeliveryEvent(ctx, delivery.ID, nil, domain.DDStatusDriverAssigned, domain.DDActorSystem, nil,
+		fmt.Sprintf("Driver assigned via offer acceptance. Agreed fee: %.2f", agreedAmount), nil)
+
+	s.logger.Info("driver assigned via offer",
+		zap.String("driver_id", profile.ID.String()),
+		zap.String("delivery_id", delivery.ID.String()),
+		zap.Float64("agreed_amount", agreedAmount),
+	)
+
+	// Notify seller with pickup code
+	if s.notificationSvc != nil {
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			delivery.SellerID,
+			"Driver Assigned",
+			fmt.Sprintf("A driver has been assigned. Agreed fee: ₦%.2f. Pickup code: %s", agreedAmount, pickupCode),
+			map[string]string{
+				"delivery_id": delivery.ID.String(),
+				"pickup_code": pickupCode,
+			},
+			domain.NotificationRiderAssigned,
+		)
+
+		// Notify driver
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			profile.UserID,
+			"Offer Accepted",
+			fmt.Sprintf("Your offer of ₦%.2f has been accepted. Please proceed to pickup.", agreedAmount),
+			map[string]string{"delivery_id": delivery.ID.String()},
+			domain.NotificationRiderAssigned,
+		)
+	}
+
+	return delivery, nil
 }
 
 // ============================================

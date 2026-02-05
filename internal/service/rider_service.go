@@ -63,6 +63,15 @@ type ForcedReturnInfo struct {
 	RebookDeadline    string `json:"rebook_deadline"`
 }
 
+type JobStatusBroadcaster interface {
+	BroadcastJobStatus(jobID, status string)
+}
+
+type RiderLocationCache interface {
+	UpdateLocation(ctx context.Context, riderID uuid.UUID, lat, lng, heading, speed float64) error
+	RemoveLocation(ctx context.Context, riderID uuid.UUID) error
+}
+
 type RiderServiceImpl struct {
 	riderRepo            repository.RiderProfileRepository
 	jobRepo              repository.DeliveryJobRepository
@@ -74,6 +83,8 @@ type RiderServiceImpl struct {
 	errandService        ErrandService
 	locationService      LocationService
 	notificationService  NotificationService
+	broadcaster          JobStatusBroadcaster
+	riderLocationCache   RiderLocationCache
 	logger               *zap.Logger
 	config               *config.Config
 }
@@ -89,6 +100,8 @@ func NewRiderService(
 	errandService ErrandService,
 	locationService LocationService,
 	notificationService NotificationService,
+	broadcaster JobStatusBroadcaster,
+	riderLocationCache RiderLocationCache,
 	logger *zap.Logger,
 	config *config.Config,
 ) RiderService {
@@ -103,6 +116,8 @@ func NewRiderService(
 		errandService:        errandService,
 		locationService:      locationService,
 		notificationService:  notificationService,
+		broadcaster:          broadcaster,
+		riderLocationCache:   riderLocationCache,
 		logger:               logger,
 		config:               config,
 	}
@@ -115,9 +130,31 @@ func (s *RiderServiceImpl) UpdateLocation(ctx context.Context, userID uuid.UUID,
 	if err := s.riderRepo.UpdateLocation(ctx, profile.ID, lat, lng); err != nil {
 		return fmt.Errorf("failed to update location: %w", err)
 	}
+
+	// Store in Redis for nearby riders feature (only if online)
+	if profile.IsOnline && s.riderLocationCache != nil {
+		if err := s.riderLocationCache.UpdateLocation(ctx, profile.ID, lat, lng, heading, speed); err != nil {
+			s.logger.Warn("failed to update rider location in cache", zap.Error(err))
+		}
+	}
+
 	job, err := s.jobRepo.GetActiveByRiderID(ctx, profile.ID)
-	if err == nil && job != nil {
+	if err != nil {
+		s.logger.Info("no active job found for rider",
+			zap.String("rider_profile_id", profile.ID.String()),
+			zap.Error(err),
+		)
+	} else if job != nil {
+		s.logger.Info("broadcasting location update",
+			zap.String("rider_profile_id", profile.ID.String()),
+			zap.String("job_id", job.ID.String()),
+			zap.String("job_status", string(job.Status)),
+		)
 		s.locationService.HandleLocationUpdate(ctx, profile.ID, job.ID.String(), lat, lng, heading, speed)
+	} else {
+		s.logger.Info("job is nil for rider",
+			zap.String("rider_profile_id", profile.ID.String()),
+		)
 	}
 
 	return nil
@@ -218,6 +255,13 @@ func (s *RiderServiceImpl) GoOffline(ctx context.Context, userID uuid.UUID) erro
 		return fmt.Errorf("failed to go offline: %w", err)
 	}
 
+	// Remove from Redis location cache
+	if s.riderLocationCache != nil {
+		if err := s.riderLocationCache.RemoveLocation(ctx, profile.ID); err != nil {
+			s.logger.Warn("failed to remove rider location from cache", zap.Error(err))
+		}
+	}
+
 	s.logger.Info("rider went offline",
 		zap.String("user_id", userID.String()),
 	)
@@ -288,6 +332,9 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 	if err := s.jobRepo.Update(ctx, job); err != nil {
 		return nil, fmt.Errorf("failed to update job: %w", err)
 	}
+
+	s.broadcastJobStatus(jobID, domain.DJStatusAccepted)
+
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		if err := s.errandService.OnJobAccepted(ctx, *job.ErrandID, profile.ID); err != nil {
 			s.logger.Warn("failed to update errand status to accepted", zap.Error(err))
@@ -353,6 +400,9 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 	if err := s.jobRepo.Update(ctx, job); err != nil {
 		return fmt.Errorf("failed to update job: %w", err)
 	}
+
+	s.broadcastJobStatus(jobID, domain.DJStatusPickedUp)
+
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		if err := s.errandService.OnJobPickedUp(ctx, *job.ErrandID); err != nil {
 			s.logger.Warn("failed to update errand status to picked_up", zap.Error(err))
@@ -370,8 +420,6 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 			s.logger.Warn("failed to update payment request status to in_delivery", zap.Error(err))
 		}
 	}
-
-
 
 	s.logger.Info("rider confirmed pickup",
 		zap.String("job_id", jobID.String()),
@@ -416,6 +464,9 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 	if err := s.jobRepo.Update(ctx, job); err != nil {
 		return fmt.Errorf("failed to update job: %w", err)
 	}
+
+	s.broadcastJobStatus(jobID, domain.DJStatusDelivered)
+
 	if err := s.riderRepo.IncrementDeliveries(ctx, profile.ID); err != nil {
 		s.logger.Error("failed to increment deliveries", zap.Error(err))
 	}
@@ -539,6 +590,8 @@ func (s *RiderServiceImpl) MarkSellerUnavailable(ctx context.Context, userID uui
 		return fmt.Errorf("failed to update job: %w", err)
 	}
 
+	s.broadcastJobStatus(jobID, domain.DJStatusSellerUnavailable)
+
 	// Update payment request status and refund buyer
 	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 	if err != nil {
@@ -601,6 +654,8 @@ func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid
 		return nil, fmt.Errorf("failed to update job: %w", err)
 	}
 
+	s.broadcastJobStatus(jobID, domain.DJStatusBuyerUnavailable)
+
 	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get payment request: %w", err)
@@ -648,6 +703,8 @@ func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid
 	if err := s.jobRepo.Update(ctx, job); err != nil {
 		return nil, fmt.Errorf("failed to update original job status: %w", err)
 	}
+
+	s.broadcastJobStatus(jobID, domain.DJStatusForcedReturn)
 
 	// Notify buyer and seller
 	if s.notificationService != nil {
@@ -753,6 +810,8 @@ func (s *RiderServiceImpl) CompleteForcedReturn(ctx context.Context, userID uuid
 	}
 	s.logger.Info("job status updated successfully")
 
+	s.broadcastJobStatus(jobID, domain.DJStatusForcedReturnDone)
+
 	// Platform pays rider for forced return delivery
 	if job.DeliveryFee > 0 {
 		riderTake := domain.CalculateRiderTake(job.DeliveryFee)
@@ -794,5 +853,11 @@ func (s *RiderServiceImpl) CompleteForcedReturn(ctx context.Context, userID uuid
 
 func generateVerificationCode() string {
 	return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+}
+
+func (s *RiderServiceImpl) broadcastJobStatus(jobID uuid.UUID, status domain.DeliveryJobStatus) {
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(jobID.String(), string(status))
+	}
 }
 var _ RiderService = (*RiderServiceImpl)(nil)

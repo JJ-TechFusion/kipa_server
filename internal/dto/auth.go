@@ -11,6 +11,11 @@ type SendOTPRequest struct {
 	DeviceID    string `json:"device_id" binding:"required,min=16,max=64"`
 }
 
+type ResendOTPRequest struct {
+	PhoneNumber string `json:"phone_number" binding:"required,e164"`
+	DeviceID    string `json:"device_id" binding:"required,min=16,max=64"`
+}
+
 type VerifyOTPRequest struct {
 	PhoneNumber    string `json:"phone_number" binding:"required,e164"`
 	VerificationID string `json:"verification_id" binding:"required"`
@@ -38,6 +43,7 @@ type UpdateProfileRequest struct {
 
 type SendOTPResponse struct {
 	VerificationID string    `json:"verification_id"`
+	IdempotencyKey string    `json:"idempotency_key"`
 	ExpiresAt      time.Time `json:"expires_at"`
 	RetryAfter     int       `json:"retry_after_seconds"`
 }

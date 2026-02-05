@@ -40,6 +40,8 @@ type PaymentRequestService interface {
 
 	MarkReadyForPickup(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) (*domain.PaymentRequest, error)
 
+	CancelRiderSearch(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) (*domain.PaymentRequest, error)
+
 	UpdateStatus(ctx context.Context, prID uuid.UUID, status domain.PaymentRequestStatus) error
 
 	
@@ -107,6 +109,7 @@ type PaymentRequestServiceImpl struct {
 	userRepo        repository.UserRepository
 	deliveryJobRepo repository.DeliveryJobRepository
 	feeCalculator   FeeCalculatorService
+	broadcaster     JobStatusBroadcaster
 	config          *config.Config
 	logger          *zap.Logger
 }
@@ -117,6 +120,7 @@ func NewPaymentRequestService(
 	userRepo repository.UserRepository,
 	deliveryJobRepo repository.DeliveryJobRepository,
 	feeCalculator FeeCalculatorService,
+	broadcaster JobStatusBroadcaster,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) PaymentRequestService {
@@ -126,6 +130,7 @@ func NewPaymentRequestService(
 		userRepo:        userRepo,
 		deliveryJobRepo: deliveryJobRepo,
 		feeCalculator:   feeCalculator,
+		broadcaster:     broadcaster,
 		config:          cfg,
 		logger:          logger,
 	}
@@ -265,9 +270,9 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 			pr.EstimatedDeliveryFee = &estimate.TotalFee
 		}
 	} else if req.DeliveryType == domain.DeliveryTypeInterState {
-		s.logger.Info("using default inter-state fee")
-		defaultInterStateFee := 5000.0
-		pr.EstimatedDeliveryFee = &defaultInterStateFee
+		// Inter-state: Fee determined by driver bidding, no estimate provided
+		s.logger.Info("inter-state delivery: fee to be determined by driver bidding")
+		pr.EstimatedDeliveryFee = nil
 	} else {
 		s.logger.Info("no delivery fee required")
 		zero := 0.0
@@ -432,6 +437,10 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 		}
 		pr.DeliveryJobID = &job.ID
 
+		if s.broadcaster != nil {
+			s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusSearching))
+		}
+
 		s.logger.Info("delivery job created for rider matching",
 			zap.String("job_id", job.ID.String()),
 			zap.String("pr_id", prID.String()),
@@ -455,6 +464,63 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 
 	return pr, nil
 }
+
+func (s *PaymentRequestServiceImpl) CancelRiderSearch(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) (*domain.PaymentRequest, error) {
+	pr, err := s.prRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+	if pr.SellerID != sellerID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	// Only allow cancellation when searching for rider
+	if pr.Status != domain.PRStatusSearchingRider {
+		return nil, fmt.Errorf("%w: can only cancel search when status is searching_rider", domain.ErrInvalidStatusTransition)
+	}
+
+	// Cancel the delivery job
+	if pr.DeliveryJobID != nil {
+		job, err := s.deliveryJobRepo.GetByID(ctx, *pr.DeliveryJobID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get delivery job: %w", err)
+		}
+
+		if job.Status == domain.DJStatusSearching {
+			if err := s.deliveryJobRepo.UpdateStatus(ctx, job.ID, domain.DJStatusCancelled); err != nil {
+				return nil, fmt.Errorf("failed to cancel delivery job: %w", err)
+			}
+
+			if s.broadcaster != nil {
+				s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusCancelled))
+			}
+
+			s.logger.Info("delivery job cancelled",
+				zap.String("job_id", job.ID.String()),
+				zap.String("pr_id", prID.String()),
+			)
+		}
+	}
+
+	// Revert payment request status back to paid_awaiting_fulfillment
+	oldStatus := pr.Status
+	pr.Status = domain.PRStatusPaidAwaitingFulfillment
+	pr.ReadyForPickupAt = nil
+	pr.DeliveryJobID = nil
+
+	if err := s.prRepo.Update(ctx, pr); err != nil {
+		return nil, fmt.Errorf("failed to update payment request: %w", err)
+	}
+
+	s.recordEvent(ctx, pr.ID, &oldStatus, pr.Status, "rider_search_cancelled", nil)
+
+	s.logger.Info("rider search cancelled",
+		zap.String("pr_id", prID.String()),
+	)
+
+	return pr, nil
+}
+
 func stringValue(s *string) string {
 	if s == nil {
 		return ""
@@ -673,6 +739,10 @@ func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uui
 
 	if err := s.deliveryJobRepo.Create(ctx, newJob); err != nil {
 		return nil, fmt.Errorf("failed to create delivery job: %w", err)
+	}
+
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(newJob.ID.String(), string(domain.DJStatusSearching))
 	}
 
 	// Update payment request

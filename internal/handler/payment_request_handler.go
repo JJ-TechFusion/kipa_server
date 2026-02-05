@@ -32,6 +32,7 @@ func (h *PaymentRequestHandler) RegisterRoutes(router *gin.RouterGroup, authMidd
 		pr.PATCH("/:id", h.Edit)
 		pr.PATCH("/:id/fulfillment", h.ConfigureFulfillment)
 		pr.POST("/:id/ready-for-pickup", h.MarkReadyForPickup)
+		pr.POST("/:id/cancel-search", h.CancelRiderSearch)
 		pr.DELETE("/:id", h.Cancel)
 	}
 }
@@ -138,9 +139,11 @@ func (h *PaymentRequestHandler) ConfigureFulfillment(c *gin.Context) {
 		"payment_url":     "https://kipa.ng/pay/" + *pr.PaymentCode,
 	})
 }
+
 type MarkReadyForPickupRequest struct {
 	VehicleType string `json:"vehicle_type" binding:"required,oneof=motorcycle car"`
 }
+
 func (h *PaymentRequestHandler) MarkReadyForPickup(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -159,8 +162,33 @@ func (h *PaymentRequestHandler) MarkReadyForPickup(c *gin.Context) {
 		return
 	}
 
+	response := paymentRequestToResponse(pr)
+
+	util.Success(c, http.StatusOK, response)
+}
+
+func (h *PaymentRequestHandler) CancelRiderSearch(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid payment request ID")
+		return
+	}
+
+	pr, err := h.prService.CancelRiderSearch(c.Request.Context(), id, userID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
 	util.Success(c, http.StatusOK, paymentRequestToResponse(pr))
 }
+
 func (h *PaymentRequestHandler) Cancel(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -261,21 +289,29 @@ func mapPaymentRequestErrorToResponse(err error) (int, string, string) {
 	}
 }
 type PaymentRequestResponse struct {
-	ID                   uuid.UUID `json:"id"`
-	SellerID             uuid.UUID `json:"seller_id"`
-	ItemName             string    `json:"item_name"`
-	ItemDescription      *string   `json:"item_description,omitempty"`
-	ItemPrice            float64   `json:"item_price"`
-	DeliveryType         string    `json:"delivery_type"`
-	PickupAddress        *string   `json:"pickup_address,omitempty"`
-	DropoffAddress       *string   `json:"dropoff_address,omitempty"`
-	EstimatedDeliveryFee *float64  `json:"estimated_delivery_fee,omitempty"`
-	BuyerServiceFee      *float64  `json:"buyer_service_fee,omitempty"`
-	EstimatedTotal       *float64  `json:"estimated_total,omitempty"`
-	PaymentCode          *string   `json:"payment_code,omitempty"`
-	Status               string    `json:"status"`
+	ID                   uuid.UUID  `json:"id"`
+	SellerID             uuid.UUID  `json:"seller_id"`
+	ItemName             string     `json:"item_name"`
+	ItemDescription      *string    `json:"item_description,omitempty"`
+	ItemPrice            float64    `json:"item_price"`
+	DeliveryType         string     `json:"delivery_type"`
+	PickupAddress        *string    `json:"pickup_address,omitempty"`
+	PickupLat            float64    `json:"pickup_lat,omitempty"`
+	PickupLng            float64    `json:"pickup_lng,omitempty"`
+	DropoffAddress       *string    `json:"dropoff_address,omitempty"`
+	DropoffLat           float64    `json:"dropoff_lat,omitempty"`
+	DropoffLng           float64    `json:"dropoff_lng,omitempty"`
+	EstimatedDeliveryFee *float64   `json:"estimated_delivery_fee,omitempty"`
+	BuyerServiceFee      *float64   `json:"buyer_service_fee,omitempty"`
+	EstimatedTotal       *float64   `json:"estimated_total,omitempty"`
+	PaymentCode          *string    `json:"payment_code,omitempty"`
+	Status               string     `json:"status"`
+	IsReusable           bool       `json:"is_reusable"`
+	MaxUses              *int       `json:"max_uses,omitempty"`
+	CurrentUses          int        `json:"current_uses"`
 	BuyerID              *uuid.UUID `json:"buyer_id,omitempty"`
-	CreatedAt            string    `json:"created_at"`
+	DeliveryJobID        *uuid.UUID `json:"delivery_job_id,omitempty"`
+	CreatedAt            string     `json:"created_at"`
 }
 
 func paymentRequestToResponse(pr *domain.PaymentRequest) PaymentRequestResponse {
@@ -287,13 +323,21 @@ func paymentRequestToResponse(pr *domain.PaymentRequest) PaymentRequestResponse 
 		ItemPrice:            pr.ItemPrice,
 		DeliveryType:         string(pr.DeliveryType),
 		PickupAddress:        pr.PickupAddress,
+		PickupLat:            pr.PickupLat,
+		PickupLng:            pr.PickupLng,
 		DropoffAddress:       pr.DropoffAddress,
+		DropoffLat:           pr.DropoffLat,
+		DropoffLng:           pr.DropoffLng,
 		EstimatedDeliveryFee: pr.EstimatedDeliveryFee,
 		BuyerServiceFee:      pr.BuyerServiceFee,
 		EstimatedTotal:       pr.EstimatedTotal,
 		PaymentCode:          pr.PaymentCode,
 		Status:               string(pr.Status),
+		IsReusable:           pr.IsReusable,
+		MaxUses:              pr.MaxUses,
+		CurrentUses:          pr.CurrentUses,
 		BuyerID:              pr.BuyerID,
+		DeliveryJobID:        pr.DeliveryJobID,
 		CreatedAt:            pr.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }

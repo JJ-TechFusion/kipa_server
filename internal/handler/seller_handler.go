@@ -60,6 +60,12 @@ func (h *SellerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 		seller.GET("/driver-deliveries/:id/timeline", h.GetDriverDeliveryTimeline)
 		seller.GET("/driver-deliveries/:id/pickup-code", h.GetPickupCode)
 		seller.POST("/driver-deliveries/:id/cancel", h.CancelDriverDelivery)
+
+		// Driver offer management (for inter-state deliveries)
+		seller.GET("/driver-deliveries/:id/offers", h.GetDeliveryOffers)
+		seller.POST("/driver-deliveries/:id/offers/:oid/accept", h.AcceptDriverOffer)
+		seller.POST("/driver-deliveries/:id/offers/:oid/reject", h.RejectDriverOffer)
+		seller.POST("/driver-deliveries/:id/offers/:oid/counter", h.CounterDriverOffer)
 	}
 }
 func (h *SellerHandler) ListSales(c *gin.Context) {
@@ -150,10 +156,31 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
 	}
 
+	var deliveryInfo *SaleDeliveryInfo
+	if job != nil {
+		deliveryInfo = &SaleDeliveryInfo{
+			JobID:         &job.ID,
+			Status:        string(job.Status),
+			RiderAssigned: job.RiderID != nil,
+		}
+		if job.RiderID != nil && job.PickupCode != nil {
+			deliveryInfo.PickupCode = job.PickupCode
+		}
+		if job.PickedUpAt != nil {
+			t := job.PickedUpAt.Format("2006-01-02T15:04:05Z07:00")
+			deliveryInfo.PickedUpAt = &t
+		}
+		if job.DeliveredAt != nil {
+			t := job.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
+			deliveryInfo.DeliveredAt = &t
+		}
+	}
+
 	timeline := BuildTimeline(TimelineViewSeller, pr, order, job)
 	response := SaleDetailResponse{
 		SaleResponse: orderToSaleResponse(order, pr, escrowStatus),
 		Escrow:       escrowDetails,
+		Delivery:     deliveryInfo,
 		Timeline:     &timeline,
 	}
 
@@ -238,9 +265,19 @@ type EscrowDetails struct {
 	ReleasedAt    *string   `json:"released_at,omitempty"`
 }
 
+type SaleDeliveryInfo struct {
+	JobID         *uuid.UUID `json:"job_id,omitempty"`
+	Status        string     `json:"status"`
+	PickupCode    *string    `json:"pickup_code,omitempty"`
+	RiderAssigned bool       `json:"rider_assigned"`
+	PickedUpAt    *string    `json:"picked_up_at,omitempty"`
+	DeliveredAt   *string    `json:"delivered_at,omitempty"`
+}
+
 type SaleDetailResponse struct {
 	SaleResponse
 	Escrow   *EscrowDetails    `json:"escrow,omitempty"`
+	Delivery *SaleDeliveryInfo `json:"delivery,omitempty"`
 	Timeline *TimelineResponse `json:"timeline,omitempty"`
 }
 
@@ -608,4 +645,211 @@ func (h *SellerHandler) GetDriverDeliveryTimeline(c *gin.Context) {
 
 	timeline := BuildDriverDeliveryTimeline(TimelineViewSeller, delivery, pr)
 	util.Success(c, http.StatusOK, timeline)
+}
+
+// ============================================
+// Driver Offer Management (Inter-state)
+// ============================================
+
+func (h *SellerHandler) GetDeliveryOffers(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	deliveryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid delivery ID")
+		return
+	}
+
+	offers, err := h.driverService.GetOffersForDelivery(c.Request.Context(), userID, deliveryID)
+	if err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	responses := make([]SellerDriverOfferResponse, 0, len(offers))
+	for _, o := range offers {
+		responses = append(responses, driverOfferToSellerResponse(o))
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"offers": responses,
+		"count":  len(responses),
+	})
+}
+
+func (h *SellerHandler) AcceptDriverOffer(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	offerID, err := uuid.Parse(c.Param("oid"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid offer ID")
+		return
+	}
+
+	delivery, err := h.driverService.AcceptOffer(c.Request.Context(), userID, offerID)
+	if err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message":  "Offer accepted. Driver has been assigned.",
+		"delivery": driverDeliveryToResponse(delivery),
+	})
+}
+
+type RejectOfferRequest struct {
+	Note string `json:"note"`
+}
+
+func (h *SellerHandler) RejectDriverOffer(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	offerID, err := uuid.Parse(c.Param("oid"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid offer ID")
+		return
+	}
+
+	var req RejectOfferRequest
+	c.ShouldBindJSON(&req) // Optional note
+
+	if err := h.driverService.RejectOffer(c.Request.Context(), userID, offerID, req.Note); err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{"message": "Offer rejected"})
+}
+
+type CounterOfferRequest struct {
+	Amount float64 `json:"amount" binding:"required,gt=0"`
+	Note   string  `json:"note"`
+}
+
+func (h *SellerHandler) CounterDriverOffer(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	offerID, err := uuid.Parse(c.Param("oid"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid offer ID")
+		return
+	}
+
+	var req CounterOfferRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	offer, err := h.driverService.CounterOffer(c.Request.Context(), userID, offerID, &service.CounterOfferRequest{
+		Amount: req.Amount,
+		Note:   req.Note,
+	})
+	if err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message": "Counter offer sent to driver",
+		"offer":   driverOfferToSellerResponse(offer),
+	})
+}
+
+func (h *SellerHandler) handleOfferError(c *gin.Context, err error) {
+	switch {
+	case err == domain.ErrOfferNotFound:
+		util.Error(c, http.StatusNotFound, "OFFER_NOT_FOUND", "Offer not found")
+	case err == domain.ErrOfferExpired:
+		util.Error(c, http.StatusBadRequest, "OFFER_EXPIRED", "This offer has expired")
+	case err == domain.ErrDeliveryNotAcceptingOffers:
+		util.Error(c, http.StatusBadRequest, "NOT_ACCEPTING_OFFERS", "This delivery is not accepting offers")
+	case err == domain.ErrOfferCannotBeAccepted:
+		util.Error(c, http.StatusBadRequest, "CANNOT_ACCEPT", "This offer cannot be accepted in its current state")
+	case err == domain.ErrOfferCannotBeRejected:
+		util.Error(c, http.StatusBadRequest, "CANNOT_REJECT", "This offer cannot be rejected in its current state")
+	case err == domain.ErrOfferCannotBeCountered:
+		util.Error(c, http.StatusBadRequest, "CANNOT_COUNTER", "This offer cannot be countered in its current state")
+	case err == domain.ErrUnauthorized:
+		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this delivery")
+	case err == domain.ErrDriverDeliveryNotFound:
+		util.Error(c, http.StatusNotFound, "DELIVERY_NOT_FOUND", "Delivery not found")
+	default:
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "An error occurred")
+	}
+}
+
+// ============================================
+// Offer Response Types
+// ============================================
+
+type SellerDriverOfferResponse struct {
+	ID               string   `json:"id"`
+	DeliveryID       string   `json:"delivery_id"`
+	DriverID         string   `json:"driver_id"`
+	OfferedAmount    float64  `json:"offered_amount"`
+	CounterAmount    *float64 `json:"counter_amount,omitempty"`
+	AgreedAmount     *float64 `json:"agreed_amount,omitempty"`
+	Status           string   `json:"status"`
+	ExpiresAt        string   `json:"expires_at"`
+	CounterExpiresAt *string  `json:"counter_expires_at,omitempty"`
+	CounteredAt      *string  `json:"countered_at,omitempty"`
+	RespondedAt      *string  `json:"responded_at,omitempty"`
+	DriverNote       *string  `json:"driver_note,omitempty"`
+	SellerNote       *string  `json:"seller_note,omitempty"`
+	OfferCount       int      `json:"offer_count"`
+	CreatedAt        string   `json:"created_at"`
+}
+
+func driverOfferToSellerResponse(o *domain.DriverOffer) SellerDriverOfferResponse {
+	resp := SellerDriverOfferResponse{
+		ID:            o.ID.String(),
+		DeliveryID:    o.DeliveryID.String(),
+		DriverID:      o.DriverID.String(),
+		OfferedAmount: o.OfferedAmount,
+		Status:        string(o.Status),
+		ExpiresAt:     o.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+		OfferCount:    o.OfferCount,
+		CreatedAt:     o.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		DriverNote:    o.DriverNote,
+		SellerNote:    o.SellerNote,
+	}
+
+	if o.CounterAmount != nil {
+		resp.CounterAmount = o.CounterAmount
+	}
+	if o.AgreedAmount != nil {
+		resp.AgreedAmount = o.AgreedAmount
+	}
+	if o.CounterExpiresAt != nil {
+		s := o.CounterExpiresAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.CounterExpiresAt = &s
+	}
+	if o.CounteredAt != nil {
+		s := o.CounteredAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.CounteredAt = &s
+	}
+	if o.RespondedAt != nil {
+		s := o.RespondedAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.RespondedAt = &s
+	}
+
+	return resp
 }

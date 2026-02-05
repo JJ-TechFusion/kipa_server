@@ -118,8 +118,9 @@ func (h *Hub) SubscribeToJob(client *Client, jobID string) {
 	}
 	h.rooms[jobID][client] = true
 
-	h.logger.Debug("client subscribed to job",
+	h.logger.Info("client subscribed to job room",
 		zap.String("client_id", client.ID),
+		zap.String("user_id", client.UserID.String()),
 		zap.String("job_id", jobID),
 	)
 }
@@ -152,7 +153,13 @@ func (h *Hub) HandleLocationUpdate(client *Client, msg *LocationUpdate) {
 func (h *Hub) BroadcastToJob(jobID string, msg interface{}) {
 	h.mu.RLock()
 	room := h.rooms[jobID]
+	clientCount := len(room)
 	h.mu.RUnlock()
+
+	h.logger.Info("broadcasting to job room",
+		zap.String("job_id", jobID),
+		zap.Int("client_count", clientCount),
+	)
 
 	for client := range room {
 		client.Send(msg)
@@ -212,4 +219,12 @@ func (h *Hub) GetOnlineRiderCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.riders)
+}
+
+func (h *Hub) BroadcastNearbyRiders(jobID string, riders []NearbyRiderInfo) {
+	h.BroadcastToJob(jobID, &NearbyRidersMessage{
+		Type:   TypeNearbyRiders,
+		JobID:  jobID,
+		Riders: riders,
+	})
 }

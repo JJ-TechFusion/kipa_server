@@ -76,6 +76,10 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 	client := NewClient(h.hub, conn, claims.UserID, clientRole, claims.DeviceID, h.logger)
 	h.hub.Register(client)
 	if clientRole == RoleUser && jobID != "" {
+		h.logger.Info("auto-subscribing user to job",
+			zap.String("user_id", claims.UserID.String()),
+			zap.String("job_id", jobID),
+		)
 		client.Subscribe(jobID)
 	}
 	go client.WritePump()

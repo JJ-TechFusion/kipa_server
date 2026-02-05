@@ -117,7 +117,7 @@ type RiderJobOffer struct {
 func (s DeliveryJobStatus) CanTransitionTo(next DeliveryJobStatus) bool {
 	transitions := map[DeliveryJobStatus][]DeliveryJobStatus{
 		DJStatusCreated:       {DJStatusSearching, DJStatusCancelled},
-		DJStatusSearching:     {DJStatusAccepted, DJStatusTimeout},
+		DJStatusSearching:     {DJStatusAccepted, DJStatusTimeout, DJStatusCancelled},
 		DJStatusAccepted:      {DJStatusEnRoutePickup, DJStatusCancelled},
 		DJStatusEnRoutePickup: {DJStatusPickedUp, DJStatusCancelled, DJStatusFailed, DJStatusSellerUnavailable},
 		DJStatusPickedUp:      {DJStatusInTransit},

@@ -59,6 +59,8 @@ type SessionRepository interface {
 	ValidateRefreshToken(ctx context.Context, userID uuid.UUID, deviceID, refreshToken string) (bool, error)
 	GetRateLimitCount(ctx context.Context, phoneNumber string) (int, error)
 	IncrementRateLimitCount(ctx context.Context, phoneNumber string, window time.Duration) error
+	GetLastOTPSentTime(ctx context.Context, phoneNumber string) (time.Time, error)
+	SetLastOTPSentTime(ctx context.Context, phoneNumber string, ttl time.Duration) error
 }
 type PaymentRequestRepository interface {
 	Create(ctx context.Context, pr *domain.PaymentRequest) error
@@ -426,4 +428,21 @@ type DriverDeliveryRepository interface {
 type DriverDeliveryEventRepository interface {
 	Create(ctx context.Context, event *domain.DriverDeliveryEvent) error
 	GetByDeliveryID(ctx context.Context, deliveryID uuid.UUID) ([]*domain.DriverDeliveryEvent, error)
+}
+
+type DriverOfferRepository interface {
+	Create(ctx context.Context, offer *domain.DriverOffer) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.DriverOffer, error)
+	Update(ctx context.Context, offer *domain.DriverOffer) error
+
+	// Query methods
+	GetByDeliveryID(ctx context.Context, deliveryID uuid.UUID) ([]*domain.DriverOffer, error)
+	GetByDriverID(ctx context.Context, driverID uuid.UUID, status *domain.DriverOfferStatus) ([]*domain.DriverOffer, error)
+	GetPendingByDeliveryAndDriver(ctx context.Context, deliveryID, driverID uuid.UUID) (*domain.DriverOffer, error)
+	GetOfferCountByDeliveryAndDriver(ctx context.Context, deliveryID, driverID uuid.UUID) (int, error)
+
+	// Bulk operations
+	RejectAllPendingExcept(ctx context.Context, deliveryID uuid.UUID, exceptOfferID uuid.UUID) error
+	ExpireStaleOffers(ctx context.Context) (int64, error)
+	ExpireStaleCounterOffers(ctx context.Context) (int64, error)
 }

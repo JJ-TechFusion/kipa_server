@@ -249,6 +249,7 @@ type DriverDeliveryStatus string
 
 const (
 	DDStatusAwaitingDriver      DriverDeliveryStatus = "awaiting_driver"
+	DDStatusAwaitingOffers      DriverDeliveryStatus = "awaiting_offers"
 	DDStatusDriverAssigned      DriverDeliveryStatus = "driver_assigned"
 	DDStatusAwaitingPickup      DriverDeliveryStatus = "awaiting_pickup"
 	DDStatusPickedUp            DriverDeliveryStatus = "picked_up"
@@ -270,7 +271,7 @@ const (
 
 func (s DriverDeliveryStatus) IsValid() bool {
 	switch s {
-	case DDStatusAwaitingDriver, DDStatusDriverAssigned, DDStatusAwaitingPickup,
+	case DDStatusAwaitingDriver, DDStatusAwaitingOffers, DDStatusDriverAssigned, DDStatusAwaitingPickup,
 		DDStatusPickedUp, DDStatusInTransit, DDStatusArrived, DDStatusConfirmationWindow,
 		DDStatusCompleted, DDStatusDriverPaid, DDStatusDisputed, DDStatusRefunded,
 		DDStatusCancelled, DDStatusExpired, DDStatusBuyerUnreachable, DDStatusReturnToSeller,
@@ -291,7 +292,8 @@ func (s DriverDeliveryStatus) IsTerminal() bool {
 
 func (s DriverDeliveryStatus) CanTransitionTo(next DriverDeliveryStatus) bool {
 	transitions := map[DriverDeliveryStatus][]DriverDeliveryStatus{
-		DDStatusAwaitingDriver:     {DDStatusDriverAssigned, DDStatusExpired, DDStatusCancelled},
+		DDStatusAwaitingDriver:     {DDStatusAwaitingOffers, DDStatusDriverAssigned, DDStatusExpired, DDStatusCancelled},
+		DDStatusAwaitingOffers:     {DDStatusDriverAssigned, DDStatusExpired, DDStatusCancelled},
 		DDStatusDriverAssigned:     {DDStatusAwaitingPickup, DDStatusCancelled},
 		DDStatusAwaitingPickup:     {DDStatusPickedUp, DDStatusPickupCodeLockout, DDStatusCancelled},
 		DDStatusPickedUp:           {DDStatusInTransit},
@@ -413,10 +415,15 @@ func (d *DriverDelivery) HasDriver() bool {
 	return d.DriverID != nil
 }
 
+// IsAcceptingOffers checks if the delivery is accepting offers from drivers
+func (d *DriverDelivery) IsAcceptingOffers() bool {
+	return d.Status == DDStatusAwaitingOffers
+}
+
 func (d *DriverDelivery) CanBeCancelled() bool {
 	// Can only cancel before item is picked up
 	switch d.Status {
-	case DDStatusAwaitingDriver, DDStatusDriverAssigned, DDStatusAwaitingPickup:
+	case DDStatusAwaitingDriver, DDStatusAwaitingOffers, DDStatusDriverAssigned, DDStatusAwaitingPickup:
 		return true
 	}
 	return false

@@ -35,9 +35,16 @@ func (h *DriverHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 		driver.POST("/go-online", h.GoOnline)
 		driver.POST("/go-offline", h.GoOffline)
 
-		// Available deliveries
+		// Available deliveries (for direct accept mode)
 		driver.GET("/available-deliveries", h.GetAvailableDeliveries)
 		driver.POST("/deliveries/:id/accept", h.AcceptDelivery)
+
+		// Offer/Bid system
+		driver.POST("/deliveries/:id/offer", h.MakeOffer)
+		driver.GET("/offers", h.GetMyOffers)
+		driver.DELETE("/offers/:id", h.WithdrawOffer)
+		driver.POST("/offers/:id/accept-counter", h.AcceptCounterOffer)
+		driver.POST("/offers/:id/reject-counter", h.RejectCounterOffer)
 
 		// Current trip
 		driver.GET("/trip", h.GetCurrentTrip)
@@ -696,4 +703,238 @@ func driverParseIntParam(c *gin.Context, key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+// ============================================
+// OFFER/BID SYSTEM
+// ============================================
+
+type MakeOfferRequest struct {
+	Amount float64 `json:"amount" binding:"required,gt=0"`
+	Note   string  `json:"note"`
+}
+
+func (h *DriverHandler) MakeOffer(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	deliveryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid delivery ID")
+		return
+	}
+
+	var req MakeOfferRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	offer, err := h.driverService.MakeOffer(c.Request.Context(), userID, deliveryID, &service.MakeOfferRequest{
+		Amount: req.Amount,
+		Note:   req.Note,
+	})
+	if err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusCreated, driverOfferToResponse(offer))
+}
+
+func (h *DriverHandler) GetMyOffers(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	var statusFilter *domain.DriverOfferStatus
+	if statusParam := c.Query("status"); statusParam != "" {
+		status := domain.DriverOfferStatus(statusParam)
+		if status.IsValid() {
+			statusFilter = &status
+		}
+	}
+
+	offers, err := h.driverService.GetMyOffers(c.Request.Context(), userID, statusFilter)
+	if err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	responses := make([]DriverOfferResponse, 0, len(offers))
+	for _, o := range offers {
+		responses = append(responses, driverOfferToResponse(o))
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"offers": responses,
+		"count":  len(responses),
+	})
+}
+
+func (h *DriverHandler) WithdrawOffer(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	offerID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid offer ID")
+		return
+	}
+
+	if err := h.driverService.WithdrawOffer(c.Request.Context(), userID, offerID); err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{"message": "Offer withdrawn successfully"})
+}
+
+func (h *DriverHandler) AcceptCounterOffer(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	offerID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid offer ID")
+		return
+	}
+
+	delivery, err := h.driverService.AcceptCounterOffer(c.Request.Context(), userID, offerID)
+	if err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message":  "Counter offer accepted. You have been assigned to the delivery.",
+		"delivery": driverDeliveryToResponse(delivery),
+	})
+}
+
+func (h *DriverHandler) RejectCounterOffer(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	offerID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid offer ID")
+		return
+	}
+
+	if err := h.driverService.RejectCounterOffer(c.Request.Context(), userID, offerID); err != nil {
+		h.handleOfferError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{"message": "Counter offer rejected"})
+}
+
+func (h *DriverHandler) handleOfferError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, domain.ErrOfferNotFound):
+		util.Error(c, http.StatusNotFound, "OFFER_NOT_FOUND", "Offer not found")
+	case errors.Is(err, domain.ErrOfferExpired):
+		util.Error(c, http.StatusBadRequest, "OFFER_EXPIRED", "This offer has expired")
+	case errors.Is(err, domain.ErrDriverAlreadyOffered):
+		util.Error(c, http.StatusConflict, "ALREADY_OFFERED", "You already have a pending offer for this delivery")
+	case errors.Is(err, domain.ErrDeliveryNotAcceptingOffers):
+		util.Error(c, http.StatusBadRequest, "NOT_ACCEPTING_OFFERS", "This delivery is not accepting offers")
+	case errors.Is(err, domain.ErrMaxOfferAttemptsExceeded):
+		util.Error(c, http.StatusBadRequest, "MAX_OFFERS_EXCEEDED", "You have reached the maximum number of offer attempts")
+	case errors.Is(err, domain.ErrOfferCannotBeAccepted):
+		util.Error(c, http.StatusBadRequest, "CANNOT_ACCEPT", "This offer cannot be accepted in its current state")
+	case errors.Is(err, domain.ErrOfferCannotBeRejected):
+		util.Error(c, http.StatusBadRequest, "CANNOT_REJECT", "This offer cannot be rejected in its current state")
+	case errors.Is(err, domain.ErrOfferCannotBeCountered):
+		util.Error(c, http.StatusBadRequest, "CANNOT_COUNTER", "This offer cannot be countered in its current state")
+	case errors.Is(err, domain.ErrOfferCannotBeWithdrawn):
+		util.Error(c, http.StatusBadRequest, "CANNOT_WITHDRAW", "This offer cannot be withdrawn in its current state")
+	case errors.Is(err, domain.ErrCounterOfferExpired):
+		util.Error(c, http.StatusBadRequest, "COUNTER_EXPIRED", "The counter offer has expired")
+	case errors.Is(err, domain.ErrUnauthorized):
+		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have permission for this action")
+	case errors.Is(err, domain.ErrDriverProfileNotFound):
+		util.Error(c, http.StatusNotFound, "PROFILE_NOT_FOUND", "Driver profile not found. Please create one first.")
+	case errors.Is(err, domain.ErrDriverNotVerified):
+		util.Error(c, http.StatusForbidden, "NOT_VERIFIED", "Your driver account is pending verification")
+	case errors.Is(err, domain.ErrDriverDeliveryNotFound):
+		util.Error(c, http.StatusNotFound, "DELIVERY_NOT_FOUND", "Delivery not found")
+	default:
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "An error occurred")
+	}
+}
+
+// ============================================
+// OFFER RESPONSE TYPES
+// ============================================
+
+type DriverOfferResponse struct {
+	ID               string   `json:"id"`
+	DeliveryID       string   `json:"delivery_id"`
+	DriverID         string   `json:"driver_id"`
+	OfferedAmount    float64  `json:"offered_amount"`
+	CounterAmount    *float64 `json:"counter_amount,omitempty"`
+	AgreedAmount     *float64 `json:"agreed_amount,omitempty"`
+	Status           string   `json:"status"`
+	ExpiresAt        string   `json:"expires_at"`
+	CounterExpiresAt *string  `json:"counter_expires_at,omitempty"`
+	CounteredAt      *string  `json:"countered_at,omitempty"`
+	RespondedAt      *string  `json:"responded_at,omitempty"`
+	DriverNote       *string  `json:"driver_note,omitempty"`
+	SellerNote       *string  `json:"seller_note,omitempty"`
+	OfferCount       int      `json:"offer_count"`
+	CanReOffer       bool     `json:"can_re_offer"`
+	CreatedAt        string   `json:"created_at"`
+}
+
+func driverOfferToResponse(o *domain.DriverOffer) DriverOfferResponse {
+	resp := DriverOfferResponse{
+		ID:            o.ID.String(),
+		DeliveryID:    o.DeliveryID.String(),
+		DriverID:      o.DriverID.String(),
+		OfferedAmount: o.OfferedAmount,
+		Status:        string(o.Status),
+		ExpiresAt:     o.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+		OfferCount:    o.OfferCount,
+		CanReOffer:    o.CanDriverReOffer(),
+		CreatedAt:     o.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		DriverNote:    o.DriverNote,
+		SellerNote:    o.SellerNote,
+	}
+
+	if o.CounterAmount != nil {
+		resp.CounterAmount = o.CounterAmount
+	}
+	if o.AgreedAmount != nil {
+		resp.AgreedAmount = o.AgreedAmount
+	}
+	if o.CounterExpiresAt != nil {
+		s := o.CounterExpiresAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.CounterExpiresAt = &s
+	}
+	if o.CounteredAt != nil {
+		s := o.CounteredAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.CounteredAt = &s
+	}
+	if o.RespondedAt != nil {
+		s := o.RespondedAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.RespondedAt = &s
+	}
+
+	return resp
 }

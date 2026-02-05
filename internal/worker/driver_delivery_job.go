@@ -24,6 +24,9 @@ type DriverServiceInterface interface {
 	GetAbandonedTrips(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error)
 	ProcessAbandonedTrip(ctx context.Context, tripID uuid.UUID) error
 	GetStaleDepartures(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error)
+
+	// Driver offer expiry
+	ExpireStaleOffers(ctx context.Context) error
 }
 
 // runDriverDeliveryAutoConfirmJob runs periodically to auto-confirm deliveries

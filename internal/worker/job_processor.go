@@ -71,6 +71,10 @@ func DefaultWorkerConfig() *WorkerConfig {
 type DistributedLock interface {
 	Lock(ctx context.Context, name string, ttl time.Duration) (release func(), acquired bool)
 }
+type JobStatusBroadcaster interface {
+	BroadcastJobStatus(jobID, status string)
+}
+
 type JobProcessor struct {
 	escrowService      EscrowServiceInterface
 	logisticsService   LogisticsServiceInterface
@@ -78,11 +82,16 @@ type JobProcessor struct {
 	deliveryJobRepo    repository.DeliveryJobRepository
 	paymentRequestRepo repository.PaymentRequestRepository
 	riderOfferRepo     repository.RiderJobOfferRepository
-	lock   DistributedLock
-	config *WorkerConfig
-	logger *zap.Logger
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	broadcaster        JobStatusBroadcaster
+	lock               DistributedLock
+	config             *WorkerConfig
+	logger             *zap.Logger
+	stopCh             chan struct{}
+	wg                 sync.WaitGroup
+
+	// Nearby riders broadcasting
+	nearbyRidersFinder      NearbyRidersFinder
+	nearbyRidersBroadcaster NearbyRidersBroadcaster
 }
 type EscrowServiceInterface interface {
 	ProcessPendingConfirmationWindows(ctx context.Context) error
@@ -92,6 +101,7 @@ func NewJobProcessor(
 	deliveryJobRepo repository.DeliveryJobRepository,
 	paymentRequestRepo repository.PaymentRequestRepository,
 	riderOfferRepo repository.RiderJobOfferRepository,
+	broadcaster JobStatusBroadcaster,
 	config *WorkerConfig,
 	logger *zap.Logger,
 ) *JobProcessor {
@@ -104,6 +114,7 @@ func NewJobProcessor(
 		deliveryJobRepo:    deliveryJobRepo,
 		paymentRequestRepo: paymentRequestRepo,
 		riderOfferRepo:     riderOfferRepo,
+		broadcaster:        broadcaster,
 		config:             config,
 		logger:             logger.Named("worker"),
 		stopCh:             make(chan struct{}),
@@ -111,7 +122,7 @@ func NewJobProcessor(
 }
 func (p *JobProcessor) Start(ctx context.Context) {
 	p.logger.Info("starting background job processor")
-	p.wg.Add(12) // 5 existing + 3 logistics + 1 rebook + 1 driver auto-confirm + 2 driver monitors
+	p.wg.Add(13) // 5 existing + 3 logistics + 1 rebook + 1 driver auto-confirm + 2 driver monitors + 1 nearby riders
 
 	go p.runWithRecovery(ctx, "escrow_timeout", p.runEscrowTimeoutJob)
 	go p.runWithRecovery(ctx, "rider_search_timeout", p.runRiderSearchTimeoutJob)
@@ -131,6 +142,9 @@ func (p *JobProcessor) Start(ctx context.Context) {
 	go p.runWithRecovery(ctx, "driver_delivery_auto_confirm", p.runDriverDeliveryAutoConfirmJob)
 	go p.runWithRecovery(ctx, "driver_delivery_monitor", p.runDriverDeliveryMonitorJob)
 	go p.runWithRecovery(ctx, "driver_trip_monitor", p.runDriverTripMonitorJob)
+
+	// Nearby riders broadcast job
+	go p.runWithRecovery(ctx, "nearby_riders", p.runNearbyRidersJob)
 
 	p.logger.Info("all background jobs started")
 }

@@ -107,7 +107,6 @@ func (h *WalletFundingHandler) InitializeTopUp(c *gin.Context) {
 		"payment_reference": result.PaymentReference,
 		"authorization_url": result.AuthorizationURL,
 		"access_code":       result.AccessCode,
-		"public_key":        h.paystackClient.GetPublicKey(),
 	})
 }
 

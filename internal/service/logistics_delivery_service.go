@@ -23,10 +23,8 @@ const (
 )
 
 type LogisticsDeliveryService interface {
-	// Creation
 	Create(ctx context.Context, req *CreateLogisticsDeliveryRequest) (*domain.LogisticsDelivery, error)
 
-	// Queries
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.LogisticsDelivery, error)
 	GetDetails(ctx context.Context, id uuid.UUID) (*domain.LogisticsDeliveryDetails, error)
 	GetByPaymentRequestID(ctx context.Context, prID uuid.UUID) (*domain.LogisticsDelivery, error)
@@ -56,13 +54,10 @@ type LogisticsDeliveryService interface {
 	ListDamageClaims(ctx context.Context, limit, offset int) (*dto.LogisticsDeliveryListResponse, error)
 	ListPendingRefundApprovals(ctx context.Context, limit, offset int) (*dto.LogisticsDeliveryListResponse, error)
 
-	// Timeline
 	GetTimeline(ctx context.Context, id uuid.UUID) (*dto.DeliveryTimelineResponse, error)
 
-	// Evidence
 	UploadEvidence(ctx context.Context, id uuid.UUID, uploaderID uuid.UUID, uploaderType string, req *dto.UploadEvidenceRequest) error
 
-	// Background jobs
 	ProcessExceededShipDeadlines(ctx context.Context) error
 	ProcessConfirmationReminders(ctx context.Context) error
 	ProcessAutoEscalations(ctx context.Context) error
@@ -151,7 +146,6 @@ func (s *LogisticsDeliveryServiceImpl) Create(ctx context.Context, req *CreateLo
 		return nil, fmt.Errorf("failed to create logistics delivery: %w", err)
 	}
 
-	// Record event
 	s.recordEvent(ctx, delivery.ID, nil, domain.LDStatusAwaitingShipment, nil, "system", "Logistics delivery created", nil)
 
 	s.logger.Info("logistics delivery created",
@@ -328,17 +322,14 @@ func (s *LogisticsDeliveryServiceImpl) MarkShipped(ctx context.Context, id uuid.
 		return err
 	}
 
-	// Record event
 	fromStatus := delivery.Status
 	s.recordEvent(ctx, id, &fromStatus, domain.LDStatusShipped, &sellerID, "seller", "Item shipped to logistics carrier", map[string]interface{}{
 		"carrier":         carrier,
 		"tracking_number": trackingNumber,
 	})
 
-	// Update escrow status
 	s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusDeliveryInProgress)
 
-	// Notify buyer
 	s.sendNotification(ctx, delivery.BuyerID, "Item Shipped", fmt.Sprintf("Your order has been shipped via %s. Tracking: %s", carrier.DisplayName(), trackingNumber))
 
 	s.logger.Info("logistics delivery marked as shipped",
@@ -364,7 +355,6 @@ func (s *LogisticsDeliveryServiceImpl) UpdateTracking(ctx context.Context, id uu
 		return domain.ErrInvalidStatusTransition
 	}
 
-	// Only update non-nil fields
 	if req.TrackingNumber != nil {
 		delivery.TrackingNumber = req.TrackingNumber
 	}
@@ -401,7 +391,6 @@ func (s *LogisticsDeliveryServiceImpl) ClaimDelivery(ctx context.Context, id uui
 		return domain.ErrCannotClaimDelivery
 	}
 
-	// Enforce minimum 24h since shipping
 	if delivery.ShippedAt == nil || time.Since(*delivery.ShippedAt) < MinHoursBeforeClaimingDelivery*time.Hour {
 		return domain.ErrCannotClaimDeliveryTooEarly
 	}
@@ -414,16 +403,13 @@ func (s *LogisticsDeliveryServiceImpl) ClaimDelivery(ctx context.Context, id uui
 		return err
 	}
 
-	// Upload delivery proof if provided
 	if req.DeliveryProofURL != nil {
 		s.uploadEvidenceInternal(ctx, id, sellerID, "seller", "delivery_photo", *req.DeliveryProofURL, req.Notes)
 	}
 
-	// Record event
 	fromStatus := delivery.Status
 	s.recordEvent(ctx, id, &fromStatus, domain.LDStatusDeliveryClaimed, &sellerID, "seller", "Seller claims item delivered", nil)
 
-	// Notify buyer - this is critical
 	s.sendNotification(ctx, delivery.BuyerID, "Please Confirm Delivery",
 		fmt.Sprintf("The seller claims your order has been delivered. Please confirm receipt within %d days or open a dispute if there are issues.", ConfirmationWindowDays))
 
@@ -458,7 +444,6 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 
 	switch req.Condition {
 	case "good":
-		// Good condition → proceed to refund approval (or auto-refund for low value)
 		escrow, err := s.escrowRepo.GetByID(ctx, delivery.EscrowID)
 		if err != nil {
 			s.logger.Error("failed to get escrow", zap.Error(err))
@@ -474,7 +459,7 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 				"Seller confirmed receipt in good condition. Your refund is pending admin approval.")
 		} else {
 			s.logger.Info("low value delivery - processing auto-refund")
-			// Low value → auto-refund
+			
 			newStatus = domain.LDStatusReturnConfirmed
 			delivery.Status = newStatus
 			if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
@@ -482,7 +467,6 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 			}
 			s.recordEvent(ctx, id, &fromStatus, newStatus, &sellerID, "seller", "Return received in good condition", nil)
 
-			// Process refund immediately
 			if escrow != nil {
 				s.processReturnRefund(ctx, delivery, escrow)
 			}

@@ -55,6 +55,7 @@ type ErrandServiceImpl struct {
 	errandRepo    repository.ErrandRepository
 	jobRepo       repository.DeliveryJobRepository
 	feeCalculator FeeCalculatorService
+	broadcaster   JobStatusBroadcaster
 	logger        *zap.Logger
 }
 
@@ -62,12 +63,14 @@ func NewErrandService(
 	errandRepo repository.ErrandRepository,
 	jobRepo repository.DeliveryJobRepository,
 	feeCalculator FeeCalculatorService,
+	broadcaster JobStatusBroadcaster,
 	logger *zap.Logger,
 ) ErrandService {
 	return &ErrandServiceImpl{
 		errandRepo:    errandRepo,
 		jobRepo:       jobRepo,
 		feeCalculator: feeCalculator,
+		broadcaster:   broadcaster,
 		logger:        logger,
 	}
 }
@@ -173,6 +176,9 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 		return nil, fmt.Errorf("failed to create delivery job: %w", err)
 	}
 
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusSearching))
+	}
 
 	errand.Status = domain.ErrandStatusSearching
 	errand.ConfirmedAt = &now
@@ -217,6 +223,8 @@ func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errand
 	if errand.DeliveryJobID != nil {
 		if err := s.jobRepo.UpdateStatus(ctx, *errand.DeliveryJobID, domain.DJStatusCancelled); err != nil {
 			s.logger.Error("failed to cancel delivery job", zap.Error(err))
+		} else if s.broadcaster != nil {
+			s.broadcaster.BroadcastJobStatus(errand.DeliveryJobID.String(), string(domain.DJStatusCancelled))
 		}
 	}
 

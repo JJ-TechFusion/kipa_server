@@ -20,15 +20,16 @@ type LocationRecord struct {
 }
 
 type RiderLocation struct {
-	Type      string  `json:"type"`
-	JobID     string  `json:"job_id"`
-	RiderID   string  `json:"rider_id"`
-	Lat       float64 `json:"lat"`
-	Lng       float64 `json:"lng"`
-	Heading   float64 `json:"heading"`
-	Speed     float64 `json:"speed"`
-	ETA       int     `json:"eta_minutes,omitempty"`
-	Timestamp int64   `json:"ts"`
+	Type                string   `json:"type"`
+	JobID               string   `json:"job_id"`
+	RiderID             string   `json:"rider_id"`
+	Lat                 float64  `json:"lat"`
+	Lng                 float64  `json:"lng"`
+	Heading             float64  `json:"heading"`
+	Speed               float64  `json:"speed"`
+	ETAMinutes          *int     `json:"eta_minutes,omitempty"`
+	DistanceRemainingKM *float64 `json:"distance_remaining_km,omitempty"`
+	Timestamp           int64    `json:"ts"`
 }
 
 const (
