@@ -362,6 +362,7 @@ func main() {
 
 	// New handlers for platform features
 	prHandler := handler.NewPaymentRequestHandler(prService)
+	transactionHandler := handler.NewTransactionHandler(prService, orderService, userRepo, deliveryJobRepo)
 	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeResolutionService, driverService)
 	riderHandler := handler.NewRiderHandler(riderService)
 	commissionHandler := handler.NewRiderCommissionHandler(commissionService)
@@ -404,6 +405,7 @@ func main() {
 	// Register all handlers
 	authHandler.RegisterRoutes(v1, authMiddleware)
 	prHandler.RegisterRoutes(v1, authMiddleware)
+	transactionHandler.RegisterRoutes(v1, authMiddleware)
 	buyerHandler.RegisterRoutes(v1, authMiddleware)
 	sellerHandler.RegisterRoutes(v1, authMiddleware)
 	riderHandler.RegisterRoutes(v1, authMiddleware)

@@ -30,6 +30,7 @@ type InitializePaymentRequest struct {
 
 type InitializePaymentResponse struct {
 	OrderID          uuid.UUID `json:"order_id"`
+	PaymentRequestID uuid.UUID `json:"payment_request_id"`
 	AuthorizationURL string    `json:"authorization_url"`
 	AccessCode       string    `json:"access_code"`
 	Reference        string    `json:"reference"`
@@ -37,6 +38,7 @@ type InitializePaymentResponse struct {
 
 type VerifyPaymentResponse struct {
 	OrderID             uuid.UUID  `json:"order_id"`
+	PaymentRequestID    uuid.UUID  `json:"payment_request_id"`
 	PaymentStatus       string     `json:"payment_status"`
 	EscrowID            *uuid.UUID `json:"escrow_id,omitempty"`
 	LogisticsDeliveryID *uuid.UUID `json:"logistics_delivery_id,omitempty"`
@@ -45,6 +47,7 @@ type VerifyPaymentResponse struct {
 
 type WalletPaymentResponse struct {
 	OrderID             uuid.UUID  `json:"order_id"`
+	PaymentRequestID    uuid.UUID  `json:"payment_request_id"`
 	EscrowID            uuid.UUID  `json:"escrow_id"`
 	LogisticsDeliveryID *uuid.UUID `json:"logistics_delivery_id,omitempty"`
 	Status              string     `json:"status"`
@@ -158,6 +161,7 @@ func (s *OrderServiceImpl) InitializePayment(ctx context.Context, buyerID uuid.U
 
 	return &InitializePaymentResponse{
 		OrderID:          order.ID,
+		PaymentRequestID: pr.ID,
 		AuthorizationURL: paystackResp.Data.AuthorizationURL,
 		AccessCode:       accessCode,
 		Reference:        reference,
@@ -170,10 +174,11 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 	}
 	if order.PaymentStatus == domain.OrderPaymentVerified {
 		return &VerifyPaymentResponse{
-			OrderID:       order.ID,
-			PaymentStatus: string(order.PaymentStatus),
-			EscrowID:      order.EscrowID,
-			Status:        string(order.Status),
+			OrderID:          order.ID,
+			PaymentRequestID: order.PaymentRequestID,
+			PaymentStatus:    string(order.PaymentStatus),
+			EscrowID:         order.EscrowID,
+			Status:           string(order.Status),
 		}, nil
 	}
 	if order.PaymentStatus != domain.OrderPaymentInitialized {
@@ -321,6 +326,7 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 
 	return &VerifyPaymentResponse{
 		OrderID:             order.ID,
+		PaymentRequestID:    order.PaymentRequestID,
 		PaymentStatus:       string(order.PaymentStatus),
 		EscrowID:            &escrow.ID,
 		LogisticsDeliveryID: logisticsDeliveryID,
@@ -505,6 +511,7 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 
 	return &WalletPaymentResponse{
 		OrderID:             order.ID,
+		PaymentRequestID:    pr.ID,
 		EscrowID:            escrow.ID,
 		LogisticsDeliveryID: logisticsDeliveryID,
 		Status:              string(order.Status),

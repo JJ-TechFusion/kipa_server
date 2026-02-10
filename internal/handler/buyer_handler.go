@@ -164,11 +164,12 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 		}
 
 		util.Success(c, http.StatusOK, gin.H{
-			"order_id":          resp.OrderID,
-			"authorization_url": resp.AuthorizationURL,
-			"access_code":       resp.AccessCode,
-			"reference":         resp.Reference,
-			"payment_method":    "card",
+			"order_id":           resp.OrderID,
+			"payment_request_id": resp.PaymentRequestID,
+			"authorization_url":  resp.AuthorizationURL,
+			"access_code":        resp.AccessCode,
+			"reference":          resp.Reference,
+			"payment_method":     "card",
 		})
 
 	case "wallet":
@@ -179,11 +180,12 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 		}
 
 		util.Success(c, http.StatusOK, gin.H{
-			"order_id":       resp.OrderID,
-			"escrow_id":      resp.EscrowID,
-			"status":         resp.Status,
-			"payment_method": "wallet",
-			"message":        "Payment completed successfully",
+			"order_id":           resp.OrderID,
+			"payment_request_id": resp.PaymentRequestID,
+			"escrow_id":          resp.EscrowID,
+			"status":             resp.Status,
+			"payment_method":     "wallet",
+			"message":            "Payment completed successfully",
 		})
 
 	default:
@@ -204,11 +206,12 @@ func (h *BuyerHandler) VerifyPayment(c *gin.Context) {
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
-		"order_id":       resp.OrderID,
-		"payment_status": resp.PaymentStatus,
-		"escrow_id":      resp.EscrowID,
-		"status":         resp.Status,
-		"message":        "Payment verified successfully",
+		"order_id":           resp.OrderID,
+		"payment_request_id": resp.PaymentRequestID,
+		"payment_status":     resp.PaymentStatus,
+		"escrow_id":          resp.EscrowID,
+		"status":             resp.Status,
+		"message":            "Payment verified successfully",
 	})
 }
 func (h *BuyerHandler) ListPurchases(c *gin.Context) {
@@ -218,7 +221,10 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		return
 	}
 
-	limit := 20
+	// Get status filter from query param
+	statusFilter := c.Query("status")
+
+	limit := 50
 	offset := 0
 
 	orders, err := h.orderService.GetOrdersByBuyerID(c.Request.Context(), userID, limit, offset)
@@ -226,6 +232,16 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
+
+	// Count orders by status for tabs
+	statusCounts := map[string]int{
+		"all":         0,
+		"processing":  0,
+		"in_delivery": 0,
+		"completed":   0,
+		"disputed":    0,
+	}
+
 	responses := make([]PurchaseResponse, 0)
 	for _, order := range orders {
 		if order.PaymentStatus != domain.OrderPaymentVerified {
@@ -234,19 +250,56 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 
 		pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
 		if err != nil {
-			continue // Skip if can't fetch payment request
+			continue
 		}
+
+		// Count by status
+		statusCounts["all"]++
+		switch order.Status {
+		case domain.OrderStatusPaid, domain.OrderStatusProcessing, domain.OrderStatusReady:
+			statusCounts["processing"]++
+		case domain.OrderStatusInDelivery, domain.OrderStatusDelivered:
+			statusCounts["in_delivery"]++
+		case domain.OrderStatusCompleted:
+			statusCounts["completed"]++
+		case domain.OrderStatusDisputed:
+			statusCounts["disputed"]++
+		}
+
+		// Apply status filter
+		if statusFilter != "" && statusFilter != "all" {
+			switch statusFilter {
+			case "processing":
+				if order.Status != domain.OrderStatusPaid && order.Status != domain.OrderStatusProcessing && order.Status != domain.OrderStatusReady {
+					continue
+				}
+			case "in_delivery":
+				if order.Status != domain.OrderStatusInDelivery && order.Status != domain.OrderStatusDelivered {
+					continue
+				}
+			case "completed":
+				if order.Status != domain.OrderStatusCompleted {
+					continue
+				}
+			case "disputed":
+				if order.Status != domain.OrderStatusDisputed {
+					continue
+				}
+			}
+		}
+
 		var job *domain.DeliveryJob
-		if pr.DeliveryType == domain.DeliveryTypeIntraState {
-			job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
+		if pr.DeliveryType == domain.DeliveryTypeIntraState && pr.DeliveryJobID != nil {
+			job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 		}
 
 		responses = append(responses, orderToPurchaseResponse(order, pr, job))
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
-		"purchases": responses,
-		"count":     len(responses),
+		"purchases":     responses,
+		"count":         len(responses),
+		"status_counts": statusCounts,
 	})
 }
 func (h *BuyerHandler) GetPurchase(c *gin.Context) {
@@ -277,8 +330,8 @@ func (h *BuyerHandler) GetPurchase(c *gin.Context) {
 		return
 	}
 	var job *domain.DeliveryJob
-	if pr.DeliveryType == domain.DeliveryTypeIntraState {
-		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
+	if pr.DeliveryType == domain.DeliveryTypeIntraState && pr.DeliveryJobID != nil {
+		job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 	}
 
 	resp := orderToPurchaseResponse(order, pr, job)
@@ -518,6 +571,7 @@ type PurchaseResponse struct {
 	ItemName             string     `json:"item_name"`
 	ItemDescription      *string    `json:"item_description,omitempty"`
 	ItemPrice            float64    `json:"item_price"`
+	ProcessingTimeHours  *int       `json:"processing_time_hours,omitempty"`
 	DeliveryType         string     `json:"delivery_type"`
 	EstimatedDeliveryFee float64    `json:"estimated_delivery_fee"`
 	BuyerServiceFee      float64    `json:"buyer_service_fee"`
@@ -526,6 +580,7 @@ type PurchaseResponse struct {
 	Status               string     `json:"status"`
 	SellerID             uuid.UUID  `json:"seller_id"`
 	EscrowID             *uuid.UUID `json:"escrow_id,omitempty"`
+	DeliveryJobID        *uuid.UUID `json:"delivery_job_id,omitempty"`
 	PaidAt               *string    `json:"paid_at,omitempty"`
 	CreatedAt            string     `json:"created_at"`
 
@@ -549,6 +604,7 @@ func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job
 		ItemName:             pr.ItemName,
 		ItemDescription:      pr.ItemDescription,
 		ItemPrice:            order.ItemAmount,
+		ProcessingTimeHours:  pr.ProcessingTimeHours,
 		DeliveryType:         string(pr.DeliveryType),
 		EstimatedDeliveryFee: order.DeliveryFeeEstimate,
 		BuyerServiceFee:      order.BuyerServiceFee,
@@ -557,6 +613,7 @@ func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job
 		Status:               string(order.Status),
 		SellerID:             pr.SellerID,
 		EscrowID:             order.EscrowID,
+		DeliveryJobID:        pr.DeliveryJobID,
 		CreatedAt:            order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
@@ -656,8 +713,8 @@ func (h *BuyerHandler) GetPurchaseTimeline(c *gin.Context) {
 		return
 	}
 	var job *domain.DeliveryJob
-	if pr.DeliveryType == domain.DeliveryTypeIntraState {
-		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
+	if pr.DeliveryType == domain.DeliveryTypeIntraState && pr.DeliveryJobID != nil {
+		job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 	}
 
 	timeline := BuildTimeline(TimelineViewBuyer, pr, order, job)

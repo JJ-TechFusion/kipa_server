@@ -75,7 +75,10 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 		return
 	}
 
-	limit := 20
+	// Get status filter from query param
+	statusFilter := c.Query("status")
+
+	limit := 50
 	offset := 0
 
 	orders, err := h.orderService.GetOrdersBySellerID(c.Request.Context(), userID, limit, offset)
@@ -83,12 +86,58 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to fetch sales")
 		return
 	}
+
+	// Count orders by status for tabs
+	statusCounts := map[string]int{
+		"all":         0,
+		"processing":  0,
+		"in_delivery": 0,
+		"completed":   0,
+		"disputed":    0,
+	}
+
 	responses := make([]SaleResponse, 0, len(orders))
 	for _, order := range orders {
 		pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
 		if err != nil {
 			continue
 		}
+
+		// Count by status
+		statusCounts["all"]++
+		switch order.Status {
+		case domain.OrderStatusPaid, domain.OrderStatusProcessing, domain.OrderStatusReady:
+			statusCounts["processing"]++
+		case domain.OrderStatusInDelivery, domain.OrderStatusDelivered:
+			statusCounts["in_delivery"]++
+		case domain.OrderStatusCompleted:
+			statusCounts["completed"]++
+		case domain.OrderStatusDisputed:
+			statusCounts["disputed"]++
+		}
+
+		// Apply status filter
+		if statusFilter != "" && statusFilter != "all" {
+			switch statusFilter {
+			case "processing":
+				if order.Status != domain.OrderStatusPaid && order.Status != domain.OrderStatusProcessing && order.Status != domain.OrderStatusReady {
+					continue
+				}
+			case "in_delivery":
+				if order.Status != domain.OrderStatusInDelivery && order.Status != domain.OrderStatusDelivered {
+					continue
+				}
+			case "completed":
+				if order.Status != domain.OrderStatusCompleted {
+					continue
+				}
+			case "disputed":
+				if order.Status != domain.OrderStatusDisputed {
+					continue
+				}
+			}
+		}
+
 		var escrowStatus string
 		if order.EscrowID != nil {
 			escrow, err := h.escrowService.GetByID(c.Request.Context(), *order.EscrowID)
@@ -101,8 +150,9 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
-		"sales": responses,
-		"count": len(responses),
+		"sales":         responses,
+		"count":         len(responses),
+		"status_counts": statusCounts,
 	})
 }
 func (h *SellerHandler) GetSale(c *gin.Context) {
@@ -152,8 +202,8 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 
 	// Get delivery job for timeline (intra-state)
 	var job *domain.DeliveryJob
-	if pr.DeliveryType == domain.DeliveryTypeIntraState {
-		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
+	if pr.DeliveryType == domain.DeliveryTypeIntraState && pr.DeliveryJobID != nil {
+		job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 	}
 
 	var deliveryInfo *SaleDeliveryInfo
@@ -251,6 +301,7 @@ type SaleResponse struct {
 	OrderStatus      string     `json:"order_status"`
 	EscrowStatus     string     `json:"escrow_status,omitempty"`
 	BuyerID          uuid.UUID  `json:"buyer_id"`
+	DeliveryJobID    *uuid.UUID `json:"delivery_job_id,omitempty"`
 	CreatedAt        string     `json:"created_at"`
 	PaidAt           *string    `json:"paid_at,omitempty"`
 }
@@ -293,6 +344,7 @@ func orderToSaleResponse(order *domain.Order, pr *domain.PaymentRequest, escrowS
 		OrderStatus:      string(order.Status),
 		EscrowStatus:     escrowStatus,
 		BuyerID:          order.BuyerID,
+		DeliveryJobID:    pr.DeliveryJobID,
 		CreatedAt:        order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
@@ -341,8 +393,8 @@ func (h *SellerHandler) GetSaleTimeline(c *gin.Context) {
 		return
 	}
 	var job *domain.DeliveryJob
-	if pr.DeliveryType == domain.DeliveryTypeIntraState {
-		job, _ = h.deliveryJobRepo.GetByPaymentRequestID(c.Request.Context(), order.PaymentRequestID)
+	if pr.DeliveryType == domain.DeliveryTypeIntraState && pr.DeliveryJobID != nil {
+		job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 	}
 
 	timeline := BuildTimeline(TimelineViewSeller, pr, order, job)
