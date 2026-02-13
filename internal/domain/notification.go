@@ -19,11 +19,13 @@ const (
 	NotificationOrderCancelled      NotificationType = "order_cancelled"
 
 	// Unavailability handling
-	NotificationDeliveryFailed NotificationType = "delivery_failed"
-	NotificationItemReturning  NotificationType = "item_returning"
-	NotificationItemReturned   NotificationType = "item_returned"
-	NotificationRebookReminder NotificationType = "rebook_reminder"
-	NotificationRebookExpired  NotificationType = "rebook_expired"
+	NotificationDeliveryFailed    NotificationType = "delivery_failed"
+	NotificationBuyerUnavailable  NotificationType = "buyer_unavailable"
+	NotificationItemReturning     NotificationType = "item_returning"
+	NotificationItemReturned      NotificationType = "item_returned"
+	NotificationRebookReminder    NotificationType = "rebook_reminder"
+	NotificationRebookExpired     NotificationType = "rebook_expired"
+	NotificationDeliveryResumed   NotificationType = "delivery_resumed"
 
 	// Errand lifecycle
 	NotificationErrandAccepted  NotificationType = "errand_accepted"

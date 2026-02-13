@@ -978,8 +978,8 @@ func (s *AdminServiceImpl) ResolveDispute(ctx context.Context, disputeID uuid.UU
 			buyerMsg := fmt.Sprintf("Dispute for your order has been resolved: %s", outcome)
 			sellerMsg := fmt.Sprintf("Dispute for an order was resolved: %s", outcome)
 
-			go s.notificationService.SendToUser(ctx, escrow.BuyerID, "Dispute Resolved", buyerMsg, data, domain.NotificationDisputeResolved)
-			go s.notificationService.SendToUser(ctx, escrow.SellerID, "Dispute Resolved", sellerMsg, data, domain.NotificationDisputeResolved)
+			go s.notificationService.SendToUser(context.Background(), escrow.BuyerID, "Dispute Resolved", buyerMsg, data, domain.NotificationDisputeResolved)
+			go s.notificationService.SendToUser(context.Background(), escrow.SellerID, "Dispute Resolved", sellerMsg, data, domain.NotificationDisputeResolved)
 		}
 	}
 
@@ -1047,7 +1047,7 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 		if s.notificationService != nil {
 			data := map[string]string{"dispute_id": disputeID.String(), "amount": fmt.Sprintf("%.2f", refundAmount)}
 			msg := fmt.Sprintf("A refund of %.2f has been credited to your wallet: %s", refundAmount, reason)
-			go s.notificationService.SendToUser(ctx, escrow.BuyerID, "Refund Processed", msg, data, domain.NotificationRefundProcessed)
+			go s.notificationService.SendToUser(context.Background(), escrow.BuyerID, "Refund Processed", msg, data, domain.NotificationRefundProcessed)
 		}
 
 		s.logger.Info("buyer wallet credited with refund",

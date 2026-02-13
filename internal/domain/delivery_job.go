@@ -78,13 +78,13 @@ type DeliveryJob struct {
 	UnavailableMarkedAt  *time.Time `db:"unavailable_marked_at" json:"unavailable_marked_at,omitempty"`
 
 	PickupAddress   string  `db:"pickup_address" json:"pickup_address"`
-	PickupLat       float64 `db:"-" json:"pickup_lat,omitempty"` // Transient for creation
-	PickupLng       float64 `db:"-" json:"pickup_lng,omitempty"` // Transient for creation
-	PickupLocation  []byte  `db:"pickup_location" json:"-"`      // PostGIS GEOGRAPHY
+	PickupLat       float64 `db:"pickup_lat" json:"pickup_lat,omitempty"`
+	PickupLng       float64 `db:"pickup_lng" json:"pickup_lng,omitempty"`
+	PickupLocation  []byte  `db:"pickup_location" json:"-"` // PostGIS GEOGRAPHY
 	DropoffAddress  string  `db:"dropoff_address" json:"dropoff_address"`
-	DropoffLat      float64 `db:"-" json:"dropoff_lat,omitempty"` // Transient for creation
-	DropoffLng      float64 `db:"-" json:"dropoff_lng,omitempty"` // Transient for creation
-	DropoffLocation []byte  `db:"dropoff_location" json:"-"`      // PostGIS GEOGRAPHY
+	DropoffLat      float64 `db:"dropoff_lat" json:"dropoff_lat,omitempty"`
+	DropoffLng      float64 `db:"dropoff_lng" json:"dropoff_lng,omitempty"`
+	DropoffLocation []byte  `db:"dropoff_location" json:"-"` // PostGIS GEOGRAPHY
 	DistanceKM      *float64 `db:"distance_km" json:"distance_km,omitempty"`
 	RequiredVehicleType VehicleType `db:"required_vehicle_type" json:"required_vehicle_type"`
 	DeliveryFee         float64  `db:"delivery_fee" json:"delivery_fee"`
@@ -132,7 +132,7 @@ func (s DeliveryJobStatus) CanTransitionTo(next DeliveryJobStatus) bool {
 
 		// Unavailability flow
 		DJStatusSellerUnavailable: {}, // Terminal - job cancelled, buyer refunded
-		DJStatusBuyerUnavailable:  {DJStatusForcedReturn},
+		DJStatusBuyerUnavailable:  {DJStatusForcedReturn, DJStatusInTransit}, // Can resume if rebooked
 		DJStatusForcedReturn:      {DJStatusForcedReturnDone},
 		DJStatusForcedReturnDone:  {}, // Terminal - waiting for buyer rebook or refund
 	}

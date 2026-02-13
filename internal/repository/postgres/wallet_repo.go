@@ -163,6 +163,77 @@ func (r *WalletRepo) Debit(ctx context.Context, walletID uuid.UUID, amount float
 
 	return nil
 }
+
+func (r *WalletRepo) SetPin(ctx context.Context, walletID uuid.UUID, pinHash string) error {
+	query := `
+		UPDATE wallets SET
+			pin_hash = $2,
+			pin_created_at = NOW(),
+			pin_attempts = 0,
+			pin_locked_until = NULL
+		WHERE id = $1`
+
+	result, err := r.db.ExecContext(ctx, query, walletID, pinHash)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return domain.ErrWalletNotFound
+	}
+
+	return nil
+}
+
+func (r *WalletRepo) UpdatePinAttempts(ctx context.Context, walletID uuid.UUID, attempts int, lockedUntil *time.Time) error {
+	query := `
+		UPDATE wallets SET
+			pin_attempts = $2,
+			pin_locked_until = $3
+		WHERE id = $1`
+
+	result, err := r.db.ExecContext(ctx, query, walletID, attempts, lockedUntil)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return domain.ErrWalletNotFound
+	}
+
+	return nil
+}
+
+func (r *WalletRepo) ResetPinAttempts(ctx context.Context, walletID uuid.UUID) error {
+	query := `
+		UPDATE wallets SET
+			pin_attempts = 0,
+			pin_locked_until = NULL
+		WHERE id = $1`
+
+	result, err := r.db.ExecContext(ctx, query, walletID)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return domain.ErrWalletNotFound
+	}
+
+	return nil
+}
 type WalletTransactionRepo struct {
 	db *sqlx.DB
 }

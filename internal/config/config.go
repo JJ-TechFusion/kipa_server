@@ -211,6 +211,9 @@ func Load() (*Config, error) {
 			BaseURL:         viper.GetString("aws.s3_base_url"),
 			MaxFileSizeMB:   viper.GetInt("aws.max_file_size_mb"),
 		},
+		Firebase: FirebaseConfig{
+			CredentialsPath: viper.GetString("firebase.credentials_path"),
+		},
 	}
 
 	return cfg, nil
@@ -265,6 +268,7 @@ func setDefaults() {
 	viper.SetDefault("worker.reminder_cooldown_mins", 60)
 	viper.SetDefault("aws.region", "us-east-1")
 	viper.SetDefault("aws.max_file_size_mb", 5)
+	viper.SetDefault("firebase.credentials_path", "./firebase-service-account.json")
 }
 
 func (c *DatabaseConfig) GetDSN() string {

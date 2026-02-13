@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -81,9 +82,77 @@ func (p *JobProcessor) processRebookExpiries(ctx context.Context) {
 }
 
 func (p *JobProcessor) processRebookExpiry(ctx context.Context, pr *domain.PaymentRequest) error {
-	// Update status to rebook_expired
-	if err := p.paymentRequestRepo.UpdateStatus(ctx, pr.ID, domain.PRStatusRebookExpired); err != nil {
+	// Get the delivery job (rider still has item)
+	if pr.DeliveryJobID == nil {
+		p.logger.Error("rebook expiry job: no delivery job found",
+			zap.String("payment_request_id", pr.ID.String()),
+		)
+		return nil
+	}
+
+	job, err := p.deliveryJobRepo.GetByID(ctx, *pr.DeliveryJobID)
+	if err != nil {
+		p.logger.Error("rebook expiry job: failed to get delivery job",
+			zap.String("payment_request_id", pr.ID.String()),
+			zap.Error(err),
+		)
 		return err
+	}
+
+	// Only process if job is still in buyer_unavailable status
+	if job.Status != domain.DJStatusBuyerUnavailable {
+		p.logger.Info("rebook expiry job: job not in buyer_unavailable status, skipping",
+			zap.String("job_id", job.ID.String()),
+			zap.String("current_status", string(job.Status)),
+		)
+		return nil
+	}
+
+	// Initiate forced return: rider returns item to seller
+	// Swap pickup/dropoff - seller becomes the dropoff
+	job.IsForcedReturn = true
+	job.Status = domain.DJStatusForcedReturn
+
+	// Generate dropoff code for seller to verify return
+	dropoffCode := fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	job.DropoffCode = &dropoffCode
+
+	// Swap addresses: rider's current location (buyer's address) -> seller's location
+	// The original pickup was seller, original dropoff was buyer
+	// For forced return: current loc (buyer) -> seller
+	originalPickupAddr := job.PickupAddress
+	originalPickupLat := job.PickupLat
+	originalPickupLng := job.PickupLng
+
+	job.PickupAddress = job.DropoffAddress // Rider is at buyer's address
+	job.PickupLat = job.DropoffLat
+	job.PickupLng = job.DropoffLng
+
+	job.DropoffAddress = originalPickupAddr // Return to seller's address
+	job.DropoffLat = originalPickupLat
+	job.DropoffLng = originalPickupLng
+
+	if err := p.deliveryJobRepo.UpdateForcedReturn(ctx, job); err != nil {
+		p.logger.Error("rebook expiry job: failed to update job for forced return",
+			zap.String("job_id", job.ID.String()),
+			zap.Error(err),
+		)
+		return err
+	}
+
+	// Broadcast job status change
+	if p.broadcaster != nil {
+		p.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusForcedReturn))
+	}
+
+	// Update payment request status
+	// Note: The existing delivery job is being converted to forced return,
+	// so DeliveryJobID already points to the correct job
+	if err := p.paymentRequestRepo.UpdateStatus(ctx, pr.ID, domain.PRStatusRebookExpired); err != nil {
+		p.logger.Error("rebook expiry job: failed to update payment request status",
+			zap.String("payment_request_id", pr.ID.String()),
+			zap.Error(err),
+		)
 	}
 
 	// Calculate 5% unavailability fee
@@ -95,20 +164,31 @@ func (p *JobProcessor) processRebookExpiry(ctx context.Context, pr *domain.Payme
 		)
 	}
 
-	// Process refund minus 5% if escrow service available
-	if p.escrowService != nil && pr.EscrowID != nil {
-		// Note: The actual partial refund logic would need to be implemented
-		// in the escrow service. For now, we log and let admin handle it.
-		p.logger.Info("rebook expiry job: rebook expired, needs partial refund",
-			zap.String("payment_request_id", pr.ID.String()),
-			zap.String("escrow_id", pr.EscrowID.String()),
-			zap.Float64("unavailability_fee", unavailabilityFee),
-			zap.Float64("refund_amount", pr.ItemPrice-unavailabilityFee),
-		)
+	// Notify buyer and seller about forced return
+	if p.notificationService != nil {
+		data := map[string]string{
+			"job_id":             job.ID.String(),
+			"payment_request_id": pr.ID.String(),
+			"dropoff_code":       dropoffCode,
+		}
+
+		// Notify seller that item is being returned
+		go p.notificationService.SendToUser(ctx, pr.SellerID, "Item Being Returned",
+			fmt.Sprintf("The buyer was unreachable. The item is being returned to you. Verification code: %s", dropoffCode),
+			data, domain.NotificationItemReturning)
+
+		// Notify buyer about return and partial refund
+		if pr.BuyerID != nil {
+			go p.notificationService.SendToUser(ctx, *pr.BuyerID, "Delivery Cancelled - Item Returning",
+				"The rebook window has expired. The item is being returned to the seller. You will receive a partial refund (minus 5% unavailability fee).",
+				data, domain.NotificationRebookExpired)
+		}
 	}
 
-	p.logger.Info("rebook expiry job: processed expired rebook",
+	p.logger.Info("rebook expiry job: forced return initiated",
 		zap.String("payment_request_id", pr.ID.String()),
+		zap.String("job_id", job.ID.String()),
+		zap.String("dropoff_code", dropoffCode),
 		zap.Float64("unavailability_fee", unavailabilityFee),
 	)
 

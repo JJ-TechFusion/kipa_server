@@ -26,6 +26,7 @@ func (h *UploadHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 		uploads.POST("/profile-picture", h.UploadProfilePicture)
 		uploads.POST("/item-image", h.UploadItemImage)
 		uploads.POST("/rider/:type", h.UploadRiderDocument)
+		uploads.POST("/dispute-evidence", h.UploadDisputeEvidence)
 	}
 }
 
@@ -105,6 +106,30 @@ func (h *UploadHandler) UploadRiderDocument(c *gin.Context) {
 	util.Success(c, http.StatusOK, gin.H{
 		"url":  url,
 		"type": docType,
+	})
+}
+
+func (h *UploadHandler) UploadDisputeEvidence(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "FILE_REQUIRED", "File is required")
+		return
+	}
+
+	url, err := h.uploadService.UploadDisputeEvidence(c.Request.Context(), userID, file)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"url": url,
 	})
 }
 

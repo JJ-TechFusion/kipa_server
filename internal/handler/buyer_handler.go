@@ -20,6 +20,7 @@ type BuyerHandler struct {
 	escrowService            service.EscrowService
 	userRepo                 repository.UserRepository
 	deliveryJobRepo          repository.DeliveryJobRepository
+	disputeRepo              repository.DisputeRepository
 	disputeResolutionService service.DisputeResolutionService
 	driverService            service.DriverService
 }
@@ -30,6 +31,7 @@ func NewBuyerHandler(
 	escrowService service.EscrowService,
 	userRepo repository.UserRepository,
 	deliveryJobRepo repository.DeliveryJobRepository,
+	disputeRepo repository.DisputeRepository,
 	disputeResolutionService service.DisputeResolutionService,
 	driverService service.DriverService,
 ) *BuyerHandler {
@@ -39,6 +41,7 @@ func NewBuyerHandler(
 		escrowService:            escrowService,
 		userRepo:                 userRepo,
 		deliveryJobRepo:          deliveryJobRepo,
+		disputeRepo:              disputeRepo,
 		disputeResolutionService: disputeResolutionService,
 		driverService:            driverService,
 	}
@@ -65,6 +68,7 @@ func (h *BuyerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		// Return flow endpoints
 		purchases.GET("/:id/return", h.GetReturnStatus)
 		purchases.POST("/:id/initiate-return", h.InitiateReturn)
+		purchases.POST("/:id/ready-for-return", h.ReadyForReturn)
 
 		// Rebook endpoints (after buyer unavailability)
 		purchases.GET("/:id/rebook-status", h.GetRebookStatus)
@@ -329,13 +333,31 @@ func (h *BuyerHandler) GetPurchase(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
+
 	var job *domain.DeliveryJob
-	if pr.DeliveryType == domain.DeliveryTypeIntraState && pr.DeliveryJobID != nil {
-		job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
+	var returnJob *domain.DeliveryJob
+	var forcedReturnJob *domain.DeliveryJob
+	if pr.DeliveryType == domain.DeliveryTypeIntraState {
+		if pr.DeliveryJobID != nil {
+			job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
+		}
+		// Fetch return job if exists (dispute return)
+		if pr.ReturnDeliveryJobID != nil {
+			returnJob, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ReturnDeliveryJobID)
+		}
+		// Fetch forced return job if exists (buyer unavailable)
+		if pr.ForcedReturnJobID != nil {
+			forcedReturnJob, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ForcedReturnJobID)
+		}
 	}
 
-	resp := orderToPurchaseResponse(order, pr, job)
-	timeline := BuildTimeline(TimelineViewBuyer, pr, order, job)
+	resp := orderToPurchaseResponseWithReturn(order, pr, job, returnJob)
+	// Use forced return job for timeline if in rebook flow
+	timelineReturnJob := returnJob
+	if forcedReturnJob != nil && returnJob == nil {
+		timelineReturnJob = forcedReturnJob
+	}
+	timeline := BuildTimelineWithReturn(TimelineViewBuyer, pr, order, job, timelineReturnJob)
 	resp.Timeline = &timeline
 
 	util.Success(c, http.StatusOK, resp)
@@ -417,6 +439,15 @@ func (h *BuyerHandler) DisputePurchase(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
+
+	// Create dispute record for admin tracking
+	dispute := domain.NewDispute(*order.EscrowID, userID, req.Reason, req.Evidence)
+	if err := h.disputeRepo.Create(c.Request.Context(), dispute); err != nil {
+		// Log error but don't fail - escrow is already disputed
+		// The dispute record is for admin tracking
+		_ = err
+	}
+
 	if err := h.orderService.UpdateStatus(c.Request.Context(), order.ID, domain.OrderStatusDisputed); err != nil {
 		h.handleError(c, err)
 		return
@@ -426,7 +457,10 @@ func (h *BuyerHandler) DisputePurchase(c *gin.Context) {
 		_ = h.prService.UpdateStatus(c.Request.Context(), order.PaymentRequestID, domain.PRStatusDisputed)
 	}
 
-	util.Success(c, http.StatusOK, gin.H{"message": "Dispute opened. Our team will review your case."})
+	util.Success(c, http.StatusOK, gin.H{
+		"message":    "Dispute opened. Our team will review your case.",
+		"dispute_id": dispute.ID,
+	})
 }
 func (h *BuyerHandler) ListOrders(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -539,6 +573,7 @@ type PaymentPageResponse struct {
 	ItemName             string   `json:"item_name"`
 	ItemDescription      *string  `json:"item_description,omitempty"`
 	ItemPrice            float64  `json:"item_price"`
+	ProcessingTimeHours  *int     `json:"processing_time_hours,omitempty"`
 	DeliveryType         string   `json:"delivery_type"`
 	EstimatedDeliveryFee *float64 `json:"estimated_delivery_fee,omitempty"`
 	BuyerServiceFee      *float64 `json:"buyer_service_fee,omitempty"`
@@ -554,6 +589,7 @@ func paymentPageToResponse(pr *domain.PaymentRequest, seller *domain.User) Payme
 		ItemName:             pr.ItemName,
 		ItemDescription:      pr.ItemDescription,
 		ItemPrice:            pr.ItemPrice,
+		ProcessingTimeHours:  pr.ProcessingTimeHours,
 		DeliveryType:         string(pr.DeliveryType),
 		EstimatedDeliveryFee: pr.EstimatedDeliveryFee,
 		BuyerServiceFee:      pr.BuyerServiceFee,
@@ -573,14 +609,18 @@ type PurchaseResponse struct {
 	ItemPrice            float64    `json:"item_price"`
 	ProcessingTimeHours  *int       `json:"processing_time_hours,omitempty"`
 	DeliveryType         string     `json:"delivery_type"`
+	PickupAddress        *string    `json:"pickup_address,omitempty"`
+	DropoffAddress       *string    `json:"dropoff_address,omitempty"`
 	EstimatedDeliveryFee float64    `json:"estimated_delivery_fee"`
 	BuyerServiceFee      float64    `json:"buyer_service_fee"`
 	TotalAmount          float64    `json:"total_amount"`
 	PaymentMethod        string     `json:"payment_method"`
 	Status               string     `json:"status"`
+	PRStatus             string     `json:"pr_status"` // Payment request status for debugging
 	SellerID             uuid.UUID  `json:"seller_id"`
 	EscrowID             *uuid.UUID `json:"escrow_id,omitempty"`
 	DeliveryJobID        *uuid.UUID `json:"delivery_job_id,omitempty"`
+	ReturnJobID          *uuid.UUID `json:"return_job_id,omitempty"`
 	PaidAt               *string    `json:"paid_at,omitempty"`
 	CreatedAt            string     `json:"created_at"`
 
@@ -590,14 +630,27 @@ type PurchaseResponse struct {
 
 type PurchaseDeliveryInfo struct {
 	JobID         *uuid.UUID `json:"job_id,omitempty"`
+	ReturnJobID   *uuid.UUID `json:"return_job_id,omitempty"`
 	Status        string     `json:"status"`
-	DropoffCode   *string    `json:"dropoff_code,omitempty"`
+	Phase         string     `json:"phase"` // "delivery" or "return"
+	PickupCode    *string    `json:"pickup_code,omitempty"`  // For buyer in return phase
+	DropoffCode   *string    `json:"dropoff_code,omitempty"` // For buyer in delivery phase
 	RiderAssigned bool       `json:"rider_assigned"`
 	PickedUpAt    *string    `json:"picked_up_at,omitempty"`
 	DeliveredAt   *string    `json:"delivered_at,omitempty"`
+
+	// Return-specific fields
+	ReturnStatus      *string `json:"return_status,omitempty"`
+	ReturnRiderAssigned bool  `json:"return_rider_assigned,omitempty"`
+	ReturnPickedUpAt  *string `json:"return_picked_up_at,omitempty"`
+	ReturnDeliveredAt *string `json:"return_delivered_at,omitempty"`
 }
 
 func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job *domain.DeliveryJob) PurchaseResponse {
+	return orderToPurchaseResponseWithReturn(order, pr, job, nil)
+}
+
+func orderToPurchaseResponseWithReturn(order *domain.Order, pr *domain.PaymentRequest, job *domain.DeliveryJob, returnJob *domain.DeliveryJob) PurchaseResponse {
 	resp := PurchaseResponse{
 		ID:                   order.ID,
 		PaymentRequestID:     order.PaymentRequestID,
@@ -606,14 +659,18 @@ func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job
 		ItemPrice:            order.ItemAmount,
 		ProcessingTimeHours:  pr.ProcessingTimeHours,
 		DeliveryType:         string(pr.DeliveryType),
+		PickupAddress:        pr.PickupAddress,
+		DropoffAddress:       pr.DropoffAddress,
 		EstimatedDeliveryFee: order.DeliveryFeeEstimate,
 		BuyerServiceFee:      order.BuyerServiceFee,
 		TotalAmount:          order.TotalAmount,
 		PaymentMethod:        string(order.PaymentMethod),
 		Status:               string(order.Status),
+		PRStatus:             string(pr.Status),
 		SellerID:             pr.SellerID,
 		EscrowID:             order.EscrowID,
 		DeliveryJobID:        pr.DeliveryJobID,
+		ReturnJobID:          pr.ReturnDeliveryJobID,
 		CreatedAt:            order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
@@ -621,12 +678,19 @@ func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job
 		paidAt := order.PaidAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.PaidAt = &paidAt
 	}
+
+	// Determine if we're in return phase
+	isReturnPhase := pr.Status.IsReturnFlow()
+
 	if job != nil {
 		deliveryInfo := &PurchaseDeliveryInfo{
 			JobID:         &job.ID,
 			Status:        string(job.Status),
 			RiderAssigned: job.RiderID != nil,
+			Phase:         "delivery",
 		}
+
+		// In normal delivery phase, buyer sees dropoff code
 		if job.RiderID != nil && job.DropoffCode != nil {
 			deliveryInfo.DropoffCode = job.DropoffCode
 		}
@@ -638,6 +702,32 @@ func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job
 		if job.DeliveredAt != nil {
 			t := job.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
 			deliveryInfo.DeliveredAt = &t
+		}
+
+		// If in return phase, include return job info
+		if isReturnPhase && returnJob != nil {
+			deliveryInfo.Phase = "return"
+			deliveryInfo.ReturnJobID = &returnJob.ID
+			returnStatus := string(returnJob.Status)
+			deliveryInfo.ReturnStatus = &returnStatus
+			deliveryInfo.ReturnRiderAssigned = returnJob.RiderID != nil
+
+			// In return phase, BUYER is at pickup location, so buyer sees PICKUP code
+			if returnJob.RiderID != nil && returnJob.PickupCode != nil {
+				deliveryInfo.PickupCode = returnJob.PickupCode
+			}
+
+			if returnJob.PickedUpAt != nil {
+				t := returnJob.PickedUpAt.Format("2006-01-02T15:04:05Z07:00")
+				deliveryInfo.ReturnPickedUpAt = &t
+			}
+			if returnJob.DeliveredAt != nil {
+				t := returnJob.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
+				deliveryInfo.ReturnDeliveredAt = &t
+			}
+		} else if isReturnPhase && returnJob == nil {
+			// Return is required but job not yet created
+			deliveryInfo.Phase = "return"
 		}
 
 		resp.Delivery = deliveryInfo
@@ -759,11 +849,15 @@ func (h *BuyerHandler) GetReturnStatus(c *gin.Context) {
 		return
 	}
 
+	// CanConfirmReady: buyer can confirm when status is return_required (job created but not searching)
+	canConfirmReady := pr.Status == domain.PRStatusReturnRequired
+
 	response := BuyerReturnStatusResponse{
 		PaymentRequestID: pr.ID,
 		Status:           string(pr.Status),
 		DisputeOutcome:   pr.DisputeOutcome,
 		CanInitiate:      pr.Status == domain.PRStatusReturnRequired && pr.ReturnDeliveryJobID == nil,
+		CanConfirmReady:  canConfirmReady,
 	}
 
 	// If there's an active return job, include its details
@@ -856,12 +950,72 @@ func (h *BuyerHandler) InitiateReturn(c *gin.Context) {
 	})
 }
 
+// ReadyForReturn confirms buyer is ready and starts rider search for return pickup
+func (h *BuyerHandler) ReadyForReturn(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid purchase ID")
+		return
+	}
+
+	order, err := h.orderService.GetOrderByID(c.Request.Context(), id)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	if order.BuyerID != userID {
+		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this purchase")
+		return
+	}
+
+	pr, err := h.prService.GetByID(c.Request.Context(), order.PaymentRequestID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	// Verify purchase is in return_required status
+	if pr.Status != domain.PRStatusReturnRequired {
+		util.Error(c, http.StatusBadRequest, "INVALID_STATUS", "Purchase is not awaiting return confirmation")
+		return
+	}
+
+	// Confirm ready and start rider search
+	returnJob, err := h.disputeResolutionService.ConfirmReadyForReturn(c.Request.Context(), pr.ID, userID)
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "RETURN_FAILED", err.Error())
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message":         "Return search started. A rider will be assigned shortly.",
+		"return_job_id":   returnJob.ID,
+		"status":          string(returnJob.Status),
+		"pickup_address":  returnJob.PickupAddress,
+		"pickup_lat":      returnJob.PickupLat,
+		"pickup_lng":      returnJob.PickupLng,
+		"dropoff_address": returnJob.DropoffAddress,
+		"dropoff_lat":     returnJob.DropoffLat,
+		"dropoff_lng":     returnJob.DropoffLng,
+		"delivery_fee":    returnJob.DeliveryFee,
+		"pickup_code":     returnJob.PickupCode, // Note: Generated when rider accepts
+	})
+}
+
 // Return flow DTOs for buyer
 type BuyerReturnStatusResponse struct {
-	PaymentRequestID uuid.UUID          `json:"payment_request_id"`
-	Status           string             `json:"status"`
-	DisputeOutcome   *string            `json:"dispute_outcome,omitempty"`
-	CanInitiate      bool               `json:"can_initiate"`
+	PaymentRequestID uuid.UUID           `json:"payment_request_id"`
+	Status           string              `json:"status"`
+	DisputeOutcome   *string             `json:"dispute_outcome,omitempty"`
+	CanInitiate      bool                `json:"can_initiate"`
+	CanConfirmReady  bool                `json:"can_confirm_ready"`
 	ReturnJob        *BuyerReturnJobInfo `json:"return_job,omitempty"`
 }
 
@@ -913,6 +1067,7 @@ func (h *BuyerHandler) GetRebookStatus(c *gin.Context) {
 }
 
 // RebookDelivery handles buyer rebooking delivery after being unavailable
+// No request body needed - rider resumes delivery to same address
 func (h *BuyerHandler) RebookDelivery(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -923,12 +1078,6 @@ func (h *BuyerHandler) RebookDelivery(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid purchase ID")
-		return
-	}
-
-	var req service.RebookDeliveryRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		util.ValidationError(c, err)
 		return
 	}
 
@@ -943,19 +1092,17 @@ func (h *BuyerHandler) RebookDelivery(c *gin.Context) {
 		return
 	}
 
-	job, err := h.prService.RebookDelivery(c.Request.Context(), order.PaymentRequestID, userID, &req)
+	job, err := h.prService.RebookDelivery(c.Request.Context(), order.PaymentRequestID, userID, &service.RebookDeliveryRequest{})
 	if err != nil {
 		util.Error(c, http.StatusBadRequest, "REBOOK_FAILED", err.Error())
 		return
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
-		"message":    "Delivery rebooked successfully. Searching for rider.",
-		"job_id":     job.ID,
-		"status":     string(job.Status),
-		"pickup_address":  job.PickupAddress,
+		"message":         "Delivery rebooked successfully. Rider will continue to your location.",
+		"job_id":          job.ID,
+		"status":          string(job.Status),
 		"dropoff_address": job.DropoffAddress,
-		"delivery_fee":    job.DeliveryFee,
 	})
 }
 

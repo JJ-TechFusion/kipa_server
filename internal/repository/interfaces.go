@@ -109,6 +109,9 @@ type DeliveryJobRepository interface {
 	GetByStatus(ctx context.Context, status domain.DeliveryJobStatus, limit, offset int) ([]*domain.DeliveryJob, int, error)
 	GetReturnJobByOriginalID(ctx context.Context, originalJobID uuid.UUID) (*domain.DeliveryJob, error)
 	GetJobCoordinates(ctx context.Context, jobID uuid.UUID) (*JobCoordinates, error)
+
+	// Forced return updates (swaps pickup/dropoff, sets is_forced_return)
+	UpdateForcedReturn(ctx context.Context, job *domain.DeliveryJob) error
 }
 
 type JobCoordinates struct {
@@ -134,6 +137,32 @@ type EscrowRepository interface {
 	Update(ctx context.Context, escrow *domain.Escrow) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.EscrowStatus) error
 	GetPendingConfirmationWindow(ctx context.Context) ([]*domain.Escrow, error)
+	GetPendingForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*PendingEscrowDetails, error)
+}
+
+// PendingEscrowDetails contains escrow with related user and payment request info
+type PendingEscrowDetails struct {
+	// Escrow fields
+	EscrowID     uuid.UUID           `db:"escrow_id"`
+	EscrowStatus domain.EscrowStatus `db:"escrow_status"`
+	ItemAmount   float64             `db:"item_amount"`
+	TotalLocked  float64             `db:"total_locked"`
+	FundedAt     *time.Time          `db:"funded_at"`
+	CreatedAt    time.Time           `db:"created_at"`
+
+	// Payment request fields
+	PaymentRequestID    uuid.UUID `db:"payment_request_id"`
+	ItemName            string    `db:"item_name"`
+	ItemDescription     *string   `db:"item_description"`
+	ProcessingTimeHours *int      `db:"processing_time_hours"`
+
+	// User perspective: is the current user buyer or seller?
+	IsBuyer bool `db:"is_buyer"`
+
+	// Counter-party info (seller if user is buyer, buyer if user is seller)
+	CounterPartyID       uuid.UUID `db:"counter_party_id"`
+	CounterPartyName     string    `db:"counter_party_name"`
+	CounterPartyPhotoURL *string   `db:"counter_party_photo_url"`
 }
 type WalletRepository interface {
 	Create(ctx context.Context, wallet *domain.Wallet) error
@@ -143,6 +172,11 @@ type WalletRepository interface {
 	Update(ctx context.Context, wallet *domain.Wallet) error
 	Credit(ctx context.Context, walletID uuid.UUID, amount float64) error
 	Debit(ctx context.Context, walletID uuid.UUID, amount float64) error
+
+	// PIN management
+	SetPin(ctx context.Context, walletID uuid.UUID, pinHash string) error
+	UpdatePinAttempts(ctx context.Context, walletID uuid.UUID, attempts int, lockedUntil *time.Time) error
+	ResetPinAttempts(ctx context.Context, walletID uuid.UUID) error
 }
 type WalletTransactionRepository interface {
 	Create(ctx context.Context, tx *domain.WalletTransaction) error

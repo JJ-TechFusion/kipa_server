@@ -146,7 +146,12 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 			}
 		}
 
-		responses = append(responses, orderToSaleResponse(order, pr, escrowStatus))
+		var job *domain.DeliveryJob
+		if pr.DeliveryType == domain.DeliveryTypeIntraState && pr.DeliveryJobID != nil {
+			job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
+		}
+
+		responses = append(responses, orderToSaleResponse(order, pr, escrowStatus, job))
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
@@ -202,9 +207,24 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 
 	// Get delivery job for timeline (intra-state)
 	var job *domain.DeliveryJob
-	if pr.DeliveryType == domain.DeliveryTypeIntraState && pr.DeliveryJobID != nil {
-		job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
+	var returnJob *domain.DeliveryJob
+	var forcedReturnJob *domain.DeliveryJob
+	if pr.DeliveryType == domain.DeliveryTypeIntraState {
+		if pr.DeliveryJobID != nil {
+			job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
+		}
+		// Fetch return job if exists (dispute return)
+		if pr.ReturnDeliveryJobID != nil {
+			returnJob, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ReturnDeliveryJobID)
+		}
+		// Fetch forced return job if exists (buyer unavailable)
+		if pr.ForcedReturnJobID != nil {
+			forcedReturnJob, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ForcedReturnJobID)
+		}
 	}
+
+	// Determine if we're in return phase
+	isReturnPhase := pr.Status.IsReturnFlow()
 
 	var deliveryInfo *SaleDeliveryInfo
 	if job != nil {
@@ -212,7 +232,9 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 			JobID:         &job.ID,
 			Status:        string(job.Status),
 			RiderAssigned: job.RiderID != nil,
+			Phase:         "delivery",
 		}
+		// In normal delivery phase, seller sees pickup code
 		if job.RiderID != nil && job.PickupCode != nil {
 			deliveryInfo.PickupCode = job.PickupCode
 		}
@@ -224,11 +246,45 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 			t := job.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
 			deliveryInfo.DeliveredAt = &t
 		}
+
+		// If in return phase, include return job info
+		if isReturnPhase && returnJob != nil {
+			deliveryInfo.Phase = "return"
+			deliveryInfo.ReturnJobID = &returnJob.ID
+			returnStatus := string(returnJob.Status)
+			deliveryInfo.ReturnStatus = &returnStatus
+			deliveryInfo.ReturnRiderAssigned = returnJob.RiderID != nil
+
+			// In return phase, SELLER is at dropoff location, so seller sees DROPOFF code
+			if returnJob.RiderID != nil && returnJob.DropoffCode != nil {
+				deliveryInfo.DropoffCode = returnJob.DropoffCode
+			}
+
+			if returnJob.PickedUpAt != nil {
+				t := returnJob.PickedUpAt.Format("2006-01-02T15:04:05Z07:00")
+				deliveryInfo.ReturnPickedUpAt = &t
+			}
+			if returnJob.DeliveredAt != nil {
+				t := returnJob.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
+				deliveryInfo.ReturnDeliveredAt = &t
+			}
+
+			// Seller can confirm return when status is return_delivered
+			deliveryInfo.CanConfirmReturn = returnJob.Status == domain.DJStatusReturnDelivered
+		} else if isReturnPhase && returnJob == nil {
+			// Return is required but job not yet created
+			deliveryInfo.Phase = "return"
+		}
 	}
 
-	timeline := BuildTimeline(TimelineViewSeller, pr, order, job)
+	// Use forced return job for timeline if in rebook flow
+	timelineReturnJob := returnJob
+	if forcedReturnJob != nil && returnJob == nil {
+		timelineReturnJob = forcedReturnJob
+	}
+	timeline := BuildTimelineWithReturn(TimelineViewSeller, pr, order, job, timelineReturnJob)
 	response := SaleDetailResponse{
-		SaleResponse: orderToSaleResponse(order, pr, escrowStatus),
+		SaleResponse: orderToSaleResponse(order, pr, escrowStatus, job),
 		Escrow:       escrowDetails,
 		Delivery:     deliveryInfo,
 		Timeline:     &timeline,
@@ -291,19 +347,30 @@ func (h *SellerHandler) GetEarnings(c *gin.Context) {
 }
 
 type SaleResponse struct {
-	ID               uuid.UUID  `json:"id"`
-	PaymentRequestID uuid.UUID  `json:"payment_request_id"`
-	ItemName         string     `json:"item_name"`
-	ItemPrice        float64    `json:"item_price"`
-	TotalAmount      float64    `json:"total_amount"`
-	PaymentMethod    string     `json:"payment_method"`
-	PaymentStatus    string     `json:"payment_status"`
-	OrderStatus      string     `json:"order_status"`
-	EscrowStatus     string     `json:"escrow_status,omitempty"`
-	BuyerID          uuid.UUID  `json:"buyer_id"`
-	DeliveryJobID    *uuid.UUID `json:"delivery_job_id,omitempty"`
-	CreatedAt        string     `json:"created_at"`
-	PaidAt           *string    `json:"paid_at,omitempty"`
+	ID                   uuid.UUID  `json:"id"`
+	PaymentRequestID     uuid.UUID  `json:"payment_request_id"`
+	ItemName             string     `json:"item_name"`
+	ItemDescription      *string    `json:"item_description,omitempty"`
+	ItemPrice            float64    `json:"item_price"`
+	ProcessingTimeHours  *int       `json:"processing_time_hours,omitempty"`
+	DeliveryType         string     `json:"delivery_type"`
+	PickupAddress        *string    `json:"pickup_address,omitempty"`
+	DropoffAddress       *string    `json:"dropoff_address,omitempty"`
+	EstimatedDeliveryFee float64    `json:"estimated_delivery_fee"`
+	BuyerServiceFee      float64    `json:"buyer_service_fee"`
+	TotalAmount          float64    `json:"total_amount"`
+	PaymentMethod        string     `json:"payment_method"`
+	PaymentStatus        string     `json:"payment_status"`
+	OrderStatus          string     `json:"order_status"`
+	PRStatus             string     `json:"pr_status"`
+	EscrowStatus         string     `json:"escrow_status,omitempty"`
+	BuyerID              uuid.UUID  `json:"buyer_id"`
+	DeliveryJobID        *uuid.UUID `json:"delivery_job_id,omitempty"`
+	ReturnJobID          *uuid.UUID `json:"return_job_id,omitempty"`
+	CreatedAt            string     `json:"created_at"`
+	PaidAt               *string    `json:"paid_at,omitempty"`
+
+	Delivery *SaleDeliveryInfo `json:"delivery,omitempty"`
 }
 
 type EscrowDetails struct {
@@ -318,11 +385,21 @@ type EscrowDetails struct {
 
 type SaleDeliveryInfo struct {
 	JobID         *uuid.UUID `json:"job_id,omitempty"`
+	ReturnJobID   *uuid.UUID `json:"return_job_id,omitempty"`
 	Status        string     `json:"status"`
-	PickupCode    *string    `json:"pickup_code,omitempty"`
+	Phase         string     `json:"phase"` // "delivery" or "return"
+	PickupCode    *string    `json:"pickup_code,omitempty"`  // For seller in delivery phase
+	DropoffCode   *string    `json:"dropoff_code,omitempty"` // For seller in return phase
 	RiderAssigned bool       `json:"rider_assigned"`
 	PickedUpAt    *string    `json:"picked_up_at,omitempty"`
 	DeliveredAt   *string    `json:"delivered_at,omitempty"`
+
+	// Return-specific fields
+	ReturnStatus        *string `json:"return_status,omitempty"`
+	ReturnRiderAssigned bool    `json:"return_rider_assigned,omitempty"`
+	ReturnPickedUpAt    *string `json:"return_picked_up_at,omitempty"`
+	ReturnDeliveredAt   *string `json:"return_delivered_at,omitempty"`
+	CanConfirmReturn    bool    `json:"can_confirm_return,omitempty"`
 }
 
 type SaleDetailResponse struct {
@@ -332,25 +409,60 @@ type SaleDetailResponse struct {
 	Timeline *TimelineResponse `json:"timeline,omitempty"`
 }
 
-func orderToSaleResponse(order *domain.Order, pr *domain.PaymentRequest, escrowStatus string) SaleResponse {
+func orderToSaleResponse(order *domain.Order, pr *domain.PaymentRequest, escrowStatus string, job *domain.DeliveryJob) SaleResponse {
 	resp := SaleResponse{
-		ID:               order.ID,
-		PaymentRequestID: order.PaymentRequestID,
-		ItemName:         pr.ItemName,
-		ItemPrice:        order.ItemAmount,
-		TotalAmount:      order.TotalAmount,
-		PaymentMethod:    string(order.PaymentMethod),
-		PaymentStatus:    string(order.PaymentStatus),
-		OrderStatus:      string(order.Status),
-		EscrowStatus:     escrowStatus,
-		BuyerID:          order.BuyerID,
-		DeliveryJobID:    pr.DeliveryJobID,
-		CreatedAt:        order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:                   order.ID,
+		PaymentRequestID:     order.PaymentRequestID,
+		ItemName:             pr.ItemName,
+		ItemDescription:      pr.ItemDescription,
+		ItemPrice:            order.ItemAmount,
+		ProcessingTimeHours:  pr.ProcessingTimeHours,
+		DeliveryType:         string(pr.DeliveryType),
+		PickupAddress:        pr.PickupAddress,
+		DropoffAddress:       pr.DropoffAddress,
+		EstimatedDeliveryFee: order.DeliveryFeeEstimate,
+		BuyerServiceFee:      order.BuyerServiceFee,
+		TotalAmount:          order.TotalAmount,
+		PaymentMethod:        string(order.PaymentMethod),
+		PaymentStatus:        string(order.PaymentStatus),
+		OrderStatus:          string(order.Status),
+		PRStatus:             string(pr.Status),
+		EscrowStatus:         escrowStatus,
+		BuyerID:              order.BuyerID,
+		DeliveryJobID:        pr.DeliveryJobID,
+		ReturnJobID:          pr.ReturnDeliveryJobID,
+		CreatedAt:            order.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
 	if order.PaidAt != nil {
 		paidAt := order.PaidAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.PaidAt = &paidAt
+	}
+
+	// Add delivery info if job exists
+	if job != nil {
+		deliveryInfo := &SaleDeliveryInfo{
+			JobID:         &job.ID,
+			Status:        string(job.Status),
+			RiderAssigned: job.RiderID != nil,
+			Phase:         "delivery",
+		}
+
+		// In delivery phase, seller sees pickup code
+		if job.RiderID != nil && job.PickupCode != nil {
+			deliveryInfo.PickupCode = job.PickupCode
+		}
+
+		if job.PickedUpAt != nil {
+			t := job.PickedUpAt.Format("2006-01-02T15:04:05Z07:00")
+			deliveryInfo.PickedUpAt = &t
+		}
+		if job.DeliveredAt != nil {
+			t := job.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
+			deliveryInfo.DeliveredAt = &t
+		}
+
+		resp.Delivery = deliveryInfo
 	}
 
 	return resp

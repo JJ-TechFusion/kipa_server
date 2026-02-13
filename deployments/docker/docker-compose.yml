@@ -74,6 +74,7 @@ services:
       DATABASE_SSLMODE: disable
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      FIREBASE_CREDENTIALS_PATH: /app/firebase-service-account.json
       
       # All other variables loaded from .env file via env_file directive
     depends_on:

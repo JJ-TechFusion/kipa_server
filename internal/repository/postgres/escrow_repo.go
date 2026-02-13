@@ -168,3 +168,45 @@ func (r *EscrowRepo) GetPendingConfirmationWindow(ctx context.Context) ([]*domai
 
 	return escrows, nil
 }
+
+func (r *EscrowRepo) GetPendingForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.PendingEscrowDetails, error) {
+	var results []*repository.PendingEscrowDetails
+
+	query := `
+		SELECT
+			e.id as escrow_id,
+			e.status as escrow_status,
+			e.item_amount,
+			e.total_locked,
+			e.funded_at,
+			e.created_at,
+			pr.id as payment_request_id,
+			pr.item_name,
+			pr.item_description,
+			pr.processing_time_hours,
+			CASE WHEN e.buyer_id = $1 THEN true ELSE false END as is_buyer,
+			CASE WHEN e.buyer_id = $1 THEN e.seller_id ELSE e.buyer_id END as counter_party_id,
+			CASE WHEN e.buyer_id = $1
+				THEN COALESCE(CONCAT(seller.first_name, ' ', seller.last_name), 'Unknown')
+				ELSE COALESCE(CONCAT(buyer.first_name, ' ', buyer.last_name), 'Unknown')
+			END as counter_party_name,
+			CASE WHEN e.buyer_id = $1
+				THEN seller.profile_photo_url
+				ELSE buyer.profile_photo_url
+			END as counter_party_photo_url
+		FROM escrows e
+		JOIN payment_requests pr ON e.payment_request_id = pr.id
+		JOIN users buyer ON e.buyer_id = buyer.id
+		JOIN users seller ON e.seller_id = seller.id
+		WHERE (e.buyer_id = $1 OR e.seller_id = $1)
+			AND e.status IN ('funded', 'delivery_in_progress', 'delivered', 'confirmation_window', 'disputed')
+		ORDER BY e.created_at DESC
+		LIMIT $2 OFFSET $3`
+
+	err := r.db.SelectContext(ctx, &results, query, userID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}

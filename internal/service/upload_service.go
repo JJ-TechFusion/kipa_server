@@ -15,6 +15,7 @@ type UploadService interface {
 	UploadProfilePicture(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error)
 	UploadItemImage(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error)
 	UploadRiderDocument(ctx context.Context, userID uuid.UUID, docType string, file *multipart.FileHeader) (string, error)
+	UploadDisputeEvidence(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error)
 }
 
 type UploadServiceImpl struct {
@@ -52,6 +53,10 @@ func (s *UploadServiceImpl) UploadRiderDocument(ctx context.Context, userID uuid
 	return s.uploadFile(ctx, file, folder)
 }
 
+func (s *UploadServiceImpl) UploadDisputeEvidence(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error) {
+	return s.uploadFile(ctx, file, "disputes")
+}
+
 func (s *UploadServiceImpl) uploadFile(ctx context.Context, file *multipart.FileHeader, folder string) (string, error) {
 	if !s.s3Client.IsConfigured() {
 		return "", fmt.Errorf("file upload not configured")
@@ -64,6 +69,11 @@ func (s *UploadServiceImpl) uploadFile(ctx context.Context, file *multipart.File
 	defer src.Close()
 
 	contentType := file.Header.Get("Content-Type")
+	s.logger.Info("upload attempt",
+		zap.String("content_type", contentType),
+		zap.String("filename", file.Filename),
+		zap.Int64("size", file.Size),
+	)
 	if !storage.IsAllowedMimeType(contentType) {
 		return "", fmt.Errorf("file type not allowed: %s", contentType)
 	}

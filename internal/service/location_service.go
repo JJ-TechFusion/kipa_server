@@ -129,12 +129,24 @@ func (s *LocationServiceImpl) RecordLocation(ctx context.Context, riderID uuid.U
 		s.etaMu.Unlock()
 
 		if shouldCalc {
-			coords, err := s.deliveryJobRepo.GetDropoffCoordinates(ctx, jobUUID)
-			if err == nil && coords != nil {
-				eta, err := s.mapsClient.GetETA(ctx, lat, lng, coords.Lat, coords.Lng)
-				if err == nil {
-					etaMinutes = &eta.DurationMinutes
-					distanceRemaining = &eta.DistanceKM
+			// Get job to determine which destination to use for ETA
+			job, err := s.deliveryJobRepo.GetByID(ctx, jobUUID)
+			if err == nil && job != nil {
+				coords, err := s.deliveryJobRepo.GetJobCoordinates(ctx, jobUUID)
+				if err == nil && coords != nil {
+					var destLat, destLng float64
+					// Before pickup: ETA to pickup location
+					// After pickup: ETA to dropoff location
+					if job.Status == domain.DJStatusAccepted || job.Status == domain.DJStatusEnRoutePickup {
+						destLat, destLng = coords.PickupLat, coords.PickupLng
+					} else {
+						destLat, destLng = coords.DropoffLat, coords.DropoffLng
+					}
+					eta, err := s.mapsClient.GetETA(ctx, lat, lng, destLat, destLng)
+					if err == nil {
+						etaMinutes = &eta.DurationMinutes
+						distanceRemaining = &eta.DistanceKM
+					}
 				}
 			}
 		}

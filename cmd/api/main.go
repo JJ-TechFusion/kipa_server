@@ -363,10 +363,10 @@ func main() {
 	// New handlers for platform features
 	prHandler := handler.NewPaymentRequestHandler(prService)
 	transactionHandler := handler.NewTransactionHandler(prService, orderService, userRepo, deliveryJobRepo)
-	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeResolutionService, driverService)
+	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeRepo, disputeResolutionService, driverService)
 	riderHandler := handler.NewRiderHandler(riderService)
 	commissionHandler := handler.NewRiderCommissionHandler(commissionService)
-	walletHandler := handler.NewWalletHandler(walletService)
+	walletHandler := handler.NewWalletHandler(walletService, escrowService)
 	walletFundingHandler := handler.NewWalletFundingHandler(
 		walletFundingService,
 		walletService,
@@ -379,7 +379,7 @@ func main() {
 	sellerHandler := handler.NewSellerHandler(orderService, prService, escrowService, deliveryJobRepo, disputeResolutionService, driverService)
 	errandHandler := handler.NewErrandHandler(errandService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
-	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo)
+	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo, prService)
 	notificationHandler := handler.NewNotificationHandler(notificationService, logger)
 	chatHandler := handler.NewChatHandler(chatService, logger)
 	logisticsHandler := handler.NewLogisticsHandler(logisticsService)

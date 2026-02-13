@@ -56,12 +56,13 @@ type PaymentRequestService interface {
 	// Rebook delivery after buyer unavailability
 	RebookDelivery(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error)
 	GetRebookStatus(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID) (*RebookStatusResponse, error)
+
+	// Admin rebook on buyer's behalf
+	AdminRebookDelivery(ctx context.Context, prID uuid.UUID, adminID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error)
 }
 
 type RebookDeliveryRequest struct {
-	DropoffAddress string   `json:"dropoff_address" binding:"required"`
-	DropoffLat     float64  `json:"dropoff_lat" binding:"required"`
-	DropoffLng     float64  `json:"dropoff_lng" binding:"required"`
+	// No fields required - rider resumes delivery to same address
 }
 
 type RebookStatusResponse struct {
@@ -661,7 +662,8 @@ func (s *PaymentRequestServiceImpl) recordEvent(ctx context.Context, prID uuid.U
 	}
 }
 
-// RebookDelivery handles buyer rebooking delivery after unavailability
+// RebookDelivery handles buyer/admin rebooking delivery after unavailability
+// This resumes the SAME delivery job (rider still has item) rather than creating a new one
 func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error) {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -685,90 +687,54 @@ func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uui
 		return nil, fmt.Errorf("maximum rebook attempts reached")
 	}
 
-	// Get seller's pickup address from original request
-	if pr.PickupAddress == nil {
-		return nil, fmt.Errorf("no pickup address found")
+	// Get current delivery job (rider still has item)
+	if pr.DeliveryJobID == nil {
+		return nil, fmt.Errorf("no active delivery job found")
 	}
 
-	// Get coordinates for seller's location from forced return job
-	var pickupLat, pickupLng float64
-	if pr.ForcedReturnJobID != nil {
-		coords, err := s.deliveryJobRepo.GetJobCoordinates(ctx, *pr.ForcedReturnJobID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get coordinates: %w", err)
-		}
-		// Seller's location is the dropoff of forced return
-		pickupLat = coords.DropoffLat
-		pickupLng = coords.DropoffLng
+	job, err := s.deliveryJobRepo.GetByID(ctx, *pr.DeliveryJobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get delivery job: %w", err)
 	}
 
-	vehicleType := domain.VehicleTypeMotorcycle
-	if pr.VehicleType != nil {
-		vehicleType = *pr.VehicleType
+	// Verify job is in buyer_unavailable status
+	if job.Status != domain.DJStatusBuyerUnavailable {
+		return nil, fmt.Errorf("delivery job is not in buyer_unavailable status, current: %s", job.Status)
 	}
 
-	// Create new delivery job
-	newJob := &domain.DeliveryJob{
-		PaymentRequestID:    prID,
-		PickupAddress:       *pr.PickupAddress,
-		PickupLat:           pickupLat,
-		PickupLng:           pickupLng,
-		DropoffAddress:      req.DropoffAddress,
-		DropoffLat:          req.DropoffLat,
-		DropoffLng:          req.DropoffLng,
-		RequiredVehicleType: vehicleType,
-		Status:              domain.DJStatusSearching,
-		SearchRadiusKM:      5,
-	}
+	// Resume delivery - set back to in_transit (same address, rider continues)
+	job.Status = domain.DJStatusInTransit
 
-	// Calculate delivery fee
-	if s.feeCalculator != nil {
-		estimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(ctx, pickupLat, pickupLng, req.DropoffLat, req.DropoffLng, vehicleType)
-		if err == nil {
-			newJob.DeliveryFee = estimate.TotalFee
-			newJob.DistanceKM = &estimate.DistanceKM
-		} else {
-			newJob.DeliveryFee = 2500.0 // Default
-		}
-	}
-
-	now := time.Now()
-	newJob.SearchStartedAt = &now
-	timeout := now.Add(30 * time.Minute)
-	newJob.SearchTimeoutAt = &timeout
-
-	if err := s.deliveryJobRepo.Create(ctx, newJob); err != nil {
-		return nil, fmt.Errorf("failed to create delivery job: %w", err)
+	if err := s.deliveryJobRepo.UpdateStatus(ctx, job.ID, domain.DJStatusInTransit); err != nil {
+		return nil, fmt.Errorf("failed to update delivery job: %w", err)
 	}
 
 	if s.broadcaster != nil {
-		s.broadcaster.BroadcastJobStatus(newJob.ID.String(), string(domain.DJStatusSearching))
+		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusInTransit))
 	}
 
 	// Update payment request
 	oldStatus := pr.Status
-	pr.DeliveryJobID = &newJob.ID
-	pr.Status = domain.PRStatusSearchingRider
+	pr.Status = domain.PRStatusInDelivery
 	pr.RebookAttempts++
-	pr.DropoffAddress = &req.DropoffAddress
+	pr.RebookDeadline = nil // Clear deadline
 
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return nil, fmt.Errorf("failed to update payment request: %w", err)
 	}
 
-	s.recordEvent(ctx, prID, &oldStatus, domain.PRStatusSearchingRider, "delivery_rebooked", map[string]interface{}{
-		"new_job_id":      newJob.ID.String(),
-		"rebook_attempt":  pr.RebookAttempts,
-		"dropoff_address": req.DropoffAddress,
+	s.recordEvent(ctx, prID, &oldStatus, domain.PRStatusInDelivery, "delivery_rebooked", map[string]interface{}{
+		"job_id":         job.ID.String(),
+		"rebook_attempt": pr.RebookAttempts,
 	})
 
-	s.logger.Info("delivery rebooked",
+	s.logger.Info("delivery rebooked - resuming same job",
 		zap.String("pr_id", prID.String()),
-		zap.String("new_job_id", newJob.ID.String()),
+		zap.String("job_id", job.ID.String()),
 		zap.Int("rebook_attempt", pr.RebookAttempts),
 	)
 
-	return newJob, nil
+	return job, nil
 }
 
 // GetRebookStatus returns the rebook status for a payment request
@@ -800,6 +766,76 @@ func (s *PaymentRequestServiceImpl) GetRebookStatus(ctx context.Context, prID uu
 	}
 
 	return resp, nil
+}
+
+// AdminRebookDelivery handles admin rebooking delivery on buyer's behalf
+// This resumes the SAME delivery job (rider still has item) rather than creating a new one
+func (s *PaymentRequestServiceImpl) AdminRebookDelivery(ctx context.Context, prID uuid.UUID, adminID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error) {
+	pr, err := s.prRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+
+	if pr.Status != domain.PRStatusPendingRebook {
+		return nil, fmt.Errorf("payment request is not in pending_rebook status")
+	}
+
+	// Admin can rebook even after deadline passed (within reason)
+	// Check max rebook attempts (limit to 1 rebook)
+	if pr.RebookAttempts >= 1 {
+		return nil, fmt.Errorf("maximum rebook attempts reached")
+	}
+
+	// Get current delivery job (rider still has item)
+	if pr.DeliveryJobID == nil {
+		return nil, fmt.Errorf("no active delivery job found")
+	}
+
+	job, err := s.deliveryJobRepo.GetByID(ctx, *pr.DeliveryJobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get delivery job: %w", err)
+	}
+
+	// Verify job is in buyer_unavailable status
+	if job.Status != domain.DJStatusBuyerUnavailable {
+		return nil, fmt.Errorf("delivery job is not in buyer_unavailable status, current: %s", job.Status)
+	}
+
+	// Resume delivery - set back to in_transit (same address, rider continues)
+	if err := s.deliveryJobRepo.UpdateStatus(ctx, job.ID, domain.DJStatusInTransit); err != nil {
+		return nil, fmt.Errorf("failed to update delivery job: %w", err)
+	}
+
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusInTransit))
+	}
+
+	// Update payment request
+	oldStatus := pr.Status
+	pr.Status = domain.PRStatusInDelivery
+	pr.RebookAttempts++
+	pr.RebookDeadline = nil // Clear deadline
+
+	if err := s.prRepo.Update(ctx, pr); err != nil {
+		return nil, fmt.Errorf("failed to update payment request: %w", err)
+	}
+
+	s.recordEvent(ctx, prID, &oldStatus, domain.PRStatusInDelivery, "delivery_rebooked_by_admin", map[string]interface{}{
+		"job_id":         job.ID.String(),
+		"admin_id":       adminID.String(),
+		"rebook_attempt": pr.RebookAttempts,
+	})
+
+	s.logger.Info("delivery rebooked by admin - resuming same job",
+		zap.String("pr_id", prID.String()),
+		zap.String("job_id", job.ID.String()),
+		zap.String("admin_id", adminID.String()),
+		zap.Int("rebook_attempt", pr.RebookAttempts),
+	)
+
+	// Refresh job to return updated status
+	job.Status = domain.DJStatusInTransit
+	return job, nil
 }
 
 var _ PaymentRequestService = (*PaymentRequestServiceImpl)(nil)

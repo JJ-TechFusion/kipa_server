@@ -17,17 +17,27 @@ import (
 )
 
 var allowedMimeTypes = map[string]bool{
-	"image/jpeg": true,
-	"image/png":  true,
-	"image/webp": true,
-	"image/gif":  true,
+	"image/jpeg":          true,
+	"image/jpg":           true,
+	"image/png":           true,
+	"image/webp":          true,
+	"image/gif":           true,
+	"image/heic":          true,
+	"image/heif":          true,
+	"image/heic-sequence": true,
+	"image/heif-sequence": true,
 }
 
 var mimeToExt = map[string]string{
-	"image/jpeg": "jpg",
-	"image/png":  "png",
-	"image/webp": "webp",
-	"image/gif":  "gif",
+	"image/jpeg":          "jpg",
+	"image/jpg":           "jpg",
+	"image/png":           "png",
+	"image/webp":          "webp",
+	"image/gif":           "gif",
+	"image/heic":          "heic",
+	"image/heif":          "heif",
+	"image/heic-sequence": "heic",
+	"image/heif-sequence": "heif",
 }
 
 type S3Client struct {

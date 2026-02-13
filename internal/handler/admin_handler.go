@@ -17,17 +17,20 @@ type AdminHandler struct {
 	adminService             service.AdminService
 	disputeResolutionService service.DisputeResolutionService
 	deliveryJobRepo          repository.DeliveryJobRepository
+	paymentRequestService    service.PaymentRequestService
 }
 
 func NewAdminHandler(
 	adminService service.AdminService,
 	disputeResolutionService service.DisputeResolutionService,
 	deliveryJobRepo repository.DeliveryJobRepository,
+	paymentRequestService service.PaymentRequestService,
 ) *AdminHandler {
 	return &AdminHandler{
 		adminService:             adminService,
 		disputeResolutionService: disputeResolutionService,
 		deliveryJobRepo:          deliveryJobRepo,
+		paymentRequestService:    paymentRequestService,
 	}
 }
 
@@ -92,6 +95,7 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			paymentRequests.GET("", h.ListPaymentRequests)
 			paymentRequests.POST("/:id/cancel", h.CancelPaymentRequest)
 			paymentRequests.GET("/expired", h.GetExpiredPaymentRequests)
+			paymentRequests.POST("/:id/rebook", h.AdminRebookDelivery) // Rebook on buyer's behalf
 		}
 
 		// System Health
@@ -621,6 +625,30 @@ func (h *AdminHandler) GetExpiredPaymentRequests(c *gin.Context) {
 	})
 }
 
+// AdminRebookDelivery allows admin to rebook delivery on buyer's behalf after buyer unavailability
+// No request body needed - rider resumes delivery to same address
+func (h *AdminHandler) AdminRebookDelivery(c *gin.Context) {
+	prID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payment request ID"})
+		return
+	}
+
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	job, err := h.paymentRequestService.AdminRebookDelivery(c.Request.Context(), prID, adminID, &service.RebookDeliveryRequest{})
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "delivery rebooked successfully",
+		"job_id":  job.ID.String(),
+		"status":  string(job.Status),
+	})
+}
+
 // System Health Handlers
 
 func (h *AdminHandler) CheckDatabaseHealth(c *gin.Context) {
@@ -746,9 +774,15 @@ func (h *AdminHandler) ResolveDispute(c *gin.Context) {
 	}
 
 	adminID := c.MustGet("user_id").(uuid.UUID)
-	outcome := domain.DisputeOutcome(req.Outcome)
 
-	if err := h.adminService.ResolveDispute(c.Request.Context(), disputeID, outcome, req.Notes, adminID); err != nil {
+	// Use disputeResolutionService which handles all the business logic
+	// (updating PR status, creating return jobs, escrow updates, etc.)
+	serviceReq := &service.ResolveDisputeRequest{
+		Outcome:         req.Outcome,
+		ResolutionNotes: req.Notes,
+	}
+
+	if err := h.disputeResolutionService.ResolveDispute(c.Request.Context(), disputeID, adminID, serviceReq); err != nil {
 		h.handleError(c, err)
 		return
 	}

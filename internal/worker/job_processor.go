@@ -6,8 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"kipa/internal/domain"
 	"kipa/internal/repository"
 	"kipa/internal/service"
 )
@@ -76,18 +78,19 @@ type JobStatusBroadcaster interface {
 }
 
 type JobProcessor struct {
-	escrowService      EscrowServiceInterface
-	logisticsService   LogisticsServiceInterface
-	driverService      DriverServiceInterface
-	deliveryJobRepo    repository.DeliveryJobRepository
-	paymentRequestRepo repository.PaymentRequestRepository
-	riderOfferRepo     repository.RiderJobOfferRepository
-	broadcaster        JobStatusBroadcaster
-	lock               DistributedLock
-	config             *WorkerConfig
-	logger             *zap.Logger
-	stopCh             chan struct{}
-	wg                 sync.WaitGroup
+	escrowService       EscrowServiceInterface
+	logisticsService    LogisticsServiceInterface
+	driverService       DriverServiceInterface
+	notificationService NotificationServiceInterface
+	deliveryJobRepo     repository.DeliveryJobRepository
+	paymentRequestRepo  repository.PaymentRequestRepository
+	riderOfferRepo      repository.RiderJobOfferRepository
+	broadcaster         JobStatusBroadcaster
+	lock                DistributedLock
+	config              *WorkerConfig
+	logger              *zap.Logger
+	stopCh              chan struct{}
+	wg                  sync.WaitGroup
 
 	// Nearby riders broadcasting
 	nearbyRidersFinder      NearbyRidersFinder
@@ -95,6 +98,10 @@ type JobProcessor struct {
 }
 type EscrowServiceInterface interface {
 	ProcessPendingConfirmationWindows(ctx context.Context) error
+}
+
+type NotificationServiceInterface interface {
+	SendToUser(ctx context.Context, userID uuid.UUID, title, body string, data map[string]string, notificationType domain.NotificationType) error
 }
 func NewJobProcessor(
 	escrowService EscrowServiceInterface,
@@ -244,6 +251,11 @@ func (p *JobProcessor) SetLogisticsService(svc LogisticsServiceInterface) {
 func (p *JobProcessor) SetDriverService(svc DriverServiceInterface) {
 	p.driverService = svc
 }
+
+func (p *JobProcessor) SetNotificationService(svc NotificationServiceInterface) {
+	p.notificationService = svc
+}
+
 func (p *JobProcessor) SetDistributedLock(lock DistributedLock) {
 	p.lock = lock
 }

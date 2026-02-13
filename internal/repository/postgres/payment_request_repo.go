@@ -241,6 +241,9 @@ func (r *PaymentRequestRepo) Update(ctx context.Context, pr *domain.PaymentReque
 			buyer_id = $38,
 			escrow_id = $39,
 			logistics_delivery_id = $40,
+			delivery_job_id = $41,
+			return_delivery_job_id = $42,
+			dispute_outcome = $43,
 			updated_at = NOW()
 		WHERE id = $1`
 
@@ -283,6 +286,9 @@ func (r *PaymentRequestRepo) Update(ctx context.Context, pr *domain.PaymentReque
 		pr.BuyerID,
 		pr.EscrowID,
 		pr.LogisticsDeliveryID,
+		pr.DeliveryJobID,
+		pr.ReturnDeliveryJobID,
+		pr.DisputeOutcome,
 	)
 
 	return err

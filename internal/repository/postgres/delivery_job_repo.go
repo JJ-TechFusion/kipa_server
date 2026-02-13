@@ -34,12 +34,14 @@ func (r *DeliveryJobRepo) Create(ctx context.Context, job *domain.DeliveryJob) e
 			pickup_address, pickup_location, dropoff_address, dropoff_location,
 			distance_km, delivery_fee, rider_payout, platform_delivery_fee,
 			required_vehicle_type, status, search_radius_km, search_started_at, search_timeout_at,
-			pickup_code, dropoff_code, is_forced_return, rider_id
+			pickup_code, dropoff_code, is_forced_return, rider_id,
+			is_return, original_job_id, dispute_id
 		) VALUES (
 			$1, $2, $3, $4,
 			$5, ST_SetSRID(ST_MakePoint($6, $7), 4326)::geography,
 			$8, ST_SetSRID(ST_MakePoint($9, $10), 4326)::geography,
-			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+			$24, $25, $26
 		)
 		RETURNING created_at, updated_at`
 
@@ -69,12 +71,21 @@ func (r *DeliveryJobRepo) Create(ctx context.Context, job *domain.DeliveryJob) e
 		job.DropoffCode,
 		job.IsForcedReturn,
 		job.RiderID,
+		job.IsReturn,
+		job.OriginalJobID,
+		job.DisputeID,
 	).Scan(&job.CreatedAt, &job.UpdatedAt)
 }
 
 func (r *DeliveryJobRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.DeliveryJob, error) {
 	var job domain.DeliveryJob
-	query := `SELECT * FROM delivery_jobs WHERE id = $1`
+	query := `
+		SELECT *,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM delivery_jobs WHERE id = $1`
 
 	err := r.db.GetContext(ctx, &job, query, id)
 	if err != nil {
@@ -89,7 +100,13 @@ func (r *DeliveryJobRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.De
 
 func (r *DeliveryJobRepo) GetByPaymentRequestID(ctx context.Context, prID uuid.UUID) (*domain.DeliveryJob, error) {
 	var job domain.DeliveryJob
-	query := `SELECT * FROM delivery_jobs WHERE payment_request_id = $1`
+	query := `
+		SELECT *,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM delivery_jobs WHERE payment_request_id = $1`
 
 	err := r.db.GetContext(ctx, &job, query, prID)
 	if err != nil {
@@ -130,7 +147,12 @@ func (r *DeliveryJobRepo) GetByRiderID(ctx context.Context, riderID uuid.UUID, s
 func (r *DeliveryJobRepo) GetActiveByRiderID(ctx context.Context, riderID uuid.UUID) (*domain.DeliveryJob, error) {
 	var job domain.DeliveryJob
 	query := `
-		SELECT * FROM delivery_jobs
+		SELECT *,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM delivery_jobs
 		WHERE rider_id = $1
 		AND status IN ('accepted', 'en_route_pickup', 'picked_up', 'in_transit')
 		ORDER BY created_at DESC
@@ -255,7 +277,9 @@ func (r *DeliveryJobRepo) Update(ctx context.Context, job *domain.DeliveryJob) e
 			status = $8,
 			accepted_at = $9,
 			picked_up_at = $10,
-			delivered_at = $11
+			delivered_at = $11,
+			dropoff_address = $12,
+			dropoff_location = ST_SetSRID(ST_MakePoint($13, $14), 4326)::geography
 		WHERE id = $1`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -270,6 +294,8 @@ func (r *DeliveryJobRepo) Update(ctx context.Context, job *domain.DeliveryJob) e
 		job.AcceptedAt,
 		job.PickedUpAt,
 		job.DeliveredAt,
+		job.DropoffAddress,
+		job.DropoffLng, job.DropoffLat,
 	)
 
 	return err
@@ -402,7 +428,15 @@ func (r *DeliveryJobRepo) GetByStatus(ctx context.Context, status domain.Deliver
 
 func (r *DeliveryJobRepo) GetReturnJobByOriginalID(ctx context.Context, originalJobID uuid.UUID) (*domain.DeliveryJob, error) {
 	var job domain.DeliveryJob
-	query := `SELECT * FROM delivery_jobs WHERE original_job_id = $1 AND is_return = true ORDER BY created_at DESC LIMIT 1`
+	query := `
+		SELECT *,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM delivery_jobs
+		WHERE original_job_id = $1 AND is_return = true
+		ORDER BY created_at DESC LIMIT 1`
 
 	err := r.db.GetContext(ctx, &job, query, originalJobID)
 	if err != nil {
@@ -413,6 +447,32 @@ func (r *DeliveryJobRepo) GetReturnJobByOriginalID(ctx context.Context, original
 	}
 
 	return &job, nil
+}
+
+func (r *DeliveryJobRepo) UpdateForcedReturn(ctx context.Context, job *domain.DeliveryJob) error {
+	query := `
+		UPDATE delivery_jobs SET
+			status = $2,
+			is_forced_return = $3,
+			dropoff_code = $4,
+			pickup_address = $5,
+			pickup_location = ST_SetSRID(ST_MakePoint($6, $7), 4326)::geography,
+			dropoff_address = $8,
+			dropoff_location = ST_SetSRID(ST_MakePoint($9, $10), 4326)::geography
+		WHERE id = $1`
+
+	_, err := r.db.ExecContext(ctx, query,
+		job.ID,
+		job.Status,
+		job.IsForcedReturn,
+		job.DropoffCode,
+		job.PickupAddress,
+		job.PickupLng, job.PickupLat,
+		job.DropoffAddress,
+		job.DropoffLng, job.DropoffLat,
+	)
+
+	return err
 }
 
 type RiderJobOfferRepo struct {

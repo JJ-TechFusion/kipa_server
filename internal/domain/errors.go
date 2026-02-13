@@ -140,6 +140,15 @@ var (
 	ErrOfferCannotBeCountered     = errors.New("offer cannot be countered in current state")
 	ErrOfferCannotBeWithdrawn     = errors.New("offer cannot be withdrawn in current state")
 	ErrCounterOfferExpired        = errors.New("counter offer has expired")
+
+	// Wallet PIN errors
+	ErrPinAlreadySet    = errors.New("wallet PIN already set")
+	ErrPinNotSet        = errors.New("wallet PIN not set")
+	ErrInvalidPin       = errors.New("invalid PIN")
+	ErrPinLocked        = errors.New("wallet locked due to too many failed attempts")
+	ErrPinTooShort      = errors.New("PIN must be at least 4 digits")
+	ErrPinTooLong       = errors.New("PIN must be at most 6 digits")
+	ErrPinMustBeNumeric = errors.New("PIN must contain only digits")
 )
 const (
 	CodeInvalidInput   = "INVALID_INPUT"

@@ -35,6 +35,8 @@ type EscrowService interface {
 	Refund(ctx context.Context, escrowID uuid.UUID, reason string) error
 
 	ProcessPendingConfirmationWindows(ctx context.Context) error
+
+	GetPendingForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.PendingEscrowDetails, error)
 }
 
 type CreateEscrowRequest struct {
@@ -316,4 +318,9 @@ func (s *EscrowServiceImpl) calculateAdjustment(estimated, actual float64) *floa
 	adjustment := actual - estimated
 	return &adjustment
 }
+
+func (s *EscrowServiceImpl) GetPendingForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*repository.PendingEscrowDetails, error) {
+	return s.escrowRepo.GetPendingForUser(ctx, userID, limit, offset)
+}
+
 var _ EscrowService = (*EscrowServiceImpl)(nil)

@@ -10,6 +10,7 @@ import (
 
 	"kipa/internal/config"
 	"kipa/internal/database"
+	"kipa/internal/integration/fcm"
 	"kipa/internal/repository/postgres"
 	redisrepo "kipa/internal/repository/redis"
 	"kipa/internal/service"
@@ -95,6 +96,28 @@ func main() {
 	)
 
 
+	// Initialize notification service repos
+	deviceTokenRepo := postgres.NewDeviceTokenRepo(db)
+	notificationLogRepo := postgres.NewNotificationLogRepo(db)
+
+	// Initialize FCM client for push notifications
+	var fcmClient *fcm.Client
+	if cfg.Firebase.CredentialsPath != "" {
+		var err error
+		fcmClient, err = fcm.NewClient(cfg.Firebase.CredentialsPath, log)
+		if err != nil {
+			log.Warn("failed to initialize FCM client, notifications will be disabled", zap.Error(err))
+		}
+	}
+
+	// Initialize notification service
+	notificationService := service.NewNotificationService(
+		fcmClient,
+		deviceTokenRepo,
+		notificationLogRepo,
+		log,
+	)
+
 	// Initialize distributed lock
 	distributedLock := redisrepo.NewDistributedLock(redisClient.Client)
 
@@ -133,6 +156,9 @@ func main() {
 
 	// Set driver service for auto-confirm job
 	processor.SetDriverService(driverService)
+
+	// Set notification service for rebook expiry notifications
+	processor.SetNotificationService(notificationService)
 
 	// Create context that can be cancelled
 	ctx, cancel := context.WithCancel(context.Background())

@@ -20,6 +20,7 @@ type DisputeResolutionService interface {
 
 	// Intra-state return flow
 	CreateReturnDeliveryJob(ctx context.Context, paymentRequestID uuid.UUID) (*domain.DeliveryJob, error)
+	ConfirmReadyForReturn(ctx context.Context, paymentRequestID uuid.UUID, buyerID uuid.UUID) (*domain.DeliveryJob, error)
 	ConfirmReturnReceived(ctx context.Context, returnJobID uuid.UUID, sellerID uuid.UUID, req *ConfirmReturnRequest) error
 	ResolveDamageClaim(ctx context.Context, returnJobID uuid.UUID, adminID uuid.UUID, req *ResolveDamageClaimRequest) error
 
@@ -123,10 +124,24 @@ func (s *DisputeResolutionServiceImpl) handleBuyerWins(ctx context.Context, disp
 	outcome := "buyer_favor"
 	pr.DisputeOutcome = &outcome
 
-	// For intra-state with rider delivery, require return
+	// For intra-state with rider delivery, require return and pre-create return job
 	if pr.IsIntraStateDelivery() && pr.DeliveryJobID != nil {
-		// Buyer must return the item via rider
-		pr.Status = domain.PRStatusReturnRequired
+		// Pre-create return delivery job in "created" state (not searching yet)
+		// Buyer must confirm they're ready before search starts
+		returnJob, err := s.createReturnJobInternal(ctx, pr, dispute)
+		if err != nil {
+			s.logger.Error("failed to create return job",
+				zap.Error(err),
+				zap.String("pr_id", pr.ID.String()),
+			)
+			// Still set status to return_required, job can be created later
+			pr.Status = domain.PRStatusReturnRequired
+		} else {
+			// Return job created, but status is still return_required (buyer must confirm ready)
+			pr.Status = domain.PRStatusReturnRequired
+			pr.ReturnDeliveryJobID = &returnJob.ID
+		}
+
 		if err := s.prRepo.Update(ctx, pr); err != nil {
 			return err
 		}
@@ -137,15 +152,16 @@ func (s *DisputeResolutionServiceImpl) handleBuyerWins(ctx context.Context, disp
 			return err
 		}
 
-		// Notify both parties
-		s.sendNotification(ctx, *pr.BuyerID, "Return Required",
-			"You won the dispute. Please wait for a rider to pick up the item for return. Your refund will be processed after the seller confirms receipt.")
-		s.sendNotification(ctx, pr.SellerID, "Dispute Resolved - Return Incoming",
-			"Buyer won the dispute and will be returning the item via rider. Please confirm receipt when you receive it.")
+		// Notify both parties - buyer must confirm when ready
+		s.sendNotification(ctx, *pr.BuyerID, "You Won the Dispute - Return Required",
+			"You won the dispute! When you're ready to return the item, tap 'Ready for Return Pickup' in the app. A rider will then be dispatched to collect it.")
+		s.sendNotification(ctx, pr.SellerID, "Dispute Resolved - Awaiting Return",
+			"Buyer won the dispute. They will return the item via rider. You'll be notified when the return is on the way.")
 
 		s.logger.Info("dispute resolved: buyer wins, return required (intra-state)",
 			zap.String("dispute_id", dispute.ID.String()),
 			zap.String("pr_id", pr.ID.String()),
+			zap.Bool("return_job_created", pr.ReturnDeliveryJobID != nil),
 		)
 		return nil
 	}
@@ -154,6 +170,87 @@ func (s *DisputeResolutionServiceImpl) handleBuyerWins(ctx context.Context, disp
 	// (This is handled by LogisticsDeliveryService for inter-state)
 	// For pickup type or no delivery job, direct refund
 	return s.processFullRefund(ctx, dispute, escrow, pr, adminID, req.ResolutionNotes)
+}
+
+// createReturnJobInternal creates a return job in "created" state (not searching yet)
+// Buyer must confirm they're ready before search starts
+func (s *DisputeResolutionServiceImpl) createReturnJobInternal(ctx context.Context, pr *domain.PaymentRequest, dispute *domain.Dispute) (*domain.DeliveryJob, error) {
+	if pr.DeliveryJobID == nil {
+		return nil, fmt.Errorf("no original delivery job found")
+	}
+
+	originalJob, err := s.deliveryJobRepo.GetByID(ctx, *pr.DeliveryJobID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get coordinates from original job
+	coords, err := s.deliveryJobRepo.GetJobCoordinates(ctx, *pr.DeliveryJobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get original job coordinates: %w", err)
+	}
+
+	var disputeID *uuid.UUID
+	if dispute != nil {
+		disputeID = &dispute.ID
+	}
+
+	// Calculate return delivery fee (same route, reversed)
+	// For return: pickup is buyer's location (was dropoff), dropoff is seller's location (was pickup)
+	var deliveryFee float64
+	if s.feeCalculator != nil {
+		feeEstimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(
+			ctx,
+			coords.DropoffLat, coords.DropoffLng, // Return pickup (buyer's location)
+			coords.PickupLat, coords.PickupLng,   // Return dropoff (seller's location)
+			originalJob.RequiredVehicleType,
+		)
+		if err != nil {
+			s.logger.Warn("failed to calculate return delivery fee, using original fee",
+				zap.Error(err),
+				zap.String("pr_id", pr.ID.String()),
+			)
+			// Fallback to original delivery fee
+			deliveryFee = originalJob.DeliveryFee
+		} else {
+			deliveryFee = feeEstimate.TotalFee
+		}
+	} else {
+		// No fee calculator, use original fee
+		deliveryFee = originalJob.DeliveryFee
+	}
+
+	// Create return job in "created" state - NOT searching yet
+	// Buyer must confirm ready before search starts
+	returnJob := &domain.DeliveryJob{
+		ID:                  uuid.New(),
+		PaymentRequestID:    pr.ID,
+		IsReturn:            true,
+		OriginalJobID:       pr.DeliveryJobID,
+		DisputeID:           disputeID,
+		PickupAddress:       originalJob.DropoffAddress, // Buyer's location (was dropoff)
+		PickupLat:           coords.DropoffLat,
+		PickupLng:           coords.DropoffLng,
+		DropoffAddress:      originalJob.PickupAddress, // Seller's location (was pickup)
+		DropoffLat:          coords.PickupLat,
+		DropoffLng:          coords.PickupLng,
+		RequiredVehicleType: originalJob.RequiredVehicleType,
+		DeliveryFee:         deliveryFee,
+		SearchRadiusKM:      5,
+		Status:              domain.DJStatusCreated, // Waiting for buyer to confirm ready
+	}
+
+	if err := s.deliveryJobRepo.Create(ctx, returnJob); err != nil {
+		return nil, err
+	}
+
+	s.logger.Info("created return delivery job (awaiting buyer ready)",
+		zap.String("job_id", returnJob.ID.String()),
+		zap.String("pr_id", pr.ID.String()),
+		zap.String("original_job_id", originalJob.ID.String()),
+	)
+
+	return returnJob, nil
 }
 
 func (s *DisputeResolutionServiceImpl) handleSellerWins(ctx context.Context, dispute *domain.Dispute, escrow *domain.Escrow, pr *domain.PaymentRequest, adminID uuid.UUID, req *ResolveDisputeRequest) error {
@@ -295,6 +392,80 @@ func (s *DisputeResolutionServiceImpl) processFullRefund(ctx context.Context, di
 	return nil
 }
 
+// ConfirmReadyForReturn is called when buyer confirms they're ready for return pickup
+// This starts the rider search
+func (s *DisputeResolutionServiceImpl) ConfirmReadyForReturn(ctx context.Context, paymentRequestID uuid.UUID, buyerID uuid.UUID) (*domain.DeliveryJob, error) {
+	pr, err := s.prRepo.GetByID(ctx, paymentRequestID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify buyer owns this
+	if pr.BuyerID == nil || *pr.BuyerID != buyerID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	// Must be in return_required status
+	if pr.Status != domain.PRStatusReturnRequired {
+		return nil, fmt.Errorf("cannot confirm ready: status is %s, expected return_required", pr.Status)
+	}
+
+	var returnJob *domain.DeliveryJob
+
+	// Check if return job already exists
+	if pr.ReturnDeliveryJobID != nil {
+		returnJob, err = s.deliveryJobRepo.GetByID(ctx, *pr.ReturnDeliveryJobID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get return job: %w", err)
+		}
+
+		// Job must be in created status
+		if returnJob.Status != domain.DJStatusCreated {
+			return nil, fmt.Errorf("return job already in progress: %s", returnJob.Status)
+		}
+	} else {
+		// Create return job if it doesn't exist
+		returnJob, err = s.createReturnJobInternal(ctx, pr, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create return job: %w", err)
+		}
+		pr.ReturnDeliveryJobID = &returnJob.ID
+	}
+
+	// Start the search
+	now := time.Now()
+	returnJob.Status = domain.DJStatusSearching
+	returnJob.SearchStartedAt = &now
+
+	if err := s.deliveryJobRepo.Update(ctx, returnJob); err != nil {
+		return nil, fmt.Errorf("failed to update return job: %w", err)
+	}
+
+	if s.broadcaster != nil {
+		s.broadcaster.BroadcastJobStatus(returnJob.ID.String(), string(domain.DJStatusSearching))
+	}
+
+	// Update PR status
+	pr.Status = domain.PRStatusReturnSearchingRider
+	if err := s.prRepo.Update(ctx, pr); err != nil {
+		return nil, fmt.Errorf("failed to update payment request: %w", err)
+	}
+
+	// Notify buyer
+	s.sendNotification(ctx, buyerID, "Return Pickup Scheduled",
+		"We're searching for a rider to pick up your item. Please have it ready.")
+	s.sendNotification(ctx, pr.SellerID, "Return Pickup Started",
+		"The buyer is ready for return. A rider is being dispatched to pick up the item.")
+
+	s.logger.Info("buyer confirmed ready for return, search started",
+		zap.String("job_id", returnJob.ID.String()),
+		zap.String("pr_id", paymentRequestID.String()),
+		zap.String("buyer_id", buyerID.String()),
+	)
+
+	return returnJob, nil
+}
+
 // CreateReturnDeliveryJob creates a return delivery job for intra-state returns
 func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Context, paymentRequestID uuid.UUID) (*domain.DeliveryJob, error) {
 	pr, err := s.prRepo.GetByID(ctx, paymentRequestID)
@@ -307,8 +478,34 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 	}
 
 	if pr.ReturnDeliveryJobID != nil {
-		// Already has a return job
-		return s.deliveryJobRepo.GetByID(ctx, *pr.ReturnDeliveryJobID)
+		// Already has a return job - get it and start search if needed
+		existingJob, err := s.deliveryJobRepo.GetByID(ctx, *pr.ReturnDeliveryJobID)
+		if err != nil {
+			return nil, err
+		}
+
+		// If job is in created status, start the search
+		if existingJob.Status == domain.DJStatusCreated {
+			now := time.Now()
+			existingJob.Status = domain.DJStatusSearching
+			existingJob.SearchStartedAt = &now
+
+			if err := s.deliveryJobRepo.Update(ctx, existingJob); err != nil {
+				return nil, fmt.Errorf("failed to update return job: %w", err)
+			}
+
+			if s.broadcaster != nil {
+				s.broadcaster.BroadcastJobStatus(existingJob.ID.String(), string(domain.DJStatusSearching))
+			}
+
+			// Update PR status
+			pr.Status = domain.PRStatusReturnSearchingRider
+			if err := s.prRepo.Update(ctx, pr); err != nil {
+				return nil, fmt.Errorf("failed to update payment request: %w", err)
+			}
+		}
+
+		return existingJob, nil
 	}
 
 	// Get original delivery job
@@ -338,6 +535,28 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 		}
 	}
 
+	// Calculate return delivery fee
+	var deliveryFee float64
+	if s.feeCalculator != nil {
+		feeEstimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(
+			ctx,
+			coords.DropoffLat, coords.DropoffLng, // Return pickup (buyer's location)
+			coords.PickupLat, coords.PickupLng,   // Return dropoff (seller's location)
+			originalJob.RequiredVehicleType,
+		)
+		if err != nil {
+			s.logger.Warn("failed to calculate return delivery fee, using original fee",
+				zap.Error(err),
+				zap.String("pr_id", pr.ID.String()),
+			)
+			deliveryFee = originalJob.DeliveryFee
+		} else {
+			deliveryFee = feeEstimate.TotalFee
+		}
+	} else {
+		deliveryFee = originalJob.DeliveryFee
+	}
+
 	// Create return job with reversed addresses and coordinates
 	// For return: original dropoff (buyer) becomes pickup, original pickup (seller) becomes dropoff
 	now := time.Now()
@@ -354,7 +573,7 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 		DropoffLat:          coords.PickupLat,           // Swap: original pickup lat
 		DropoffLng:          coords.PickupLng,           // Swap: original pickup lng
 		RequiredVehicleType: originalJob.RequiredVehicleType,
-		DeliveryFee:         0, // Return delivery fee handled separately (dispute resolution decides)
+		DeliveryFee:         deliveryFee,
 		SearchRadiusKM:      5,
 		SearchStartedAt:     &now,
 		Status:              domain.DJStatusSearching,

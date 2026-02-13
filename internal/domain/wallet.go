@@ -18,14 +18,18 @@ const (
 	WalletTxAdjustment     WalletTransactionType = "adjustment"
 )
 type Wallet struct {
-	ID               uuid.UUID `db:"id" json:"id"`
-	UserID           uuid.UUID `db:"user_id" json:"user_id"`
-	AvailableBalance float64   `db:"available_balance" json:"available_balance"`
-	LockedBalance    float64   `db:"locked_balance" json:"locked_balance"`
-	TotalEarned      float64   `db:"total_earned" json:"total_earned"`
-	TotalWithdrawn   float64   `db:"total_withdrawn" json:"total_withdrawn"`
-	CreatedAt        time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt        time.Time `db:"updated_at" json:"updated_at"`
+	ID               uuid.UUID  `db:"id" json:"id"`
+	UserID           uuid.UUID  `db:"user_id" json:"user_id"`
+	AvailableBalance float64    `db:"available_balance" json:"available_balance"`
+	LockedBalance    float64    `db:"locked_balance" json:"locked_balance"`
+	TotalEarned      float64    `db:"total_earned" json:"total_earned"`
+	TotalWithdrawn   float64    `db:"total_withdrawn" json:"total_withdrawn"`
+	PinHash          *string    `db:"pin_hash" json:"-"`
+	PinCreatedAt     *time.Time `db:"pin_created_at" json:"pin_created_at,omitempty"`
+	PinAttempts      int        `db:"pin_attempts" json:"-"`
+	PinLockedUntil   *time.Time `db:"pin_locked_until" json:"-"`
+	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`
 }
 type WalletTransaction struct {
 	ID             uuid.UUID             `db:"id" json:"id"`
@@ -81,4 +85,32 @@ func (w *Wallet) DeductLocked(amount float64) error {
 }
 func (w *Wallet) RecordWithdrawal(amount float64) {
 	w.TotalWithdrawn += amount
+}
+
+// HasPin returns true if the wallet has a PIN set
+func (w *Wallet) HasPin() bool {
+	return w.PinHash != nil && *w.PinHash != ""
+}
+
+// IsPinLocked returns true if the wallet is locked due to too many failed attempts
+func (w *Wallet) IsPinLocked() bool {
+	if w.PinLockedUntil == nil {
+		return false
+	}
+	return time.Now().Before(*w.PinLockedUntil)
+}
+
+// IncrementPinAttempts increments failed PIN attempts and locks if threshold reached
+func (w *Wallet) IncrementPinAttempts(maxAttempts int, lockDuration time.Duration) {
+	w.PinAttempts++
+	if w.PinAttempts >= maxAttempts {
+		lockUntil := time.Now().Add(lockDuration)
+		w.PinLockedUntil = &lockUntil
+	}
+}
+
+// ResetPinAttempts resets the PIN attempt counter after successful verification
+func (w *Wallet) ResetPinAttempts() {
+	w.PinAttempts = 0
+	w.PinLockedUntil = nil
 }
