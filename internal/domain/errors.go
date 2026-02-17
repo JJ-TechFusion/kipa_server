@@ -101,6 +101,7 @@ var (
 	ErrCannotOpenDisputeInState      = errors.New("cannot open dispute in current state")
 	ErrSellerCannotDisputeYet        = errors.New("seller can only open dispute after 7 days of buyer non-response")
 	ErrDisputeAlreadyOpen            = errors.New("a dispute is already open for this delivery")
+	ErrDisputeNotFound               = errors.New("dispute not found")
 	ErrReturnTrackingRequired        = errors.New("return tracking number is required")
 	ErrHighValueRequiresAdminApproval = errors.New("high value orders require admin approval before release")
 

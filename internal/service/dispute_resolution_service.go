@@ -154,9 +154,11 @@ func (s *DisputeResolutionServiceImpl) handleBuyerWins(ctx context.Context, disp
 
 		// Notify both parties - buyer must confirm when ready
 		s.sendNotification(ctx, *pr.BuyerID, "You Won the Dispute - Return Required",
-			"You won the dispute! When you're ready to return the item, tap 'Ready for Return Pickup' in the app. A rider will then be dispatched to collect it.")
+			"You won the dispute! When you're ready to return the item, tap 'Ready for Return Pickup' in the app. A rider will then be dispatched to collect it.",
+			domain.NotificationDisputeResolved)
 		s.sendNotification(ctx, pr.SellerID, "Dispute Resolved - Awaiting Return",
-			"Buyer won the dispute. They will return the item via rider. You'll be notified when the return is on the way.")
+			"Buyer won the dispute. They will return the item via rider. You'll be notified when the return is on the way.",
+			domain.NotificationDisputeResolved)
 
 		s.logger.Info("dispute resolved: buyer wins, return required (intra-state)",
 			zap.String("dispute_id", dispute.ID.String()),
@@ -288,8 +290,8 @@ func (s *DisputeResolutionServiceImpl) handleSellerWins(ctx context.Context, dis
 	}
 
 	// Notify
-	s.sendNotification(ctx, *pr.BuyerID, "Dispute Resolved", fmt.Sprintf("Admin ruled in favor of the seller: %s", req.ResolutionNotes))
-	s.sendNotification(ctx, pr.SellerID, "Funds Released", fmt.Sprintf("You won the dispute. NGN %.2f has been credited to your wallet.", sellerPayout))
+	s.sendNotification(ctx, *pr.BuyerID, "Dispute Resolved", fmt.Sprintf("Admin ruled in favor of the seller: %s", req.ResolutionNotes), domain.NotificationDisputeResolved)
+	s.sendNotification(ctx, pr.SellerID, "Funds Released", fmt.Sprintf("You won the dispute. NGN %.2f has been credited to your wallet.", sellerPayout), domain.NotificationDisputeResolved)
 
 	s.logger.Info("dispute resolved: seller wins",
 		zap.String("dispute_id", dispute.ID.String()),
@@ -346,8 +348,8 @@ func (s *DisputeResolutionServiceImpl) handlePartialRefund(ctx context.Context, 
 	}
 
 	// Notify
-	s.sendNotification(ctx, *pr.BuyerID, "Partial Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", refundAmount))
-	s.sendNotification(ctx, pr.SellerID, "Partial Payment Released", fmt.Sprintf("NGN %.2f has been credited to your wallet.", sellerAmount))
+	s.sendNotification(ctx, *pr.BuyerID, "Partial Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", refundAmount), domain.NotificationRefundProcessed)
+	s.sendNotification(ctx, pr.SellerID, "Partial Payment Released", fmt.Sprintf("NGN %.2f has been credited to your wallet.", sellerAmount), domain.NotificationDisputeResolved)
 
 	s.logger.Info("dispute resolved: partial refund",
 		zap.String("dispute_id", dispute.ID.String()),
@@ -386,8 +388,8 @@ func (s *DisputeResolutionServiceImpl) processFullRefund(ctx context.Context, di
 	}
 
 	// Notify
-	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked))
-	s.sendNotification(ctx, pr.SellerID, "Dispute Resolved", notes)
+	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked), domain.NotificationRefundProcessed)
+	s.sendNotification(ctx, pr.SellerID, "Dispute Resolved", notes, domain.NotificationDisputeResolved)
 
 	return nil
 }
@@ -453,9 +455,11 @@ func (s *DisputeResolutionServiceImpl) ConfirmReadyForReturn(ctx context.Context
 
 	// Notify buyer
 	s.sendNotification(ctx, buyerID, "Return Pickup Scheduled",
-		"We're searching for a rider to pick up your item. Please have it ready.")
+		"We're searching for a rider to pick up your item. Please have it ready.",
+		domain.NotificationItemReturning)
 	s.sendNotification(ctx, pr.SellerID, "Return Pickup Started",
-		"The buyer is ready for return. A rider is being dispatched to pick up the item.")
+		"The buyer is ready for return. A rider is being dispatched to pick up the item.",
+		domain.NotificationItemReturning)
 
 	s.logger.Info("buyer confirmed ready for return, search started",
 		zap.String("job_id", returnJob.ID.String()),
@@ -596,7 +600,8 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 
 	// Notify buyer
 	s.sendNotification(ctx, *pr.BuyerID, "Return Pickup Scheduled",
-		"A rider will be dispatched to pick up the item for return. Please have it ready.")
+		"A rider will be dispatched to pick up the item for return. Please have it ready.",
+		domain.NotificationItemReturning)
 
 	s.logger.Info("return delivery job created",
 		zap.String("job_id", returnJob.ID.String()),
@@ -679,9 +684,11 @@ func (s *DisputeResolutionServiceImpl) ConfirmReturnReceived(ctx context.Context
 
 		// Notify
 		s.sendNotification(ctx, *pr.BuyerID, "Return Condition Disputed",
-			fmt.Sprintf("Seller claims the returned item is %s. Admin will review and decide.", req.Condition))
+			fmt.Sprintf("Seller claims the returned item is %s. Admin will review and decide.", req.Condition),
+			domain.NotificationDisputeOpened)
 		s.sendNotification(ctx, sellerID, "Damage Claim Submitted",
-			"Your damage claim has been submitted. Admin will review and make a decision.")
+			"Your damage claim has been submitted. Admin will review and make a decision.",
+			domain.NotificationDisputeOpened)
 
 		s.logger.Info("return damage claimed",
 			zap.String("job_id", returnJobID.String()),
@@ -737,9 +744,11 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 
 	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed",
-		fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked))
+		fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked),
+		domain.NotificationRefundProcessed)
 	s.sendNotification(ctx, pr.SellerID, "Return Complete",
-		"The return has been completed. Buyer has been refunded.")
+		"The return has been completed. Buyer has been refunded.",
+		domain.NotificationItemReturned)
 
 	s.logger.Info("return refund processed",
 		zap.String("job_id", job.ID.String()),
@@ -840,9 +849,11 @@ func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Co
 
 	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Partial Refund Processed",
-		fmt.Sprintf("NGN %.2f has been refunded due to item damage.", refundAmount))
+		fmt.Sprintf("NGN %.2f has been refunded due to item damage.", refundAmount),
+		domain.NotificationRefundProcessed)
 	s.sendNotification(ctx, pr.SellerID, "Damage Claim Resolved",
-		fmt.Sprintf("NGN %.2f has been credited for the damage compensation.", sellerAmount))
+		fmt.Sprintf("NGN %.2f has been credited for the damage compensation.", sellerAmount),
+		domain.NotificationDisputeResolved)
 
 	return nil
 }
@@ -883,9 +894,11 @@ func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job 
 
 	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Damage Claim Resolved",
-		"Admin determined the return damage was severe. Funds released to seller.")
+		"Admin determined the return damage was severe. Funds released to seller.",
+		domain.NotificationDisputeResolved)
 	s.sendNotification(ctx, pr.SellerID, "Funds Released",
-		fmt.Sprintf("NGN %.2f has been credited due to confirmed return damage.", escrow.TotalLocked))
+		fmt.Sprintf("NGN %.2f has been credited due to confirmed return damage.", escrow.TotalLocked),
+		domain.NotificationDisputeResolved)
 
 	return nil
 }
@@ -909,12 +922,12 @@ func (s *DisputeResolutionServiceImpl) ListPendingDamageClaims(ctx context.Conte
 	return s.deliveryJobRepo.GetByStatus(ctx, domain.DJStatusReturnDamageDisputed, limit, offset)
 }
 
-func (s *DisputeResolutionServiceImpl) sendNotification(_ context.Context, userID uuid.UUID, title, message string) {
+func (s *DisputeResolutionServiceImpl) sendNotification(_ context.Context, userID uuid.UUID, title, message string, notifType domain.NotificationType) {
 	if s.notificationService == nil {
 		return
 	}
 	go func() {
-		if err := s.notificationService.SendToUser(context.Background(), userID, title, message, nil, domain.NotificationLogisticsConfirmReminder); err != nil {
+		if err := s.notificationService.SendToUser(context.Background(), userID, title, message, nil, notifType); err != nil {
 			s.logger.Debug("failed to send notification", zap.Error(err))
 		}
 	}()

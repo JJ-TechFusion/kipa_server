@@ -113,17 +113,18 @@ func (h *ErrandHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	errand, err := h.errandService.GetByID(c.Request.Context(), userID, errandID)
+	result, err := h.errandService.GetWithDeliveryDetails(c.Request.Context(), userID, errandID)
 	if err != nil {
 		h.handleError(c, err)
 		return
 	}
 
-	feeBreakdown := domain.NewRiderFeeBreakdown(errand.DeliveryFee)
-	timeline := BuildErrandTimeline(errand)
+	feeBreakdown := domain.NewRiderFeeBreakdown(result.Errand.DeliveryFee)
+	timeline := BuildErrandTimeline(result.Errand)
 
-	util.Success(c, http.StatusOK, ErrandResponse{
-		Errand:       errand,
+	util.Success(c, http.StatusOK, ErrandWithDetailsResponse{
+		Errand:       result.Errand,
+		DeliveryJob:  result.DeliveryJob,
 		FeeBreakdown: feeBreakdown,
 		Timeline:     &timeline,
 	})
@@ -260,4 +261,12 @@ type ErrandResponse struct {
 	FeeBreakdown *domain.RiderFeeBreakdown `json:"fee_breakdown,omitempty"`
 	Timeline     *ErrandTimelineResponse   `json:"timeline,omitempty"`
 	Message      string                    `json:"message,omitempty"`
+}
+
+type ErrandWithDetailsResponse struct {
+	Errand       *domain.Errand              `json:"errand"`
+	DeliveryJob  *service.ErrandDeliveryInfo `json:"delivery_job,omitempty"`
+	FeeBreakdown *domain.RiderFeeBreakdown   `json:"fee_breakdown,omitempty"`
+	Timeline     *ErrandTimelineResponse     `json:"timeline,omitempty"`
+	Message      string                      `json:"message,omitempty"`
 }

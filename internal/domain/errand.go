@@ -23,10 +23,14 @@ type Errand struct {
 	PickupAddress      string  `db:"pickup_address" json:"pickup_address"`
 	PickupLat          float64 `db:"pickup_lat" json:"pickup_lat"`
 	PickupLng          float64 `db:"pickup_lng" json:"pickup_lng"`
+	PickupContactName  *string `db:"pickup_contact_name" json:"pickup_contact_name,omitempty"`
+	PickupContactPhone *string `db:"pickup_contact_phone" json:"pickup_contact_phone,omitempty"`
 	PickupInstructions *string `db:"pickup_instructions" json:"pickup_instructions,omitempty"`
-	DropoffAddress string  `db:"dropoff_address" json:"dropoff_address"`
-	DropoffLat     float64 `db:"dropoff_lat" json:"dropoff_lat"`
-	DropoffLng     float64 `db:"dropoff_lng" json:"dropoff_lng"`
+	DropoffAddress      string  `db:"dropoff_address" json:"dropoff_address"`
+	DropoffLat          float64 `db:"dropoff_lat" json:"dropoff_lat"`
+	DropoffLng          float64 `db:"dropoff_lng" json:"dropoff_lng"`
+	DropoffContactName  *string `db:"dropoff_contact_name" json:"dropoff_contact_name,omitempty"`
+	DropoffContactPhone *string `db:"dropoff_contact_phone" json:"dropoff_contact_phone,omitempty"`
 	PackageDescription string   `db:"package_description" json:"package_description"`
 	PackageWeightKg    *float64 `db:"package_weight_kg" json:"package_weight_kg,omitempty"`
 	PackagePhotoURL    *string  `db:"package_photo_url" json:"package_photo_url,omitempty"`

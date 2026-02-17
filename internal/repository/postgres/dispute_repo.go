@@ -168,7 +168,7 @@ func (r *DisputeRepo) GetByEscrowID(ctx context.Context, escrowID uuid.UUID) (*d
 
 func (r *DisputeRepo) List(ctx context.Context, filters *repository.DisputeFilters, limit, offset int) ([]*domain.Dispute, error) {
 	query := `
-		SELECT id, escrow_id, opened_by, reason, evidence, status, outcome, 
+		SELECT id, escrow_id, opened_by, reason, evidence, status, outcome,
 		       resolution_notes, resolved_by, resolved_at, created_at
 		FROM disputes
 		ORDER BY created_at DESC
@@ -176,6 +176,74 @@ func (r *DisputeRepo) List(ctx context.Context, filters *repository.DisputeFilte
 	`
 
 	rows, err := r.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var disputes []*domain.Dispute
+	for rows.Next() {
+		var dispute domain.Dispute
+		var evidenceJSON []byte
+		var resolutionNotes sql.NullString
+		var resolvedBy sql.NullString
+		var resolvedAt sql.NullTime
+
+		err := rows.Scan(
+			&dispute.ID,
+			&dispute.EscrowID,
+			&dispute.OpenedBy,
+			&dispute.Reason,
+			&evidenceJSON,
+			&dispute.Status,
+			&dispute.Outcome,
+			&resolutionNotes,
+			&resolvedBy,
+			&resolvedAt,
+			&dispute.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(evidenceJSON) > 0 {
+			var evidence []string
+			if err := json.Unmarshal(evidenceJSON, &evidence); err == nil {
+				dispute.Evidence = evidence
+			} else {
+				dispute.Evidence = []string{}
+			}
+		}
+
+		if resolutionNotes.Valid {
+			dispute.ResolutionNotes = &resolutionNotes.String
+		}
+		if resolvedBy.Valid {
+			id, _ := uuid.Parse(resolvedBy.String)
+			dispute.ResolvedBy = &id
+		}
+		if resolvedAt.Valid {
+			dispute.ResolvedAt = &resolvedAt.Time
+		}
+
+		disputes = append(disputes, &dispute)
+	}
+
+	return disputes, rows.Err()
+}
+
+func (r *DisputeRepo) GetByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Dispute, error) {
+	query := `
+		SELECT d.id, d.escrow_id, d.opened_by, d.reason, d.evidence, d.status, d.outcome,
+		       d.resolution_notes, d.resolved_by, d.resolved_at, d.created_at
+		FROM disputes d
+		JOIN escrows e ON d.escrow_id = e.id
+		WHERE e.buyer_id = $1 OR e.seller_id = $1
+		ORDER BY d.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, userID, limit, offset)
 	if err != nil {
 		return nil, err
 	}

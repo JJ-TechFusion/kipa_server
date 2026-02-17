@@ -59,7 +59,8 @@ func NewAuthService(
 }
 
 func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, ipAddress, userAgent string) (*dto.SendOTPResponse, error) {
-	// Check rate limit
+	req.PhoneNumber = util.NormalizePhoneNumber(req.PhoneNumber)
+
 	count, err := s.sessionRepo.GetRateLimitCount(ctx, req.PhoneNumber)
 	if err != nil {
 		s.logger.Error("failed to check rate limit", zap.Error(err))
@@ -74,7 +75,6 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 		return nil, domain.ErrOTPRateLimitExceeded
 	}
 
-	// Send verification via Twilio Verify
 	result, err := s.verifyProvider.SendVerification(ctx, req.PhoneNumber, "sms")
 	if err != nil || !result.Success {
 		s.logger.Error("failed to send verification",
@@ -84,12 +84,10 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 		return nil, domain.ErrSMSDeliveryFailed
 	}
 
-	// Increment rate limit
 	if err := s.sessionRepo.IncrementRateLimitCount(ctx, req.PhoneNumber, s.config.OTP.RateLimitWindow); err != nil {
 		s.logger.Error("failed to increment rate limit", zap.Error(err))
 	}
 
-	// Track last OTP sent time for resend cooldown
 	if err := s.sessionRepo.SetLastOTPSentTime(ctx, req.PhoneNumber, s.config.OTP.ResendCooldown); err != nil {
 		s.logger.Error("failed to set last OTP sent time", zap.Error(err))
 	}
@@ -112,6 +110,9 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 }
 
 func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPRequest, ipAddress, userAgent string) (*dto.SendOTPResponse, error) {
+	// Normalize phone number to handle variations like +23408... → +2348...
+	req.PhoneNumber = util.NormalizePhoneNumber(req.PhoneNumber)
+
 	// Check resend cooldown
 	lastSent, err := s.sessionRepo.GetLastOTPSentTime(ctx, req.PhoneNumber)
 	if err != nil {
@@ -183,6 +184,9 @@ func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPReque
 }
 
 func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPRequest, ipAddress, userAgent string) (*dto.VerifyOTPResponse, error) {
+	// Normalize phone number to handle variations like +23408... → +2348...
+	req.PhoneNumber = util.NormalizePhoneNumber(req.PhoneNumber)
+
 	// Check idempotency
 	exists, err := s.idempotencyRepo.Exists(ctx, req.IdempotencyKey)
 	if err != nil {

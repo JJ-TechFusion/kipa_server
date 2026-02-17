@@ -248,8 +248,11 @@ func main() {
 	errandService := service.NewErrandService(
 		errandRepo,
 		deliveryJobRepo,
+		riderProfileRepo,
+		userRepo,
 		feeCalculator,
 		wsHub,
+		notificationService,
 		logger,
 	)
 
@@ -353,7 +356,14 @@ func main() {
 		logger,
 	)
 
-
+	// Dispute service (for buyer/seller dispute listing)
+	disputeService := service.NewDisputeService(
+		disputeRepo,
+		escrowRepo,
+		userRepo,
+		prRepo,
+		logger,
+	)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
@@ -378,6 +388,7 @@ func main() {
 	webhookHandler := handler.NewWebhookHandler(paystackClient, walletFundingService, orderService, logger)
 	sellerHandler := handler.NewSellerHandler(orderService, prService, escrowService, deliveryJobRepo, disputeResolutionService, driverService)
 	errandHandler := handler.NewErrandHandler(errandService)
+	disputeHandler := handler.NewDisputeHandler(disputeService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
 	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo, prService)
 	notificationHandler := handler.NewNotificationHandler(notificationService, logger)
@@ -411,6 +422,7 @@ func main() {
 	riderHandler.RegisterRoutes(v1, authMiddleware)
 	commissionHandler.RegisterRoutes(v1, authMiddleware)
 	errandHandler.RegisterRoutes(v1, authMiddleware)
+	disputeHandler.RegisterRoutes(v1, authMiddleware)
 	walletHandler.RegisterRoutes(v1, authMiddleware)
 	walletFundingHandler.RegisterRoutes(v1, authMiddleware)
 	webhookHandler.RegisterRoutes(v1)

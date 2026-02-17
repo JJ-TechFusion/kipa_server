@@ -21,6 +21,7 @@ type ErrandService interface {
 	Confirm(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) (*domain.Errand, error)
 	Cancel(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) error
 	GetByID(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) (*domain.Errand, error)
+	GetWithDeliveryDetails(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) (*ErrandWithDelivery, error)
 	List(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Errand, error)
 	GetActive(ctx context.Context, userID uuid.UUID) ([]*domain.Errand, error)
 
@@ -33,16 +34,45 @@ type ErrandService interface {
 	CompleteErrand(ctx context.Context, userID uuid.UUID, errandID uuid.UUID, code string) (*domain.Errand, error)
 }
 
-type CreateErrandRequest struct {
+// ErrandWithDelivery contains errand with delivery job and rider details
+type ErrandWithDelivery struct {
+	Errand      *domain.Errand      `json:"errand"`
+	DeliveryJob *ErrandDeliveryInfo `json:"delivery_job,omitempty"`
+}
 
+// ErrandDeliveryInfo contains delivery job info for errands
+type ErrandDeliveryInfo struct {
+	ID          uuid.UUID `json:"id"`
+	Status      string    `json:"status"`
+	PickupCode  *string   `json:"pickup_code,omitempty"`
+	DropoffCode *string   `json:"dropoff_code,omitempty"`
+	Rider       *ErrandRiderInfo `json:"rider,omitempty"`
+}
+
+// ErrandRiderInfo contains rider info for errand tracking
+type ErrandRiderInfo struct {
+	ID          uuid.UUID `json:"id"`
+	FirstName   string    `json:"first_name"`
+	LastName    string    `json:"last_name"`
+	PhoneNumber string    `json:"phone_number"`
+	PhotoURL    *string   `json:"photo_url,omitempty"`
+	VehicleType string    `json:"vehicle_type,omitempty"`
+	Rating      *float64  `json:"rating,omitempty"`
+}
+
+type CreateErrandRequest struct {
 	PickupAddress      string  `json:"pickup_address" binding:"required"`
 	PickupLat          float64 `json:"pickup_lat" binding:"required"`
 	PickupLng          float64 `json:"pickup_lng" binding:"required"`
+	PickupContactName  *string `json:"pickup_contact_name"`
+	PickupContactPhone *string `json:"pickup_contact_phone"`
 	PickupInstructions *string `json:"pickup_instructions"`
 
-	DropoffAddress string  `json:"dropoff_address" binding:"required"`
-	DropoffLat     float64 `json:"dropoff_lat" binding:"required"`
-	DropoffLng     float64 `json:"dropoff_lng" binding:"required"`
+	DropoffAddress      string  `json:"dropoff_address" binding:"required"`
+	DropoffLat          float64 `json:"dropoff_lat" binding:"required"`
+	DropoffLng          float64 `json:"dropoff_lng" binding:"required"`
+	DropoffContactName  *string `json:"dropoff_contact_name"`
+	DropoffContactPhone *string `json:"dropoff_contact_phone"`
 
 	PackageDescription string   `json:"package_description" binding:"required"`
 	PackageWeightKg    *float64 `json:"package_weight_kg"`
@@ -52,26 +82,35 @@ type CreateErrandRequest struct {
 }
 
 type ErrandServiceImpl struct {
-	errandRepo    repository.ErrandRepository
-	jobRepo       repository.DeliveryJobRepository
-	feeCalculator FeeCalculatorService
-	broadcaster   JobStatusBroadcaster
-	logger        *zap.Logger
+	errandRepo      repository.ErrandRepository
+	jobRepo         repository.DeliveryJobRepository
+	riderRepo       repository.RiderProfileRepository
+	userRepo        repository.UserRepository
+	feeCalculator   FeeCalculatorService
+	broadcaster     JobStatusBroadcaster
+	notificationSvc NotificationService
+	logger          *zap.Logger
 }
 
 func NewErrandService(
 	errandRepo repository.ErrandRepository,
 	jobRepo repository.DeliveryJobRepository,
+	riderRepo repository.RiderProfileRepository,
+	userRepo repository.UserRepository,
 	feeCalculator FeeCalculatorService,
 	broadcaster JobStatusBroadcaster,
+	notificationSvc NotificationService,
 	logger *zap.Logger,
 ) ErrandService {
 	return &ErrandServiceImpl{
-		errandRepo:    errandRepo,
-		jobRepo:       jobRepo,
-		feeCalculator: feeCalculator,
-		broadcaster:   broadcaster,
-		logger:        logger,
+		errandRepo:      errandRepo,
+		jobRepo:         jobRepo,
+		riderRepo:       riderRepo,
+		userRepo:        userRepo,
+		feeCalculator:   feeCalculator,
+		broadcaster:     broadcaster,
+		notificationSvc: notificationSvc,
+		logger:          logger,
 	}
 }
 
@@ -96,23 +135,27 @@ func (s *ErrandServiceImpl) Create(ctx context.Context, userID uuid.UUID, req *C
 	dropoffCode := generateDropoffCode()
 
 	errand := &domain.Errand{
-		ID:                 uuid.New(),
-		UserID:             userID,
-		PickupAddress:      req.PickupAddress,
-		PickupLat:          req.PickupLat,
-		PickupLng:          req.PickupLng,
-		PickupInstructions: req.PickupInstructions,
-		DropoffAddress:     req.DropoffAddress,
-		DropoffLat:         req.DropoffLat,
-		DropoffLng:         req.DropoffLng,
-		PackageDescription: req.PackageDescription,
-		PackageWeightKg:    req.PackageWeightKg,
-		PackagePhotoURL:    req.PackagePhotoURL,
-		VehicleType:        req.VehicleType,
-		DistanceKM:         &feeEstimate.DistanceKM,
-		DeliveryFee:        feeEstimate.TotalFee,
-		Status:             domain.ErrandStatusDraft,
-		DropoffCode:        &dropoffCode,
+		ID:                  uuid.New(),
+		UserID:              userID,
+		PickupAddress:       req.PickupAddress,
+		PickupLat:           req.PickupLat,
+		PickupLng:           req.PickupLng,
+		PickupContactName:   req.PickupContactName,
+		PickupContactPhone:  req.PickupContactPhone,
+		PickupInstructions:  req.PickupInstructions,
+		DropoffAddress:      req.DropoffAddress,
+		DropoffLat:          req.DropoffLat,
+		DropoffLng:          req.DropoffLng,
+		DropoffContactName:  req.DropoffContactName,
+		DropoffContactPhone: req.DropoffContactPhone,
+		PackageDescription:  req.PackageDescription,
+		PackageWeightKg:     req.PackageWeightKg,
+		PackagePhotoURL:     req.PackagePhotoURL,
+		VehicleType:         req.VehicleType,
+		DistanceKM:          &feeEstimate.DistanceKM,
+		DeliveryFee:         feeEstimate.TotalFee,
+		Status:              domain.ErrandStatusDraft,
+		DropoffCode:         &dropoffCode,
 	}
 
 	if err := s.errandRepo.Create(ctx, errand); err != nil {
@@ -201,11 +244,9 @@ func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errand
 		return err
 	}
 
-
 	if errand.UserID != userID {
 		return domain.ErrUnauthorized
 	}
-
 
 	if !errand.CanCancel() {
 		return domain.ErrErrandNotCancellable
@@ -219,12 +260,26 @@ func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errand
 		return fmt.Errorf("failed to cancel errand: %w", err)
 	}
 
-
 	if errand.DeliveryJobID != nil {
 		if err := s.jobRepo.UpdateStatus(ctx, *errand.DeliveryJobID, domain.DJStatusCancelled); err != nil {
 			s.logger.Error("failed to cancel delivery job", zap.Error(err))
 		} else if s.broadcaster != nil {
 			s.broadcaster.BroadcastJobStatus(errand.DeliveryJobID.String(), string(domain.DJStatusCancelled))
+		}
+	}
+
+	// Notify rider if one was assigned
+	if s.notificationSvc != nil && errand.RiderID != nil {
+		riderProfile, _ := s.riderRepo.GetByID(ctx, *errand.RiderID)
+		if riderProfile != nil {
+			go s.notificationSvc.SendToUser(
+				context.Background(),
+				riderProfile.UserID,
+				"Errand Cancelled",
+				"The customer has cancelled this errand.",
+				map[string]string{"errand_id": errandID.String()},
+				domain.NotificationOrderCancelled,
+			)
 		}
 	}
 
@@ -248,6 +303,84 @@ func (s *ErrandServiceImpl) GetByID(ctx context.Context, userID uuid.UUID, erran
 	return errand, nil
 }
 
+func (s *ErrandServiceImpl) GetWithDeliveryDetails(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) (*ErrandWithDelivery, error) {
+	errand, err := s.errandRepo.GetByID(ctx, errandID)
+	if err != nil {
+		return nil, err
+	}
+	if errand.UserID != userID {
+		return nil, domain.ErrUnauthorized
+	}
+
+	result := &ErrandWithDelivery{
+		Errand: errand,
+	}
+
+	// If there's a delivery job, fetch its details
+	if errand.DeliveryJobID != nil {
+		job, err := s.jobRepo.GetByID(ctx, *errand.DeliveryJobID)
+		if err != nil {
+			s.logger.Warn("failed to fetch delivery job for errand",
+				zap.String("errand_id", errandID.String()),
+				zap.Error(err),
+			)
+		} else {
+			deliveryInfo := &ErrandDeliveryInfo{
+				ID:          job.ID,
+				Status:      string(job.Status),
+				PickupCode:  job.PickupCode,
+				DropoffCode: job.DropoffCode,
+			}
+
+			// If rider is assigned, fetch rider details
+			// Note: job.RiderID is the rider_profile.id, not the user_id
+			if job.RiderID != nil {
+				riderProfile, err := s.riderRepo.GetByID(ctx, *job.RiderID)
+				if err != nil {
+					s.logger.Warn("failed to fetch rider profile for errand",
+						zap.String("rider_id", job.RiderID.String()),
+						zap.Error(err),
+					)
+				} else {
+					// Also fetch user info for name and phone (use riderProfile.UserID, not job.RiderID)
+					user, err := s.userRepo.GetByID(ctx, riderProfile.UserID)
+					if err != nil {
+						s.logger.Warn("failed to fetch rider user for errand",
+							zap.String("user_id", riderProfile.UserID.String()),
+							zap.Error(err),
+						)
+					} else {
+						firstName := ""
+						lastName := ""
+						if user.FirstName != nil {
+							firstName = *user.FirstName
+						}
+						if user.LastName != nil {
+							lastName = *user.LastName
+						}
+						vehicleType := ""
+						if riderProfile.VehicleType != nil {
+							vehicleType = *riderProfile.VehicleType
+						}
+						deliveryInfo.Rider = &ErrandRiderInfo{
+							ID:          riderProfile.UserID,
+							FirstName:   firstName,
+							LastName:    lastName,
+							PhoneNumber: user.PhoneNumber,
+							PhotoURL:    user.ProfilePhotoURL,
+							VehicleType: vehicleType,
+							Rating:      &riderProfile.Rating,
+						}
+					}
+				}
+			}
+
+			result.DeliveryJob = deliveryInfo
+		}
+	}
+
+	return result, nil
+}
 
 func (s *ErrandServiceImpl) List(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Errand, error) {
 	return s.errandRepo.GetByUserID(ctx, userID, limit, offset)
@@ -266,7 +399,30 @@ func (s *ErrandServiceImpl) OnJobAccepted(ctx context.Context, errandID uuid.UUI
 	errand.RiderID = &riderID
 	errand.AcceptedAt = &now
 
-	return s.errandRepo.Update(ctx, errand)
+	if err := s.errandRepo.Update(ctx, errand); err != nil {
+		return err
+	}
+
+	// Notify errand owner that rider accepted
+	if s.notificationSvc != nil {
+		riderProfile, _ := s.riderRepo.GetByID(ctx, riderID)
+		riderName := "A rider"
+		if riderProfile != nil {
+			if user, err := s.userRepo.GetByID(ctx, riderProfile.UserID); err == nil && user.FirstName != nil {
+				riderName = *user.FirstName
+			}
+		}
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			errand.UserID,
+			"Rider Accepted",
+			fmt.Sprintf("%s has accepted your errand and is heading to pickup.", riderName),
+			map[string]string{"errand_id": errandID.String()},
+			domain.NotificationErrandAccepted,
+		)
+	}
+
+	return nil
 }
 func (s *ErrandServiceImpl) OnJobPickedUp(ctx context.Context, errandID uuid.UUID) error {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
@@ -278,7 +434,23 @@ func (s *ErrandServiceImpl) OnJobPickedUp(ctx context.Context, errandID uuid.UUI
 	errand.Status = domain.ErrandStatusPickedUp
 	errand.PickedUpAt = &now
 
-	return s.errandRepo.Update(ctx, errand)
+	if err := s.errandRepo.Update(ctx, errand); err != nil {
+		return err
+	}
+
+	// Notify errand owner
+	if s.notificationSvc != nil {
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			errand.UserID,
+			"Package Picked Up",
+			"Your package has been picked up and is on the way.",
+			map[string]string{"errand_id": errandID.String()},
+			domain.NotificationErrandPickedUp,
+		)
+	}
+
+	return nil
 }
 func (s *ErrandServiceImpl) OnJobDelivered(ctx context.Context, errandID uuid.UUID) error {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
@@ -290,7 +462,23 @@ func (s *ErrandServiceImpl) OnJobDelivered(ctx context.Context, errandID uuid.UU
 	errand.Status = domain.ErrandStatusDelivered
 	errand.DeliveredAt = &now
 
-	return s.errandRepo.Update(ctx, errand)
+	if err := s.errandRepo.Update(ctx, errand); err != nil {
+		return err
+	}
+
+	// Notify errand owner
+	if s.notificationSvc != nil {
+		go s.notificationSvc.SendToUser(
+			context.Background(),
+			errand.UserID,
+			"Package Delivered",
+			"Your package has been delivered. Please confirm with your dropoff code.",
+			map[string]string{"errand_id": errandID.String()},
+			domain.NotificationErrandDelivered,
+		)
+	}
+
+	return nil
 }
 func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID, errandID uuid.UUID, code string) (*domain.Errand, error) {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
@@ -298,11 +486,9 @@ func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID
 		return nil, err
 	}
 
-
 	if errand.UserID != userID {
 		return nil, domain.ErrUnauthorized
 	}
-
 
 	if !errand.CanComplete() {
 		return nil, fmt.Errorf("errand cannot be completed in current status: %s", errand.Status)
@@ -311,7 +497,6 @@ func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID
 	if errand.DropoffCode == nil || *errand.DropoffCode != code {
 		return nil, fmt.Errorf("invalid dropoff code")
 	}
-
 
 	now := time.Now()
 	errand.Status = domain.ErrandStatusCompleted
@@ -325,6 +510,21 @@ func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID
 		zap.String("errand_id", errandID.String()),
 		zap.String("user_id", userID.String()),
 	)
+
+	// Notify rider that errand is completed
+	if s.notificationSvc != nil && errand.RiderID != nil {
+		riderProfile, _ := s.riderRepo.GetByID(ctx, *errand.RiderID)
+		if riderProfile != nil {
+			go s.notificationSvc.SendToUser(
+				context.Background(),
+				riderProfile.UserID,
+				"Errand Completed",
+				"The recipient has confirmed delivery. Great job!",
+				map[string]string{"errand_id": errandID.String()},
+				domain.NotificationErrandCompleted,
+			)
+		}
+	}
 
 	return errand, nil
 }

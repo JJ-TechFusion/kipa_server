@@ -17,6 +17,9 @@ type DisputeRepository interface {
 
 	List(ctx context.Context, filters *DisputeFilters, limit, offset int) ([]*domain.Dispute, error)
 
+	// GetByUserID returns disputes where user is buyer or seller on the associated escrow
+	GetByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Dispute, error)
+
 	Update(ctx context.Context, dispute *domain.Dispute) error
 
 	GetStatistics(ctx context.Context) (*DisputeStatistics, error)
