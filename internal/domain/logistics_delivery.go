@@ -139,7 +139,7 @@ func (s LogisticsDeliveryStatus) CanTransitionTo(next LogisticsDeliveryStatus) b
 		},
 		LDStatusShipped: {
 			LDStatusDeliveryClaimed,
-			LDStatusDisputed,
+			// Dispute only allowed after seller claims delivery
 		},
 		LDStatusDeliveryClaimed: {
 			LDStatusConfirmed,
@@ -214,14 +214,7 @@ func (ld *LogisticsDelivery) CanBeShipped() bool {
 
 // CanClaimDelivery checks if seller can claim delivery
 func (ld *LogisticsDelivery) CanClaimDelivery() bool {
-	if ld.Status != LDStatusShipped {
-		return false
-	}
-	// Minimum 24h after shipping before claiming delivery
-	if ld.ShippedAt == nil {
-		return false
-	}
-	return time.Since(*ld.ShippedAt) >= 24*time.Hour
+	return ld.Status == LDStatusShipped
 }
 
 // CanConfirmDelivery checks if buyer can confirm
@@ -229,13 +222,10 @@ func (ld *LogisticsDelivery) CanConfirmDelivery() bool {
 	return ld.Status == LDStatusDeliveryClaimed
 }
 
-// CanOpenDispute checks if a dispute can be opened
+// CanOpenDispute checks if buyer can open a dispute
+// Buyer can only dispute after seller has claimed delivery
 func (ld *LogisticsDelivery) CanOpenDispute() bool {
-	switch ld.Status {
-	case LDStatusShipped, LDStatusDeliveryClaimed:
-		return true
-	}
-	return false
+	return ld.Status == LDStatusDeliveryClaimed
 }
 
 // CanSellerOpenDispute checks if seller can open dispute (buyer unresponsive)

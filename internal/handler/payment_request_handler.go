@@ -284,6 +284,8 @@ func mapPaymentRequestErrorToResponse(err error) (int, string, string) {
 		return http.StatusBadRequest, "ZONE_NOT_FOUND", "Delivery zone not found for the specified location"
 	case errors.Is(err, domain.ErrPaymentRequestNotEditable):
 		return http.StatusBadRequest, "NOT_EDITABLE", "Payment request cannot be edited in its current status"
+	case errors.Is(err, domain.ErrMissingInterStateFields):
+		return http.StatusBadRequest, "MISSING_FIELDS", "pickup_state and dropoff_state are required for inter-state delivery"
 	default:
 		return http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred"
 	}

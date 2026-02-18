@@ -16,6 +16,7 @@ type UploadService interface {
 	UploadItemImage(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error)
 	UploadRiderDocument(ctx context.Context, userID uuid.UUID, docType string, file *multipart.FileHeader) (string, error)
 	UploadDisputeEvidence(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error)
+	UploadShipmentReceipt(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error)
 }
 
 type UploadServiceImpl struct {
@@ -55,6 +56,10 @@ func (s *UploadServiceImpl) UploadRiderDocument(ctx context.Context, userID uuid
 
 func (s *UploadServiceImpl) UploadDisputeEvidence(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error) {
 	return s.uploadFile(ctx, file, "disputes")
+}
+
+func (s *UploadServiceImpl) UploadShipmentReceipt(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (string, error) {
+	return s.uploadFile(ctx, file, "shipments")
 }
 
 func (s *UploadServiceImpl) uploadFile(ctx context.Context, file *multipart.FileHeader, folder string) (string, error) {

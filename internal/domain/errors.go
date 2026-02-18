@@ -86,6 +86,7 @@ var (
 	ErrOrderPaymentFailed     = errors.New("order payment failed")
 	ErrMaxUsesExceeded        = errors.New("payment link max uses exceeded")
 	ErrLinkNotReusable        = errors.New("payment link is not reusable and has already been used")
+	ErrMissingInterStateFields = errors.New("pickup_state and dropoff_state are required for inter-state delivery")
 
 	// Logistics delivery errors
 	ErrLogisticsDeliveryNotFound     = errors.New("logistics delivery not found")

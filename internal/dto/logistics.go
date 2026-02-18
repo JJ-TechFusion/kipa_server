@@ -263,9 +263,7 @@ func GetAvailableActions(delivery *domain.LogisticsDelivery, userID uuid.UUID) [
 			}
 			actions = append(actions, "update_tracking")
 		}
-		if isBuyer {
-			actions = append(actions, "open_dispute")
-		}
+		// Buyer cannot dispute yet - must wait for seller to claim delivery
 	case domain.LDStatusDeliveryClaimed:
 		if isBuyer {
 			actions = append(actions, "confirm_delivery", "open_dispute")
@@ -450,25 +448,34 @@ func BuildTimeline(delivery *domain.LogisticsDelivery, events []*domain.Logistic
 		eventByStatus[e.ToStatus] = e
 	}
 
-	// Build standard timeline
-	statusOrder := getStatusIndex(delivery.Status)
+	// Build standard timeline - check if each step actually happened via events
 	for i, step := range standardSteps {
+		event, hasEvent := eventByStatus[step.Status]
+
+		// Determine if step is completed based on actual events, not status index
+		isCompleted := hasEvent
+
+		// For awaiting_shipment, it's always completed if we have any events (order was placed)
+		if step.Status == domain.LDStatusAwaitingShipment && len(events) > 0 {
+			isCompleted = true
+		}
+
 		ts := TimelineStep{
 			Status:      string(step.Status),
 			Title:       step.Title,
 			Description: step.Description,
-			IsCompleted: getStatusIndex(step.Status) < statusOrder,
+			IsCompleted: isCompleted,
 			IsCurrent:   step.Status == delivery.Status,
 			IsDispute:   false,
 		}
 
-		if event, ok := eventByStatus[step.Status]; ok {
+		if hasEvent {
 			ts.Timestamp = &event.CreatedAt
 			ts.ActorType = event.ActorType
 		}
 
-		// Skip future steps if we're in dispute flow
-		if delivery.DisputeID != nil && i > 2 && !ts.IsCompleted {
+		// Skip future steps (not completed and not current) if we're in dispute flow
+		if delivery.DisputeID != nil && i > 1 && !isCompleted && !ts.IsCurrent {
 			continue
 		}
 
@@ -510,30 +517,44 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 		})
 	}
 
-	// If dispute outcome is buyer wins, add return flow steps
-	if delivery.DisputeOutcome != nil && *delivery.DisputeOutcome == "buyer_favor" {
-		// Return required
+	// Check if buyer won (handles both "buyer_favor" and legacy "buyer_wins" values)
+	// Also check if delivery is in return flow based on status
+	buyerWon := delivery.DisputeOutcome != nil &&
+		(*delivery.DisputeOutcome == "buyer_favor" || *delivery.DisputeOutcome == "buyer_wins")
+	isInReturnFlow := delivery.IsInReturnFlow()
+
+	// If dispute outcome is buyer wins OR delivery is in return flow, add return flow steps
+	if buyerWon || isInReturnFlow {
+		// Return required step
+		_, hasReturnShipped := eventByStatus[domain.LDStatusReturnShipped]
 		if event, ok := eventByStatus[domain.LDStatusReturnRequired]; ok {
+			// Completed if we've moved past this step
+			isCompleted := hasReturnShipped || delivery.Status != domain.LDStatusReturnRequired
 			steps = append(steps, TimelineStep{
 				Status:      "return_required",
 				Title:       "Return Required",
 				Description: "Buyer must return item before refund",
 				Timestamp:   &event.CreatedAt,
 				ActorType:   "admin",
-				IsCompleted: true,
+				IsCompleted: isCompleted,
+				IsCurrent:   delivery.Status == domain.LDStatusReturnRequired,
 				IsDispute:   true,
 			})
 		}
 
-		// Return shipped
+		// Return shipped step
+		_, hasReturnConfirmed := eventByStatus[domain.LDStatusReturnConfirmed]
 		if event, ok := eventByStatus[domain.LDStatusReturnShipped]; ok {
+			isCompleted := hasReturnConfirmed || delivery.Status == domain.LDStatusReturnDamageDisputed ||
+				delivery.Status == domain.LDStatusRefunded
 			steps = append(steps, TimelineStep{
 				Status:      "return_shipped",
 				Title:       "Return Shipped",
 				Description: "Buyer shipped return",
 				Timestamp:   &event.CreatedAt,
 				ActorType:   "buyer",
-				IsCompleted: true,
+				IsCompleted: isCompleted,
+				IsCurrent:   delivery.Status == domain.LDStatusReturnShipped,
 				IsDispute:   true,
 				Metadata: map[string]interface{}{
 					"carrier":         delivery.ReturnCarrier,
@@ -563,7 +584,8 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 				Description: "Seller confirmed return in good condition",
 				Timestamp:   &event.CreatedAt,
 				ActorType:   "seller",
-				IsCompleted: true,
+				IsCompleted: delivery.Status == domain.LDStatusRefunded || delivery.Status == domain.LDStatusPendingRefundApproval,
+				IsCurrent:   delivery.Status == domain.LDStatusReturnConfirmed,
 				IsDispute:   true,
 			})
 		}
@@ -580,7 +602,8 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 				IsDispute:   true,
 			})
 		}
-	} else if delivery.DisputeOutcome != nil && *delivery.DisputeOutcome == "seller_favor" {
+	} else if delivery.DisputeOutcome != nil &&
+		(*delivery.DisputeOutcome == "seller_favor" || *delivery.DisputeOutcome == "seller_wins") {
 		// Seller wins - funds released
 		if event, ok := eventByStatus[domain.LDStatusReleasedByAdmin]; ok {
 			steps = append(steps, TimelineStep{

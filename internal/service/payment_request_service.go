@@ -234,7 +234,7 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 	// Validate state fields for inter-state delivery
 	if req.DeliveryType == domain.DeliveryTypeInterState {
 		if req.PickupState == "" || req.DropoffState == "" {
-			return nil, fmt.Errorf("pickup_state and dropoff_state are required for inter-state delivery")
+			return nil, domain.ErrMissingInterStateFields
 		}
 	}
 	

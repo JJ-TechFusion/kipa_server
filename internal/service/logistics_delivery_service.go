@@ -330,6 +330,11 @@ func (s *LogisticsDeliveryServiceImpl) MarkShipped(ctx context.Context, id uuid.
 
 	s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusDeliveryInProgress)
 
+	// Update payment request status to in_delivery
+	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusInDelivery); err != nil {
+		s.logger.Warn("failed to update payment request status", zap.Error(err))
+	}
+
 	s.sendNotification(ctx, delivery.BuyerID, "Item Shipped", fmt.Sprintf("Your order has been shipped via %s. Tracking: %s", carrier.DisplayName(), trackingNumber))
 
 	s.logger.Info("logistics delivery marked as shipped",
@@ -391,10 +396,6 @@ func (s *LogisticsDeliveryServiceImpl) ClaimDelivery(ctx context.Context, id uui
 		return domain.ErrCannotClaimDelivery
 	}
 
-	if delivery.ShippedAt == nil || time.Since(*delivery.ShippedAt) < MinHoursBeforeClaimingDelivery*time.Hour {
-		return domain.ErrCannotClaimDeliveryTooEarly
-	}
-
 	confirmationDeadline := time.Now().Add(ConfirmationWindowDays * 24 * time.Hour)
 	autoEscalationAt := time.Now().Add(ConfirmationWindowDays * 24 * time.Hour)
 
@@ -409,6 +410,11 @@ func (s *LogisticsDeliveryServiceImpl) ClaimDelivery(ctx context.Context, id uui
 
 	fromStatus := delivery.Status
 	s.recordEvent(ctx, id, &fromStatus, domain.LDStatusDeliveryClaimed, &sellerID, "seller", "Seller claims item delivered", nil)
+
+	// Update payment request status to confirmation_window
+	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusConfirmationWindow); err != nil {
+		s.logger.Warn("failed to update payment request status", zap.Error(err))
+	}
 
 	s.sendNotification(ctx, delivery.BuyerID, "Please Confirm Delivery",
 		fmt.Sprintf("The seller claims your order has been delivered. Please confirm receipt within %d days or open a dispute if there are issues.", ConfirmationWindowDays))
@@ -598,6 +604,11 @@ func (s *LogisticsDeliveryServiceImpl) CancelDelivery(ctx context.Context, id uu
 		s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusRefunded)
 	}
 
+	// Update payment request status to cancelled
+	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusCancelled); err != nil {
+		s.logger.Warn("failed to update payment request status", zap.Error(err))
+	}
+
 	s.sendNotification(ctx, delivery.SellerID, "Order Cancelled", "Your order was cancelled because you missed the shipping deadline.")
 
 	s.logger.Info("logistics delivery cancelled",
@@ -684,10 +695,14 @@ func (s *LogisticsDeliveryServiceImpl) OpenDispute(ctx context.Context, id uuid.
 
 	s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusDisputed)
 
+	// Update payment request status to disputed
+	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusDisputed); err != nil {
+		s.logger.Warn("failed to update payment request status", zap.Error(err))
+	}
+
 	// Record event
 	fromStatus := delivery.Status
 	s.recordEvent(ctx, id, &fromStatus, domain.LDStatusDisputed, &openerID, openerType, req.Reason, nil)
-
 
 	var notifyID uuid.UUID
 	if openerType == "buyer" {
@@ -736,7 +751,6 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 
 	var outcome domain.DisputeOutcome
 	var newStatus domain.LogisticsDeliveryStatus
-	disputeOutcome := req.Outcome
 
 	switch req.Outcome {
 	case "buyer_wins":
@@ -791,9 +805,9 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 		return fmt.Errorf("invalid outcome: %s", req.Outcome)
 	}
 
-	// Store the dispute outcome on the delivery
-	delivery.DisputeOutcome = &disputeOutcome
-
+	// Store the dispute outcome on the delivery (use domain constant value for consistency)
+	outcomeStr := string(outcome)
+	delivery.DisputeOutcome = &outcomeStr
 
 	dispute.Resolve(adminID, outcome, req.ResolutionNotes)
 	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
@@ -807,6 +821,22 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 	}
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return err
+	}
+
+	// Update payment request status based on outcome
+	var prStatus domain.PaymentRequestStatus
+	switch newStatus {
+	case domain.LDStatusReturnRequired:
+		prStatus = domain.PRStatusReturnRequired
+	case domain.LDStatusReleasedByAdmin:
+		prStatus = domain.PRStatusCompleted
+	case domain.LDStatusRefunded:
+		prStatus = domain.PRStatusRefunded
+	}
+	if prStatus != "" {
+		if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, prStatus); err != nil {
+			s.logger.Warn("failed to update payment request status", zap.Error(err))
+		}
 	}
 
 	fromStatus := domain.LDStatusDisputed
@@ -1231,6 +1261,10 @@ func (s *LogisticsDeliveryServiceImpl) releaseEscrowToSeller(ctx context.Context
 	delivery.ReleasedAt = &now
 	s.deliveryRepo.Update(ctx, delivery)
 
+	// Update payment request status to completed
+	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusCompleted); err != nil {
+		s.logger.Warn("failed to update payment request status", zap.Error(err))
+	}
 
 	fromStatus := domain.LDStatusConfirmed
 	if delivery.RequiresAdminApproval {
@@ -1258,6 +1292,11 @@ func (s *LogisticsDeliveryServiceImpl) processReturnRefund(ctx context.Context, 
 
 	escrow.Status = domain.EscrowStatusRefunded
 	s.escrowRepo.Update(ctx, escrow)
+
+	// Update payment request status to refunded
+	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusRefunded); err != nil {
+		s.logger.Warn("failed to update payment request status", zap.Error(err))
+	}
 
 	fromStatus := domain.LDStatusReturnConfirmed
 	s.recordEvent(ctx, delivery.ID, &fromStatus, domain.LDStatusRefunded, nil, "system", "Return confirmed, buyer refunded", nil)

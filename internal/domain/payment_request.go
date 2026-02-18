@@ -119,12 +119,12 @@ func (s PaymentRequestStatus) CanTransitionTo(next PaymentRequestStatus) bool {
 	transitions := map[PaymentRequestStatus][]PaymentRequestStatus{
 		PRStatusDraft:                   {PRStatusLinkActive, PRStatusCancelled},
 		PRStatusLinkActive:              {PRStatusPaidAwaitingFulfillment, PRStatusExpired, PRStatusCancelled},
-		PRStatusPaidAwaitingFulfillment: {PRStatusReadyForPickup, PRStatusSearchingRider, PRStatusDisputed, PRStatusRefunded},
+		PRStatusPaidAwaitingFulfillment: {PRStatusReadyForPickup, PRStatusSearchingRider, PRStatusInDelivery, PRStatusDisputed, PRStatusRefunded}, // InDelivery for inter-state
 		PRStatusReadyForPickup:          {PRStatusSearchingRider, PRStatusInDelivery, PRStatusDelivered, PRStatusDisputed},
 		PRStatusSearchingRider:          {PRStatusRiderAssigned, PRStatusNoRiderFound},
 		PRStatusRiderAssigned:           {PRStatusInDelivery, PRStatusCancelled, PRStatusCancelledSellerUnavailable},
 		PRStatusNoRiderFound:            {PRStatusSearchingRider, PRStatusRefunded},
-		PRStatusInDelivery:              {PRStatusDelivered, PRStatusDisputed, PRStatusPendingRebook},
+		PRStatusInDelivery:              {PRStatusDelivered, PRStatusConfirmationWindow, PRStatusDisputed, PRStatusPendingRebook}, // ConfirmationWindow for inter-state
 		PRStatusDelivered:               {PRStatusConfirmationWindow},
 		PRStatusConfirmationWindow:      {PRStatusCompleted, PRStatusDisputed},
 		PRStatusDisputed:                {PRStatusCompleted, PRStatusRefunded, PRStatusReturnRequired},
