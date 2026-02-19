@@ -13,39 +13,35 @@ jobs:
       DOCKER_COMPOSE_FILE: docker-compose.staging.yml
       ENV_FILE: /home/ubuntu/kipa_server/.env.staging
       APP_DIR: /home/ubuntu/kipa_server
+      AWS_REGION: us-east-1
+      INSTANCE_ID: i-0f58b63c037f6f4ae
 
     steps:
       # 1️⃣ Checkout the repo
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2️⃣ Set up SSH for EC2
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.1
+      # 2️⃣ Configure AWS credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
         with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # 3️⃣ Install Docker CLI (for docker-compose)
-      - name: Install Docker Compose
+      # 3️⃣ Deploy using SSM RunCommand
+      - name: Deploy via SSM
         run: |
-          DOCKER_COMPOSE_VERSION=2.21.0
-          sudo curl -L "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" \
-            -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
-
-      # 4️⃣ Deploy to EC2
-      - name: Deploy to EC2
-        run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@13.48.204.247 "
-            echo 'Pulling latest code...'
-            cd $APP_DIR &&
-            git fetch --all &&
-            git reset --hard origin/main &&
-            
-            echo 'Building and running Docker containers...'
-            docker compose -f $DOCKER_COMPOSE_FILE --env-file $ENV_FILE up -d --build &&
-            
-            echo 'Cleaning up old images...'
-            docker image prune -f
-          "
+          echo "Deploying Kipa server via SSM..."
+          aws ssm send-command \
+            --targets "Key=instanceIds,Values=${{ env.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy Kipa staging" \
+            --parameters 'commands=[
+              "cd $APP_DIR",
+              "git fetch --all",
+              "git reset --hard origin/main",
+              "docker compose -f $DOCKER_COMPOSE_FILE --env-file $ENV_FILE up -d --build",
+              "docker image prune -f"
+            ]' \
+            --region $AWS_REGION
