@@ -1,0 +1,48 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      DOCKER_COMPOSE_FILE: docker-compose.staging.yml
+      ENV_FILE: /home/ubuntu/kipa_server/.env.staging
+      APP_DIR: /home/ubuntu/kipa_server
+
+    steps:
+      # 1️⃣ Checkout the repo
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2️⃣ Set up SSH for EC2
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.1
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      # 3️⃣ Install Docker CLI (for docker-compose)
+      - name: Install Docker CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker.io docker-compose-plugin
+
+      # 4️⃣ Deploy to EC2
+      - name: Deploy to EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@<13.48.204.247> "
+            echo 'Pulling latest code...'
+            cd $APP_DIR &&
+            git fetch --all &&
+            git reset --hard origin/main &&
+            
+            echo 'Building and running Docker containers...'
+            docker compose -f $DOCKER_COMPOSE_FILE --env-file $ENV_FILE up -d --build &&
+            
+            echo 'Cleaning up old images...'
+            docker image prune -f
+          "
