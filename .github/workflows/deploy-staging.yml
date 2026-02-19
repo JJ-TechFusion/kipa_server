@@ -37,7 +37,7 @@ jobs:
       # 4️⃣ Deploy to EC2
       - name: Deploy to EC2
         run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@<13.48.204.247> "
+          ssh -o StrictHostKeyChecking=no ubuntu@13.48.204.247 "
             echo 'Pulling latest code...'
             cd $APP_DIR &&
             git fetch --all &&
