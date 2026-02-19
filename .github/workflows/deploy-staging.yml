@@ -13,7 +13,7 @@ jobs:
       DOCKER_COMPOSE_FILE: docker-compose.staging.yml
       ENV_FILE: /home/ubuntu/kipa_server/.env.staging
       APP_DIR: /home/ubuntu/kipa_server
-      AWS_REGION: us-east-1
+      AWS_REGION: eu-north-1
       INSTANCE_ID: i-0f58b63c037f6f4ae
 
     steps:
