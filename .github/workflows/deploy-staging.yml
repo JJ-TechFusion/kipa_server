@@ -26,10 +26,16 @@ jobs:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       # 3️⃣ Install Docker CLI (for docker-compose)
-      - name: Install Docker CLI
+      - name: Install Docker & Docker Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker.io docker-compose-plugin
+          sudo apt-get install -y docker.io curl
+          # Install latest Docker Compose
+          DOCKER_COMPOSE_VERSION=2.21.0
+          sudo curl -L "https://github.com/docker/compose/releases/download/v$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" \
+            -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
 
       # 4️⃣ Deploy to EC2
       - name: Deploy to EC2
