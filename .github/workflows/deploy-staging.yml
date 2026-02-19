@@ -34,14 +34,8 @@ jobs:
         run: |
           echo "Deploying Kipa server via SSM..."
           aws ssm send-command \
-            --targets "Key=instanceIds,Values=${{ env.INSTANCE_ID }}" \
+            --targets Key=InstanceIds,Values=${{ env.INSTANCE_ID }} \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy Kipa staging" \
-            --parameters 'commands=[
-              "cd $APP_DIR",
-              "git fetch --all",
-              "git reset --hard origin/main",
-              "docker compose -f $DOCKER_COMPOSE_FILE --env-file $ENV_FILE up -d --build",
-              "docker image prune -f"
-            ]' \
-            --region $AWS_REGION
+            --parameters '{"commands":["cd /home/ubuntu/kipa_server","git fetch --all","git reset --hard origin/main","docker compose -f docker-compose.staging.yml --env-file /home/ubuntu/kipa_server/.env.staging up -d --build","docker image prune -f"]}' \
+            --region ${{ env.AWS_REGION }}
