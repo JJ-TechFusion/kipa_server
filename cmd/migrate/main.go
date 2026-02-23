@@ -51,7 +51,7 @@ func main() {
 	}
 	defer m.Close()
 
-	// Execute command
+	// Execute commands
 	switch command {
 	case "up":
 		if steps > 0 {
