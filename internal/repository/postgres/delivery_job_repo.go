@@ -475,6 +475,19 @@ func (r *DeliveryJobRepo) UpdateForcedReturn(ctx context.Context, job *domain.De
 	return err
 }
 
+func (r *DeliveryJobRepo) HasActiveByRiderUserID(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var exists bool
+	query := `
+		SELECT EXISTS(
+			SELECT 1 FROM delivery_jobs dj
+			JOIN rider_profiles rp ON dj.rider_id = rp.id
+			WHERE rp.user_id = $1
+			AND dj.status IN ('pending', 'accepted', 'picked_up', 'in_transit')
+		)`
+	err := r.db.GetContext(ctx, &exists, query, userID)
+	return exists, err
+}
+
 type RiderJobOfferRepo struct {
 	db *sqlx.DB
 }

@@ -16,8 +16,11 @@ var (
 	ErrSessionNotFound     = errors.New("session not found")
 	ErrSessionRevoked      = errors.New("session has been revoked")
 	ErrUserNotFound        = errors.New("user not found")
-	ErrUserSuspended       = errors.New("user account is suspended")
-	ErrUserAlreadyExists   = errors.New("user already exists")
+	ErrUserSuspended         = errors.New("user account is suspended")
+	ErrUserAlreadyExists     = errors.New("user already exists")
+	ErrActiveEscrowsExist    = errors.New("cannot delete account with active escrows")
+	ErrActiveDeliveriesExist = errors.New("cannot delete account with active deliveries")
+	ErrWalletBalanceNotZero  = errors.New("cannot delete account with wallet balance")
 	ErrPhoneNumberRequired = errors.New("phone number is required")
 	ErrInvalidPhoneNumber  = errors.New("invalid phone number format")
 	ErrProfileIncomplete   = errors.New("profile incomplete: first name, last name, and email are required")
@@ -150,7 +153,8 @@ var (
 	ErrPinLocked        = errors.New("wallet locked due to too many failed attempts")
 	ErrPinTooShort      = errors.New("PIN must be at least 4 digits")
 	ErrPinTooLong       = errors.New("PIN must be at most 6 digits")
-	ErrPinMustBeNumeric = errors.New("PIN must contain only digits")
+	ErrPinMustBeNumeric     = errors.New("PIN must contain only digits")
+	ErrPinResetNotRequested = errors.New("PIN reset not requested")
 )
 const (
 	CodeInvalidInput   = "INVALID_INPUT"

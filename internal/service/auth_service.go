@@ -24,6 +24,9 @@ type AuthServiceImpl struct {
 	otpRepo         repository.OTPRepository
 	idempotencyRepo repository.IdempotencyRepository
 	sessionRepo     repository.SessionRepository
+	escrowRepo      repository.EscrowRepository
+	deliveryJobRepo repository.DeliveryJobRepository
+	walletRepo      repository.WalletRepository
 	verifyProvider  integration.VerifyProvider
 	jwtManager      util.JWTManager
 	hasher          util.Hasher
@@ -37,6 +40,9 @@ func NewAuthService(
 	otpRepo repository.OTPRepository,
 	idempotencyRepo repository.IdempotencyRepository,
 	sessionRepo repository.SessionRepository,
+	escrowRepo repository.EscrowRepository,
+	deliveryJobRepo repository.DeliveryJobRepository,
+	walletRepo repository.WalletRepository,
 	verifyProvider integration.VerifyProvider,
 	jwtManager util.JWTManager,
 	hasher util.Hasher,
@@ -49,6 +55,9 @@ func NewAuthService(
 		otpRepo:         otpRepo,
 		idempotencyRepo: idempotencyRepo,
 		sessionRepo:     sessionRepo,
+		escrowRepo:      escrowRepo,
+		deliveryJobRepo: deliveryJobRepo,
+		walletRepo:      walletRepo,
 		verifyProvider:  verifyProvider,
 		jwtManager:      jwtManager,
 		hasher:          hasher,
@@ -573,4 +582,55 @@ func generateRequestHash(phoneNumber, verificationID, otpCode string) string {
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
 }
+
+func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+	// Check for active escrows
+	hasActiveEscrows, err := s.escrowRepo.HasActiveByUserID(ctx, userID)
+	if err != nil {
+		s.logger.Error("failed to check active escrows", zap.Error(err))
+		return fmt.Errorf("failed to check active escrows: %w", err)
+	}
+	if hasActiveEscrows {
+		return domain.ErrActiveEscrowsExist
+	}
+
+	// Check for active delivery jobs (as rider)
+	hasActiveDeliveries, err := s.deliveryJobRepo.HasActiveByRiderUserID(ctx, userID)
+	if err != nil {
+		s.logger.Error("failed to check active deliveries", zap.Error(err))
+		return fmt.Errorf("failed to check active deliveries: %w", err)
+	}
+	if hasActiveDeliveries {
+		return domain.ErrActiveDeliveriesExist
+	}
+
+	// Check wallet balance
+	wallet, err := s.walletRepo.GetByUserID(ctx, userID)
+	if err != nil && !errors.Is(err, domain.ErrWalletNotFound) {
+		s.logger.Error("failed to get wallet", zap.Error(err))
+		return fmt.Errorf("failed to check wallet: %w", err)
+	}
+	if wallet != nil && (wallet.AvailableBalance > 0 || wallet.LockedBalance > 0) {
+		return domain.ErrWalletBalanceNotZero
+	}
+
+	// Soft delete user (anonymize PII, suspend account)
+	if err := s.userRepo.SoftDelete(ctx, userID); err != nil {
+		s.logger.Error("failed to soft delete user", zap.Error(err))
+		return fmt.Errorf("failed to delete account: %w", err)
+	}
+
+	// Invalidate all sessions
+	if err := s.sessionRepo.DeleteAllForUser(ctx, userID); err != nil {
+		s.logger.Error("failed to delete sessions", zap.Error(err))
+		// Don't fail the deletion for this
+	}
+
+	s.logger.Info("user account deleted",
+		zap.String("user_id", userID.String()),
+	)
+
+	return nil
+}
+
 var _ AuthService = (*AuthServiceImpl)(nil)

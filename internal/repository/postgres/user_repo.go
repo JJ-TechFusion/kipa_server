@@ -156,7 +156,7 @@ func (r *UserRepo) List(ctx context.Context, filters interface{}, limit, offset 
 
 func (r *UserRepo) GetStatistics(ctx context.Context) (*repository.UserStatistics, error) {
 	query := `
-		SELECT 
+		SELECT
 			COUNT(*) as total_users,
 			COUNT(*) FILTER (WHERE is_seller = true) as total_sellers,
 			COUNT(*) FILTER (WHERE is_buyer = true) as total_buyers,
@@ -170,6 +170,21 @@ func (r *UserRepo) GetStatistics(ctx context.Context) (*repository.UserStatistic
 		return nil, err
 	}
 	return &stats, nil
+}
+
+func (r *UserRepo) SoftDelete(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE users SET
+			first_name = 'Deleted',
+			last_name = 'User',
+			email = NULL,
+			profile_photo_url = NULL,
+			is_suspended = true,
+			suspension_reason = 'Account deleted by user',
+			updated_at = NOW()
+		WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, userID)
+	return err
 }
 
 type OTPRepo struct {

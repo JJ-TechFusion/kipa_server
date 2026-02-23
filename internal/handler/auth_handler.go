@@ -31,7 +31,8 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *mi
 		auth.POST("/logout", authMiddleware.RequireAuth(), h.Logout)
 		auth.GET("/me", authMiddleware.RequireAuth(), h.Me)
 		auth.PATCH("/profile", authMiddleware.RequireAuth(), h.UpdateProfile)
-		
+		auth.DELETE("/account", authMiddleware.RequireAuth(), h.DeleteAccount)
+
 		// Development only endpoint
 		auth.POST("/dev/token", h.DevGenerateToken)
 	}
@@ -195,6 +196,12 @@ func mapErrorToResponse(err error) (int, string, string) {
 		return http.StatusConflict, "DUPLICATE_REQUEST", "This request has already been processed"
 	case errors.Is(err, domain.ErrSMSDeliveryFailed):
 		return http.StatusServiceUnavailable, domain.CodeSMSFailed, "Failed to send OTP. Please try again."
+	case errors.Is(err, domain.ErrActiveEscrowsExist):
+		return http.StatusBadRequest, "ACTIVE_ESCROWS_EXIST", "Cannot delete account with active orders. Please complete or cancel them first."
+	case errors.Is(err, domain.ErrActiveDeliveriesExist):
+		return http.StatusBadRequest, "ACTIVE_DELIVERIES_EXIST", "Cannot delete account with active deliveries. Please complete them first."
+	case errors.Is(err, domain.ErrWalletBalanceNotZero):
+		return http.StatusBadRequest, "WALLET_BALANCE_NOT_ZERO", "Cannot delete account with wallet balance. Please withdraw your funds first."
 	default:
 		return http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred"
 	}
@@ -229,4 +236,21 @@ func (h *AuthHandler) DevGenerateToken(c *gin.Context) {
 	}
 
 	util.Success(c, http.StatusOK, response)
+}
+
+func (h *AuthHandler) DeleteAccount(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	if err := h.authService.DeleteAccount(c.Request.Context(), userID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message": "Account deleted successfully",
+	})
 }

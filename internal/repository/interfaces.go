@@ -26,6 +26,7 @@ type UserRepository interface {
 	VerifySeller(ctx context.Context, userID uuid.UUID) error
 	List(ctx context.Context, filters interface{}, limit, offset int) ([]*domain.User, error)
 	GetStatistics(ctx context.Context) (*UserStatistics, error)
+	SoftDelete(ctx context.Context, userID uuid.UUID) error
 }
 
 type UserStatistics struct {
@@ -61,6 +62,9 @@ type SessionRepository interface {
 	IncrementRateLimitCount(ctx context.Context, phoneNumber string, window time.Duration) error
 	GetLastOTPSentTime(ctx context.Context, phoneNumber string) (time.Time, error)
 	SetLastOTPSentTime(ctx context.Context, phoneNumber string, ttl time.Duration) error
+	SetPinResetPending(ctx context.Context, userID uuid.UUID, ttl time.Duration) error
+	GetPinResetPending(ctx context.Context, userID uuid.UUID) (bool, error)
+	DeletePinResetPending(ctx context.Context, userID uuid.UUID) error
 }
 type PaymentRequestRepository interface {
 	Create(ctx context.Context, pr *domain.PaymentRequest) error
@@ -112,6 +116,7 @@ type DeliveryJobRepository interface {
 
 	// Forced return updates (swaps pickup/dropoff, sets is_forced_return)
 	UpdateForcedReturn(ctx context.Context, job *domain.DeliveryJob) error
+	HasActiveByRiderUserID(ctx context.Context, userID uuid.UUID) (bool, error)
 }
 
 type JobCoordinates struct {
@@ -138,6 +143,7 @@ type EscrowRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.EscrowStatus) error
 	GetPendingConfirmationWindow(ctx context.Context) ([]*domain.Escrow, error)
 	GetPendingForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*PendingEscrowDetails, error)
+	HasActiveByUserID(ctx context.Context, userID uuid.UUID) (bool, error)
 }
 
 // PendingEscrowDetails contains escrow with related user and payment request info

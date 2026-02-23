@@ -210,3 +210,15 @@ func (r *EscrowRepo) GetPendingForUser(ctx context.Context, userID uuid.UUID, li
 
 	return results, nil
 }
+
+func (r *EscrowRepo) HasActiveByUserID(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var exists bool
+	query := `
+		SELECT EXISTS(
+			SELECT 1 FROM escrows
+			WHERE (buyer_id = $1 OR seller_id = $1)
+			AND status IN ('funded', 'delivery_in_progress', 'delivered', 'confirmation_window', 'disputed')
+		)`
+	err := r.db.GetContext(ctx, &exists, query, userID)
+	return exists, err
+}

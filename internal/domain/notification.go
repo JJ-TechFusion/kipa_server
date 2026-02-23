@@ -50,6 +50,7 @@ const (
 	NotificationWithdrawalInitiated NotificationType = "withdrawal_initiated"
 	NotificationWithdrawalSuccess   NotificationType = "withdrawal_success"
 	NotificationWithdrawalFailed    NotificationType = "withdrawal_failed"
+	NotificationPinReset            NotificationType = "pin_reset"
 
 	// Dispute & Admin
 	NotificationDisputeOpened   NotificationType = "dispute_opened"

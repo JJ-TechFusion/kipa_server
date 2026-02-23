@@ -144,6 +144,9 @@ func main() {
 		otpRepo,
 		idempotencyRepo,
 		sessionRepo,
+		escrowRepo,
+		deliveryJobRepo,
+		walletRepo,
 		verifyProvider,
 		jwtManager,
 		hasher,
@@ -167,9 +170,6 @@ func main() {
 	wsHub := websocket.NewHub(logger)
 	go wsHub.Run()
 
-	// Wallet service
-	walletService := service.NewWalletService(walletRepo, walletTxRepo, logger)
-
 	// Wallet funding service
 	walletFundingService := service.NewWalletFundingService(
 		bankAccountRepo,
@@ -186,17 +186,28 @@ func main() {
 	// Payment request service
 	prService := service.NewPaymentRequestService(prRepo, prEventRepo, userRepo, deliveryJobRepo, feeCalculator, wsHub, cfg, logger)
 
-	// Escrow service
-	// Escrow service
-	escrowService := service.NewEscrowService(escrowRepo, walletService, feeCalculator, cfg, logger)
-
-	// Notification service
+	// Notification service (created before wallet service as wallet needs it)
 	notificationService := service.NewNotificationService(
 		fcmClient,
 		deviceTokenRepo,
 		notificationLogRepo,
 		logger,
 	)
+
+	// Wallet service
+	walletService := service.NewWalletService(
+		walletRepo,
+		walletTxRepo,
+		userRepo,
+		sessionRepo,
+		verifyProvider,
+		notificationService,
+		cfg,
+		logger,
+	)
+
+	// Escrow service
+	escrowService := service.NewEscrowService(escrowRepo, walletService, feeCalculator, cfg, logger)
 
 	// Logistics delivery repositories (needed for order service)
 	logisticsDeliveryRepo := postgres.NewLogisticsDeliveryRepo(pgClient.DB)

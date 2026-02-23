@@ -76,7 +76,9 @@ func main() {
 	driverOfferRepo := postgres.NewDriverOfferRepo(db)
 
 	// Initialize services
-	walletService := service.NewWalletService(walletRepo, walletTxRepo, log)
+	// Note: Wallet service in worker doesn't need PIN reset capabilities,
+	// so we pass nil for userRepo, sessionRepo, verifyProvider, notificationService, and config
+	walletService := service.NewWalletService(walletRepo, walletTxRepo, nil, nil, nil, nil, nil, log)
 	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, platformSettingsRepo, nil, cfg, log)
 	escrowService := service.NewEscrowService(escrowRepo, walletService, feeCalculator, cfg, log)
 

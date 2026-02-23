@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	sessionKeyPrefix   = "session:"
-	userSessionsPrefix = "user_sessions:"
-	rateLimitPrefix    = "otp_rate:"
-	lastOTPSentPrefix  = "otp_last_sent:"
+	sessionKeyPrefix       = "session:"
+	userSessionsPrefix     = "user_sessions:"
+	rateLimitPrefix        = "otp_rate:"
+	lastOTPSentPrefix      = "otp_last_sent:"
+	pinResetPendingPrefix  = "pin_reset_pending:"
 )
 
 type SessionRepo struct {
@@ -186,6 +187,46 @@ func (r *SessionRepo) SetLastOTPSentTime(ctx context.Context, phoneNumber string
 	err := r.client.Set(ctx, key, time.Now().Unix(), ttl).Err()
 	if err != nil {
 		return fmt.Errorf("failed to set last OTP sent time: %w", err)
+	}
+
+	return nil
+}
+
+func pinResetPendingKey(userID uuid.UUID) string {
+	return fmt.Sprintf("%s%s", pinResetPendingPrefix, userID.String())
+}
+
+func (r *SessionRepo) SetPinResetPending(ctx context.Context, userID uuid.UUID, ttl time.Duration) error {
+	key := pinResetPendingKey(userID)
+
+	err := r.client.Set(ctx, key, "1", ttl).Err()
+	if err != nil {
+		return fmt.Errorf("failed to set PIN reset pending: %w", err)
+	}
+
+	return nil
+}
+
+func (r *SessionRepo) GetPinResetPending(ctx context.Context, userID uuid.UUID) (bool, error) {
+	key := pinResetPendingKey(userID)
+
+	_, err := r.client.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get PIN reset pending: %w", err)
+	}
+
+	return true, nil
+}
+
+func (r *SessionRepo) DeletePinResetPending(ctx context.Context, userID uuid.UUID) error {
+	key := pinResetPendingKey(userID)
+
+	err := r.client.Del(ctx, key).Err()
+	if err != nil {
+		return fmt.Errorf("failed to delete PIN reset pending: %w", err)
 	}
 
 	return nil

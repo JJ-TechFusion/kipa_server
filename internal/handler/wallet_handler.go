@@ -40,6 +40,8 @@ func (h *WalletHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 		wallet.POST("/pin", h.CreatePin)
 		wallet.POST("/pin/verify", h.VerifyPin)
 		wallet.PUT("/pin", h.ChangePin)
+		wallet.POST("/pin/reset/request", h.RequestPinReset)
+		wallet.POST("/pin/reset/confirm", h.ConfirmPinReset)
 	}
 }
 func (h *WalletHandler) GetWallet(c *gin.Context) {
@@ -324,6 +326,11 @@ type ChangePinRequest struct {
 	NewPin string `json:"new_pin" binding:"required"`
 }
 
+type ConfirmPinResetRequest struct {
+	OTPCode string `json:"otp_code" binding:"required"`
+	NewPin  string `json:"new_pin" binding:"required"`
+}
+
 func (h *WalletHandler) GetPinStatus(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -426,7 +433,56 @@ func (h *WalletHandler) handlePinError(c *gin.Context, err error) {
 		util.Error(c, http.StatusBadRequest, "PIN_TOO_LONG", "PIN must be at most 6 digits")
 	case errors.Is(err, domain.ErrPinMustBeNumeric):
 		util.Error(c, http.StatusBadRequest, "PIN_MUST_BE_NUMERIC", "PIN must contain only digits")
+	case errors.Is(err, domain.ErrPinResetNotRequested):
+		util.Error(c, http.StatusBadRequest, "PIN_RESET_NOT_REQUESTED", "PIN reset not requested. Call request endpoint first.")
+	case errors.Is(err, domain.ErrOTPRateLimitExceeded):
+		util.Error(c, http.StatusTooManyRequests, "OTP_RATE_LIMIT_EXCEEDED", "Too many OTP requests. Please try again later.")
+	case errors.Is(err, domain.ErrOTPResendCooldown):
+		util.Error(c, http.StatusTooManyRequests, "OTP_RESEND_COOLDOWN", "Please wait before requesting another OTP.")
+	case errors.Is(err, domain.ErrSMSDeliveryFailed):
+		util.Error(c, http.StatusServiceUnavailable, "SMS_DELIVERY_FAILED", "Failed to send OTP. Please try again.")
+	case errors.Is(err, domain.ErrInvalidOTP):
+		util.Error(c, http.StatusBadRequest, "INVALID_OTP", "Invalid or expired OTP code.")
 	default:
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred")
 	}
+}
+
+func (h *WalletHandler) RequestPinReset(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	response, err := h.walletService.RequestPinReset(c.Request.Context(), userID)
+	if err != nil {
+		h.handlePinError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, response)
+}
+
+func (h *WalletHandler) ConfirmPinReset(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	var req ConfirmPinResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	if err := h.walletService.ConfirmPinReset(c.Request.Context(), userID, req.OTPCode, req.NewPin); err != nil {
+		h.handlePinError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message": "PIN reset successfully",
+	})
 }
