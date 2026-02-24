@@ -49,5 +49,7 @@ tmp/
 temp/
 *.log
 
-# Deployment configs (keep only what's needed)
-deployments/
+# Deployment configs (keep only what's needed, but allow wait-for-it.sh)
+deployments/**
+!deployments/docker/
+!deployments/docker/wait-for-it.sh
