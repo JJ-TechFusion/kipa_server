@@ -39,8 +39,182 @@ func (h *TransactionHandler) RegisterRoutes(router *gin.RouterGroup, authMiddlew
 	tx := router.Group("/transactions")
 	tx.Use(authMiddleware.RequireAuth())
 	{
+		tx.GET("", h.ListTransactions)
 		tx.GET("/active-deliveries", h.GetActiveDeliveries)
 		tx.GET("/:id", h.GetTransactionStatus)
+	}
+}
+
+// ListTransactions returns all transactions for the user (as buyer or seller)
+func (h *TransactionHandler) ListTransactions(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	// Get status filter from query param (optional)
+	statusFilter := c.Query("status") // "active", "completed", "all" (default)
+
+	var transactions []TransactionListItem
+
+	// Get payment requests where user is seller (that have been paid)
+	sellerPRs, _ := h.prService.GetBySellerID(c.Request.Context(), userID, 100, 0)
+	for _, pr := range sellerPRs {
+		// Skip drafts and link_active (not yet paid)
+		if pr.Status == domain.PRStatusDraft || pr.Status == domain.PRStatusLinkActive {
+			continue
+		}
+
+		// Apply status filter
+		if !h.matchesStatusFilter(pr.Status, statusFilter) {
+			continue
+		}
+
+		item := h.buildTransactionListItem(c, pr, "seller")
+		transactions = append(transactions, item)
+	}
+
+	// Get payment requests where user is buyer
+	buyerPRs, _ := h.prService.GetByBuyerID(c.Request.Context(), userID, 100, 0)
+	for _, pr := range buyerPRs {
+		// Apply status filter
+		if !h.matchesStatusFilter(pr.Status, statusFilter) {
+			continue
+		}
+
+		item := h.buildTransactionListItem(c, pr, "buyer")
+		transactions = append(transactions, item)
+	}
+
+	// Sort by created_at descending (most recent first)
+	for i := 0; i < len(transactions)-1; i++ {
+		for j := i + 1; j < len(transactions); j++ {
+			if transactions[i].CreatedAt < transactions[j].CreatedAt {
+				transactions[i], transactions[j] = transactions[j], transactions[i]
+			}
+		}
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"transactions": transactions,
+		"count":        len(transactions),
+	})
+}
+
+func (h *TransactionHandler) matchesStatusFilter(status domain.PaymentRequestStatus, filter string) bool {
+	if filter == "" || filter == "all" {
+		return true
+	}
+
+	isActive := status == domain.PRStatusPaidAwaitingFulfillment ||
+		status == domain.PRStatusReadyForPickup ||
+		status == domain.PRStatusSearchingRider ||
+		status == domain.PRStatusRiderAssigned ||
+		status == domain.PRStatusInDelivery ||
+		status == domain.PRStatusDelivered ||
+		status == domain.PRStatusConfirmationWindow ||
+		status == domain.PRStatusDisputed ||
+		status == domain.PRStatusPendingRebook ||
+		status.IsReturnFlow()
+
+	isCompleted := status == domain.PRStatusCompleted ||
+		status == domain.PRStatusRefunded ||
+		status == domain.PRStatusCancelled ||
+		status == domain.PRStatusRebookExpired
+
+	switch filter {
+	case "active":
+		return isActive
+	case "completed":
+		return isCompleted
+	default:
+		return true
+	}
+}
+
+func (h *TransactionHandler) buildTransactionListItem(c *gin.Context, pr *domain.PaymentRequest, role string) TransactionListItem {
+	item := TransactionListItem{
+		PaymentRequestID: pr.ID,
+		Role:             role,
+		ItemName:         pr.ItemName,
+		ItemPrice:        pr.ItemPrice,
+		Status:           string(pr.Status),
+		StatusText:       h.getStatusText(pr.Status, role),
+		DeliveryType:     string(pr.DeliveryType),
+		CreatedAt:        pr.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+
+	// Add total amount
+	if pr.EstimatedTotal != nil {
+		item.TotalAmount = pr.EstimatedTotal
+	}
+
+	// Add paid timestamp
+	if pr.PaidAt != nil {
+		paidAt := pr.PaidAt.Format("2006-01-02T15:04:05Z07:00")
+		item.PaidAt = &paidAt
+	}
+
+	// Get counterparty info
+	if role == "seller" && pr.BuyerID != nil {
+		buyer, err := h.userRepo.GetByID(c.Request.Context(), *pr.BuyerID)
+		if err == nil {
+			item.CounterpartyName = buyer.FullName()
+			item.CounterpartyRole = "Buyer"
+		}
+	} else if role == "buyer" {
+		seller, err := h.userRepo.GetByID(c.Request.Context(), pr.SellerID)
+		if err == nil {
+			item.CounterpartyName = seller.FullName()
+			item.CounterpartyRole = "Seller"
+		}
+	}
+
+	return item
+}
+
+func (h *TransactionHandler) getStatusText(status domain.PaymentRequestStatus, role string) string {
+	switch status {
+	case domain.PRStatusPaidAwaitingFulfillment:
+		if role == "seller" {
+			return "Awaiting your fulfillment"
+		}
+		return "Awaiting seller fulfillment"
+	case domain.PRStatusReadyForPickup:
+		return "Ready for pickup"
+	case domain.PRStatusSearchingRider:
+		return "Finding rider"
+	case domain.PRStatusRiderAssigned:
+		return "Rider assigned"
+	case domain.PRStatusInDelivery:
+		return "In delivery"
+	case domain.PRStatusDelivered:
+		return "Delivered"
+	case domain.PRStatusConfirmationWindow:
+		return "Awaiting confirmation"
+	case domain.PRStatusCompleted:
+		return "Completed"
+	case domain.PRStatusDisputed:
+		return "Disputed"
+	case domain.PRStatusRefunded:
+		return "Refunded"
+	case domain.PRStatusCancelled:
+		return "Cancelled"
+	case domain.PRStatusPendingRebook:
+		return "Pending rebook"
+	case domain.PRStatusReturnRequired:
+		return "Return required"
+	case domain.PRStatusReturnSearchingRider:
+		return "Finding return rider"
+	case domain.PRStatusReturnInProgress:
+		return "Return in progress"
+	case domain.PRStatusReturnDelivered:
+		return "Return delivered"
+	case domain.PRStatusReturnConfirmed:
+		return "Return confirmed"
+	default:
+		return string(status)
 	}
 }
 
@@ -435,4 +609,20 @@ type ActiveDeliveryPartyInfo struct {
 	Name        string  `json:"name"`
 	PhoneNumber string  `json:"phone_number"`
 	ImageURL    *string `json:"image_url,omitempty"`
+}
+
+// TransactionListItem represents a transaction in the list view
+type TransactionListItem struct {
+	PaymentRequestID uuid.UUID `json:"payment_request_id"` // Use this to fetch details
+	Role             string    `json:"role"`               // "buyer" or "seller"
+	ItemName         string    `json:"item_name"`
+	ItemPrice        float64   `json:"item_price"`
+	TotalAmount      *float64  `json:"total_amount,omitempty"`
+	Status           string    `json:"status"`
+	StatusText       string    `json:"status_text"` // Human readable status
+	DeliveryType     string    `json:"delivery_type"`
+	CounterpartyName string    `json:"counterparty_name,omitempty"`
+	CounterpartyRole string    `json:"counterparty_role,omitempty"` // "Buyer" or "Seller"
+	CreatedAt        string    `json:"created_at"`
+	PaidAt           *string   `json:"paid_at,omitempty"`
 }
