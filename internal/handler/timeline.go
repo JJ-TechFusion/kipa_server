@@ -720,7 +720,7 @@ func appendSimpleSteps(
 type ErrandTimelineResponse struct {
 	Steps       []TimelineStep `json:"steps"`
 	CurrentStep string         `json:"current_step"`
-	Description string         `json:"package_description"`
+	Description *string        `json:"package_description,omitempty"`
 	DeliveryFee float64        `json:"delivery_fee"`
 	DropoffCode *string        `json:"dropoff_code,omitempty"`
 }

@@ -24,10 +24,10 @@ type PaymentRequestService interface {
 
 	ConfigureFulfillment(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID, req *ConfigureFulfillmentRequest) (*domain.PaymentRequest, error)
 
-	
+
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentRequest, error)
 
-	
+
 	GetByPaymentCode(ctx context.Context, code string) (*domain.PaymentRequest, error)
 
 	GetBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error)
@@ -44,7 +44,7 @@ type PaymentRequestService interface {
 
 	UpdateStatus(ctx context.Context, prID uuid.UUID, status domain.PaymentRequestStatus) error
 
-	
+
 	Cancel(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) error
 
 	SetBuyer(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, escrowID uuid.UUID) error
@@ -59,6 +59,9 @@ type PaymentRequestService interface {
 
 	// Admin rebook on buyer's behalf
 	AdminRebookDelivery(ctx context.Context, prID uuid.UUID, adminID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error)
+
+	// DuplicateAsDraft creates a new draft from a reusable payment request (for next buyer)
+	DuplicateAsDraft(ctx context.Context, prID uuid.UUID) (*domain.PaymentRequest, error)
 }
 
 type RebookDeliveryRequest struct {
@@ -321,6 +324,22 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 		zap.String("pr_id", pr.ID.String()),
 		zap.String("payment_code", paymentCode),
 	)
+
+	// For reusable requests, duplicate as draft for next buyer
+	if pr.IsReusable {
+		duplicate, err := s.DuplicateAsDraft(ctx, pr.ID)
+		if err != nil {
+			s.logger.Warn("failed to duplicate reusable payment request",
+				zap.Error(err),
+				zap.String("pr_id", pr.ID.String()),
+			)
+		} else {
+			s.logger.Info("created duplicate draft for reusable request",
+				zap.String("original_id", pr.ID.String()),
+				zap.String("duplicate_id", duplicate.ID.String()),
+			)
+		}
+	}
 
 	return pr, nil
 }
@@ -836,6 +855,50 @@ func (s *PaymentRequestServiceImpl) AdminRebookDelivery(ctx context.Context, prI
 	// Refresh job to return updated status
 	job.Status = domain.DJStatusInTransit
 	return job, nil
+}
+
+// DuplicateAsDraft creates a new draft from a reusable payment request
+// This is called after successful fulfillment configuration so seller can use it for another buyer
+func (s *PaymentRequestServiceImpl) DuplicateAsDraft(ctx context.Context, prID uuid.UUID) (*domain.PaymentRequest, error) {
+	original, err := s.prRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !original.IsReusable {
+		return nil, fmt.Errorf("cannot duplicate non-reusable payment request")
+	}
+
+	// Create new draft with only item details (no buyer-specific or fulfillment data)
+	duplicate := &domain.PaymentRequest{
+		SellerID:            original.SellerID,
+		ItemName:            original.ItemName,
+		ItemDescription:     original.ItemDescription,
+		ItemPrice:           original.ItemPrice,
+		ItemImages:          original.ItemImages,
+		ProcessingTimeHours: original.ProcessingTimeHours,
+		DeliveryType:        domain.DeliveryTypeIntraState, // Default, will be set in fulfillment
+		Status:              domain.PRStatusDraft,
+		IsReusable:          original.IsReusable,
+		MaxUses:             original.MaxUses,
+		CurrentUses:         0,
+	}
+
+	if err := s.prRepo.Create(ctx, duplicate); err != nil {
+		return nil, fmt.Errorf("failed to create duplicate draft: %w", err)
+	}
+
+	s.recordEvent(ctx, duplicate.ID, nil, domain.PRStatusDraft, "draft_duplicated", map[string]interface{}{
+		"original_id": prID.String(),
+	})
+
+	s.logger.Info("reusable payment request duplicated as draft",
+		zap.String("original_id", prID.String()),
+		zap.String("duplicate_id", duplicate.ID.String()),
+		zap.String("seller_id", original.SellerID.String()),
+	)
+
+	return duplicate, nil
 }
 
 var _ PaymentRequestService = (*PaymentRequestServiceImpl)(nil)

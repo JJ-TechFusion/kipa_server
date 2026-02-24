@@ -31,7 +31,7 @@ type Errand struct {
 	DropoffLng          float64 `db:"dropoff_lng" json:"dropoff_lng"`
 	DropoffContactName  *string `db:"dropoff_contact_name" json:"dropoff_contact_name,omitempty"`
 	DropoffContactPhone *string `db:"dropoff_contact_phone" json:"dropoff_contact_phone,omitempty"`
-	PackageDescription string   `db:"package_description" json:"package_description"`
+	PackageDescription *string  `db:"package_description" json:"package_description,omitempty"`
 	PackageWeightKg    *float64 `db:"package_weight_kg" json:"package_weight_kg,omitempty"`
 	PackagePhotoURL    *string  `db:"package_photo_url" json:"package_photo_url,omitempty"`
 	VehicleType VehicleType `db:"vehicle_type" json:"vehicle_type"`

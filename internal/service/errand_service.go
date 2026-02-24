@@ -74,7 +74,7 @@ type CreateErrandRequest struct {
 	DropoffContactName  *string `json:"dropoff_contact_name"`
 	DropoffContactPhone *string `json:"dropoff_contact_phone"`
 
-	PackageDescription string   `json:"package_description" binding:"required"`
+	PackageDescription *string  `json:"package_description"`
 	PackageWeightKg    *float64 `json:"package_weight_kg"`
 	PackagePhotoURL    *string  `json:"package_photo_url"`
 
