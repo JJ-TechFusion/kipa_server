@@ -147,6 +147,9 @@ func (s *PaymentRequestServiceImpl) CreateDraft(ctx context.Context, sellerID uu
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal item images: %w", err)
 		}
+	} else {
+		// Default to empty array for JSONB column
+		itemImagesJSON = []byte("[]")
 	}
 	var itemDescription *string
 	if req.ItemDescription != "" {
