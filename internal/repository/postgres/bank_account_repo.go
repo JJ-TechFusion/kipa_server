@@ -182,7 +182,7 @@ func (r *VirtualAccountRepo) GetByUserID(ctx context.Context, userID uuid.UUID) 
 	err := r.db.GetContext(ctx, &account, query, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil // Return nil, nil when not found (will create new one)
+			return nil, nil 
 		}
 		return nil, err
 	}
@@ -245,12 +245,16 @@ func NewWithdrawalRepo(db *sqlx.DB) repository.WithdrawalRepository {
 
 func (r *WithdrawalRepo) Create(ctx context.Context, withdrawal *domain.Withdrawal) error {
 	query := `
-		INSERT INTO withdrawals (id, user_id, wallet_id, bank_account_id, amount, fee, net_amount, status, transfer_ref)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO withdrawals (id, user_id, wallet_id, bank_account_id, amount, fee, net_amount, status, transfer_ref, payment_provider)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING created_at, updated_at`
 
 	if withdrawal.ID == uuid.Nil {
 		withdrawal.ID = uuid.New()
+	}
+
+	if withdrawal.PaymentProvider == "" {
+		withdrawal.PaymentProvider = "flutterwave"
 	}
 
 	return r.db.QueryRowxContext(ctx, query,
@@ -263,6 +267,7 @@ func (r *WithdrawalRepo) Create(ctx context.Context, withdrawal *domain.Withdraw
 		withdrawal.NetAmount,
 		withdrawal.Status,
 		withdrawal.TransferRef,
+		withdrawal.PaymentProvider,
 	).Scan(&withdrawal.CreatedAt, &withdrawal.UpdatedAt)
 }
 
@@ -408,7 +413,7 @@ func (r *TopUpRepo) GetByReference(ctx context.Context, reference string) (*doma
 	err := r.db.GetContext(ctx, &topUp, query, reference)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil // Return nil when not found
+			return nil, nil
 		}
 		return nil, err
 	}

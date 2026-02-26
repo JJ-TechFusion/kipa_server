@@ -155,6 +155,12 @@ var (
 	ErrPinTooLong       = errors.New("PIN must be at most 6 digits")
 	ErrPinMustBeNumeric     = errors.New("PIN must contain only digits")
 	ErrPinResetNotRequested = errors.New("PIN reset not requested")
+
+	// Flutterwave errors
+	ErrFlutterwaveSubaccountNotFound = errors.New("flutterwave subaccount not found")
+	ErrFlutterwaveSubaccountExists   = errors.New("flutterwave subaccount already exists")
+	ErrFlutterwaveAPIError           = errors.New("flutterwave API error")
+	ErrFlutterwaveSyncFailed         = errors.New("failed to sync wallet with flutterwave subaccount")
 )
 const (
 	CodeInvalidInput   = "INVALID_INPUT"

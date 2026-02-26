@@ -49,8 +49,9 @@ type Withdrawal struct {
 	Fee             float64          `db:"fee" json:"fee"`               // Platform fee for withdrawal
 	NetAmount       float64          `db:"net_amount" json:"net_amount"` // Amount - Fee
 	Status          WithdrawalStatus `db:"status" json:"status"`
-	TransferCode    *string          `db:"transfer_code" json:"transfer_code,omitempty"`   // Paystack transfer code
+	TransferCode    *string          `db:"transfer_code" json:"transfer_code,omitempty"`   // Paystack/Flutterwave transfer code
 	TransferRef     string           `db:"transfer_ref" json:"transfer_ref"`               // Our reference
+	PaymentProvider string           `db:"payment_provider" json:"payment_provider"`       // "paystack" or "flutterwave"
 	FailureReason   *string          `db:"failure_reason" json:"failure_reason,omitempty"`
 	ProcessedAt     *time.Time       `db:"processed_at" json:"processed_at,omitempty"`
 	CreatedAt       time.Time        `db:"created_at" json:"created_at"`

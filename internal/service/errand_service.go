@@ -159,6 +159,10 @@ func (s *ErrandServiceImpl) Create(ctx context.Context, userID uuid.UUID, req *C
 	}
 
 	if err := s.errandRepo.Create(ctx, errand); err != nil {
+		s.logger.Error("failed to create errand in database",
+			zap.Error(err),
+			zap.String("user_id", userID.String()),
+		)
 		return nil, fmt.Errorf("failed to create errand: %w", err)
 	}
 

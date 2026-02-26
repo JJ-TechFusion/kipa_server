@@ -11,18 +11,20 @@ import (
 
 	"kipa/internal/domain"
 	"kipa/internal/handler/middleware"
+	"kipa/internal/integration/flutterwave"
 	"kipa/internal/integration/paystack"
 	"kipa/internal/repository"
 	"kipa/internal/service"
 	"kipa/internal/util"
 )
 type WalletFundingHandler struct {
-	fundingService service.WalletFundingService
-	walletService  service.WalletService
-	authService    service.AuthService
-	userRepo       repository.UserRepository
-	paystackClient *paystack.Client
-	logger         *zap.Logger
+	fundingService    service.WalletFundingService
+	walletService     service.WalletService
+	authService       service.AuthService
+	userRepo          repository.UserRepository
+	paystackClient    *paystack.Client
+	flutterwaveClient *flutterwave.Client
+	logger            *zap.Logger
 }
 
 func NewWalletFundingHandler(
@@ -31,21 +33,24 @@ func NewWalletFundingHandler(
 	authService service.AuthService,
 	userRepo repository.UserRepository,
 	paystackClient *paystack.Client,
+	flutterwaveClient *flutterwave.Client,
 	logger *zap.Logger,
 ) *WalletFundingHandler {
 	return &WalletFundingHandler{
-		fundingService: fundingService,
-		walletService:  walletService,
-		authService:    authService,
-		userRepo:       userRepo,
-		paystackClient: paystackClient,
-		logger:         logger,
+		fundingService:    fundingService,
+		walletService:     walletService,
+		authService:       authService,
+		userRepo:          userRepo,
+		paystackClient:    paystackClient,
+		flutterwaveClient: flutterwaveClient,
+		logger:            logger,
 	}
 }
 func (h *WalletFundingHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware) {
 	wallet := r.Group("/wallet")
 	wallet.Use(authMiddleware.RequireAuth())
 	{
+		// Paystack routes
 		wallet.POST("/top-up", h.InitializeTopUp)
 		wallet.GET("/top-up/history", h.GetTopUpHistory)
 		wallet.POST("/top-up/verify", h.VerifyTopUp)
@@ -58,6 +63,19 @@ func (h *WalletFundingHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware
 		wallet.POST("/bank-accounts", h.AddBankAccount)
 		wallet.PUT("/bank-accounts/:id/default", h.SetDefaultBankAccount)
 		wallet.DELETE("/bank-accounts/:id", h.DeleteBankAccount)
+
+		// Flutterwave routes
+		fw := wallet.Group("/flutterwave")
+		{
+			fw.POST("/subaccount", h.CreateFlutterwaveSubaccount)
+			fw.GET("/subaccount", h.GetFlutterwaveSubaccount)
+			fw.GET("/subaccount/balance", h.GetFlutterwaveBalance)
+			fw.POST("/topup/initialize", h.InitializeFlutterwaveTopUp)
+			fw.POST("/topup/verify", h.VerifyFlutterwaveTopUp)
+			fw.POST("/withdraw", h.RequestFlutterwaveWithdrawal)
+			fw.GET("/banks", h.ListFlutterwaveBanks)
+			fw.POST("/resolve-account", h.ResolveFlutterwaveAccount)
+		}
 	}
 	r.GET("/banks", h.ListBanks)
 }
@@ -482,4 +500,275 @@ func getIntQuery(c *gin.Context, key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+// ============================================
+// FLUTTERWAVE HANDLERS
+// ============================================
+
+func (h *WalletFundingHandler) CreateFlutterwaveSubaccount(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	user, err := h.userRepo.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get user")
+		return
+	}
+
+	email := user.PhoneNumber + "@kipa.ng"
+	if user.Email != nil {
+		email = *user.Email
+	}
+
+	subaccount, err := h.fundingService.GetOrCreateFlutterwaveSubaccount(c.Request.Context(), userID, email, user.PhoneNumber)
+	if err != nil {
+		h.logger.Error("failed to create Flutterwave subaccount", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to create subaccount")
+		return
+	}
+
+	util.Success(c, http.StatusCreated, gin.H{
+		"subaccount": gin.H{
+			"id":                subaccount.ID,
+			"account_reference": subaccount.AccountReference,
+			"account_bank":      subaccount.AccountBank,
+			"account_number":    subaccount.AccountNumber,
+			"business_name":     subaccount.BusinessName,
+			"is_active":         subaccount.IsActive,
+		},
+		"message": "Flutterwave subaccount created successfully",
+	})
+}
+
+func (h *WalletFundingHandler) GetFlutterwaveSubaccount(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	subaccount, err := h.fundingService.GetFlutterwaveSubaccount(c.Request.Context(), userID)
+	if err != nil {
+		h.logger.Error("failed to get Flutterwave subaccount", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get subaccount")
+		return
+	}
+
+	if subaccount == nil {
+		util.Success(c, http.StatusOK, gin.H{
+			"subaccount": nil,
+			"message":    "No Flutterwave subaccount found. Create one to use Flutterwave features.",
+		})
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"subaccount": gin.H{
+			"id":                subaccount.ID,
+			"account_reference": subaccount.AccountReference,
+			"account_bank":      subaccount.AccountBank,
+			"account_number":    subaccount.AccountNumber,
+			"business_name":     subaccount.BusinessName,
+			"is_active":         subaccount.IsActive,
+		},
+	})
+}
+
+func (h *WalletFundingHandler) GetFlutterwaveBalance(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	balance, err := h.fundingService.GetFlutterwaveSubaccountBalance(c.Request.Context(), userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrFlutterwaveSubaccountNotFound) {
+			util.Error(c, http.StatusNotFound, "SUBACCOUNT_NOT_FOUND", "Flutterwave subaccount not found. Create one first.")
+			return
+		}
+		h.logger.Error("failed to get Flutterwave balance", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get balance")
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"balance": balance,
+	})
+}
+
+func (h *WalletFundingHandler) InitializeFlutterwaveTopUp(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	var req InitializeTopUpRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	user, err := h.userRepo.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get user")
+		return
+	}
+
+	email := user.PhoneNumber + "@kipa.ng"
+	if user.Email != nil {
+		email = *user.Email
+	}
+
+	result, err := h.fundingService.InitializeFlutterwaveTopUp(c.Request.Context(), userID, req.Amount, email, req.CallbackURL)
+	if err != nil {
+		if errors.Is(err, domain.ErrTopUpMinimum) {
+			util.Error(c, http.StatusBadRequest, "TOP_UP_MINIMUM", "Amount below minimum top-up amount (₦100)")
+			return
+		}
+		h.logger.Error("failed to initialize Flutterwave top-up", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to initialize top-up")
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"top_up_id":         result.TopUpID,
+		"payment_reference": result.PaymentReference,
+		"authorization_url": result.AuthorizationURL,
+	})
+}
+
+type VerifyFlutterwaveTopUpRequest struct {
+	TxRef string `json:"tx_ref" binding:"required"`
+}
+
+func (h *WalletFundingHandler) VerifyFlutterwaveTopUp(c *gin.Context) {
+	var req VerifyFlutterwaveTopUpRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	if err := h.fundingService.ProcessFlutterwaveTopUp(c.Request.Context(), req.TxRef); err != nil {
+		if errors.Is(err, domain.ErrTopUpNotFound) {
+			util.Error(c, http.StatusNotFound, "TOP_UP_NOT_FOUND", "Top-up record not found")
+			return
+		}
+		if errors.Is(err, domain.ErrPaymentNotSuccessful) {
+			util.Error(c, http.StatusBadRequest, "PAYMENT_FAILED", "Payment was not successful")
+			return
+		}
+		if errors.Is(err, domain.ErrPaymentAmountMismatch) {
+			util.Error(c, http.StatusBadRequest, "AMOUNT_MISMATCH", "Payment amount mismatch")
+			return
+		}
+		h.logger.Error("failed to process Flutterwave top-up", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to process top-up")
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"message": "Top-up processed successfully",
+	})
+}
+
+func (h *WalletFundingHandler) RequestFlutterwaveWithdrawal(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	var req FundingWithdrawalRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	bankAccountID, _ := uuid.Parse(req.BankAccountID)
+
+	withdrawal, err := h.fundingService.RequestFlutterwaveWithdrawal(c.Request.Context(), userID, bankAccountID, req.Amount)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrWithdrawalMinimum):
+			util.Error(c, http.StatusBadRequest, "WITHDRAWAL_MINIMUM", "Amount below minimum withdrawal amount (₦1000)")
+		case errors.Is(err, domain.ErrWithdrawalPending):
+			util.Error(c, http.StatusBadRequest, "WITHDRAWAL_PENDING", "You already have a pending withdrawal")
+		case errors.Is(err, domain.ErrBankAccountNotFound):
+			util.Error(c, http.StatusNotFound, "BANK_ACCOUNT_NOT_FOUND", "Bank account not found")
+		case errors.Is(err, domain.ErrInsufficientBalance):
+			util.Error(c, http.StatusBadRequest, "INSUFFICIENT_BALANCE", "Insufficient wallet balance")
+		case errors.Is(err, domain.ErrTransferFailed):
+			util.Error(c, http.StatusBadRequest, "TRANSFER_FAILED", "Failed to initiate transfer. Please try again.")
+		default:
+			h.logger.Error("failed to request Flutterwave withdrawal", zap.Error(err))
+			util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to request withdrawal")
+		}
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"withdrawal": gin.H{
+			"id":               withdrawal.ID,
+			"amount":           withdrawal.Amount,
+			"fee":              withdrawal.Fee,
+			"net_amount":       withdrawal.NetAmount,
+			"status":           withdrawal.Status,
+			"transfer_ref":     withdrawal.TransferRef,
+			"payment_provider": withdrawal.PaymentProvider,
+			"created_at":       withdrawal.CreatedAt,
+		},
+		"message": "Withdrawal initiated via Flutterwave. You will receive the funds shortly.",
+	})
+}
+
+func (h *WalletFundingHandler) ListFlutterwaveBanks(c *gin.Context) {
+	banks, err := h.fundingService.ListFlutterwaveBanks(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list Flutterwave banks", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to list banks")
+		return
+	}
+
+	bankList := make([]gin.H, 0, len(banks))
+	for _, bank := range banks {
+		bankList = append(bankList, gin.H{
+			"code": bank.Code,
+			"name": bank.Name,
+		})
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"banks": bankList,
+	})
+}
+
+type ResolveFlutterwaveAccountRequest struct {
+	AccountNumber string `json:"account_number" binding:"required,len=10"`
+	BankCode      string `json:"bank_code" binding:"required"`
+}
+
+func (h *WalletFundingHandler) ResolveFlutterwaveAccount(c *gin.Context) {
+	var req ResolveFlutterwaveAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	account, err := h.fundingService.ResolveFlutterwaveAccount(c.Request.Context(), req.AccountNumber, req.BankCode)
+	if err != nil {
+		h.logger.Error("failed to resolve Flutterwave account", zap.Error(err))
+		util.Error(c, http.StatusBadRequest, "INVALID_ACCOUNT", "Could not verify account details")
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"account_number": account.AccountNumber,
+		"account_name":   account.AccountName,
+	})
 }

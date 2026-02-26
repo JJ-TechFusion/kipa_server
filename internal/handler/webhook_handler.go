@@ -9,29 +9,33 @@ import (
 	"go.uber.org/zap"
 
 	"kipa/internal/domain"
+	"kipa/internal/integration/flutterwave"
 	"kipa/internal/integration/paystack"
 	"kipa/internal/service"
 	"kipa/internal/util"
 )
 
 type WebhookHandler struct {
-	paystackClient *paystack.Client
-	fundingService service.WalletFundingService
-	orderService   service.OrderService
-	logger         *zap.Logger
+	paystackClient    *paystack.Client
+	flutterwaveClient *flutterwave.Client
+	fundingService    service.WalletFundingService
+	orderService      service.OrderService
+	logger            *zap.Logger
 }
 
 func NewWebhookHandler(
 	paystackClient *paystack.Client,
+	flutterwaveClient *flutterwave.Client,
 	fundingService service.WalletFundingService,
 	orderService service.OrderService,
 	logger *zap.Logger,
 ) *WebhookHandler {
 	return &WebhookHandler{
-		paystackClient: paystackClient,
-		fundingService: fundingService,
-		orderService:   orderService,
-		logger:         logger,
+		paystackClient:    paystackClient,
+		flutterwaveClient: flutterwaveClient,
+		fundingService:    fundingService,
+		orderService:      orderService,
+		logger:            logger,
 	}
 }
 
@@ -39,6 +43,7 @@ func (h *WebhookHandler) RegisterRoutes(router *gin.RouterGroup) {
 	webhooks := router.Group("/webhooks")
 	{
 		webhooks.POST("/paystack", h.HandlePaystackWebhook)
+		webhooks.POST("/flutterwave", h.HandleFlutterwaveWebhook)
 	}
 }
 func (h *WebhookHandler) HandlePaystackWebhook(c *gin.Context) {
@@ -337,5 +342,167 @@ func (h *WebhookHandler) handleDVAAssigned(c *gin.Context, _ *paystack.WebhookEv
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "DVA assignment acknowledged",
+	})
+}
+
+// ============================================
+// FLUTTERWAVE WEBHOOK HANDLERS
+// ============================================
+
+func (h *WebhookHandler) HandleFlutterwaveWebhook(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		h.logger.Error("failed to read Flutterwave webhook body", zap.Error(err))
+		util.Error(c, http.StatusBadRequest, "INVALID_BODY", "Failed to read request body")
+		return
+	}
+
+	// Verify webhook signature using verif-hash header
+	verifHash := c.GetHeader("verif-hash")
+	if !h.flutterwaveClient.VerifyWebhookSignature(verifHash) {
+		h.logger.Warn("invalid Flutterwave webhook signature",
+			zap.String("verif_hash", verifHash),
+		)
+		util.Error(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid webhook signature")
+		return
+	}
+
+	event, err := h.flutterwaveClient.ParseWebhookEvent(body)
+	if err != nil {
+		h.logger.Error("failed to parse Flutterwave webhook event", zap.Error(err))
+		util.Error(c, http.StatusBadRequest, "INVALID_EVENT", "Failed to parse webhook event")
+		return
+	}
+
+	h.logger.Info("received Flutterwave webhook",
+		zap.String("event", event.Event),
+	)
+
+	switch event.Event {
+	case flutterwave.EventChargeCompleted:
+		h.handleFlutterwaveChargeCompleted(c, event)
+	case flutterwave.EventTransferCompleted:
+		h.handleFlutterwaveTransferCompleted(c, event)
+	case flutterwave.EventTransferFailed:
+		h.handleFlutterwaveTransferFailed(c, event)
+	default:
+		h.logger.Info("unhandled Flutterwave webhook event type",
+			zap.String("event", event.Event),
+		)
+		c.JSON(http.StatusOK, gin.H{"message": "Event received"})
+	}
+}
+
+func (h *WebhookHandler) handleFlutterwaveChargeCompleted(c *gin.Context, event *flutterwave.WebhookEvent) {
+	chargeData, err := h.flutterwaveClient.GetChargeDataFromEvent(event)
+	if err != nil {
+		h.logger.Error("failed to parse Flutterwave charge data", zap.Error(err))
+		util.Error(c, http.StatusBadRequest, "INVALID_DATA", "Failed to parse charge data")
+		return
+	}
+
+	h.logger.Info("Flutterwave charge completed webhook received",
+		zap.String("tx_ref", chargeData.TxRef),
+		zap.Float64("amount", chargeData.Amount),
+		zap.String("status", chargeData.Status),
+	)
+
+	// Check if this is a top-up (tx_ref starts with "fw_topup_")
+	if len(chargeData.TxRef) >= 9 && chargeData.TxRef[:9] == "fw_topup_" {
+		if err := h.fundingService.ProcessFlutterwaveTopUp(c.Request.Context(), chargeData.TxRef); err != nil {
+			h.logger.Error("failed to process Flutterwave top-up from webhook",
+				zap.String("tx_ref", chargeData.TxRef),
+				zap.Error(err),
+			)
+		} else {
+			h.logger.Info("Flutterwave top-up processed from webhook",
+				zap.String("tx_ref", chargeData.TxRef),
+			)
+		}
+	}
+
+	// Check if this is an order payment (tx_ref starts with "kipa_ord_")
+	if len(chargeData.TxRef) >= 9 && chargeData.TxRef[:9] == "kipa_ord_" {
+		if _, err := h.orderService.VerifyPayment(c.Request.Context(), chargeData.TxRef); err != nil {
+			h.logger.Error("failed to process Flutterwave order payment from webhook",
+				zap.String("tx_ref", chargeData.TxRef),
+				zap.Error(err),
+			)
+		} else {
+			h.logger.Info("Flutterwave order payment processed from webhook",
+				zap.String("tx_ref", chargeData.TxRef),
+			)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Charge completed acknowledged",
+		"tx_ref":  chargeData.TxRef,
+	})
+}
+
+func (h *WebhookHandler) handleFlutterwaveTransferCompleted(c *gin.Context, event *flutterwave.WebhookEvent) {
+	transferData, err := h.flutterwaveClient.GetTransferDataFromEvent(event)
+	if err != nil {
+		h.logger.Error("failed to parse Flutterwave transfer data", zap.Error(err))
+		util.Error(c, http.StatusBadRequest, "INVALID_DATA", "Failed to parse transfer data")
+		return
+	}
+
+	h.logger.Info("Flutterwave transfer completed webhook received",
+		zap.String("reference", transferData.Reference),
+		zap.Float64("amount", transferData.Amount),
+		zap.String("status", transferData.Status),
+	)
+
+	// Process withdrawal webhook
+	if err := h.fundingService.ProcessFlutterwaveWithdrawalWebhook(
+		c.Request.Context(),
+		transferData.Reference,
+		domain.WithdrawalStatusSuccess,
+		"",
+	); err != nil {
+		h.logger.Error("failed to process Flutterwave transfer success webhook",
+			zap.String("reference", transferData.Reference),
+			zap.Error(err),
+		)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Transfer success acknowledged",
+		"reference": transferData.Reference,
+	})
+}
+
+func (h *WebhookHandler) handleFlutterwaveTransferFailed(c *gin.Context, event *flutterwave.WebhookEvent) {
+	transferData, err := h.flutterwaveClient.GetTransferDataFromEvent(event)
+	if err != nil {
+		h.logger.Error("failed to parse Flutterwave transfer data", zap.Error(err))
+		util.Error(c, http.StatusBadRequest, "INVALID_DATA", "Failed to parse transfer data")
+		return
+	}
+
+	h.logger.Warn("Flutterwave transfer failed webhook received",
+		zap.String("reference", transferData.Reference),
+		zap.Float64("amount", transferData.Amount),
+		zap.String("complete_message", transferData.CompleteMessage),
+	)
+
+	// Process withdrawal webhook with failure
+	if err := h.fundingService.ProcessFlutterwaveWithdrawalWebhook(
+		c.Request.Context(),
+		transferData.Reference,
+		domain.WithdrawalStatusFailed,
+		transferData.CompleteMessage,
+	); err != nil {
+		h.logger.Error("failed to process Flutterwave transfer failed webhook",
+			zap.String("reference", transferData.Reference),
+			zap.Error(err),
+		)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Transfer failed acknowledged",
+		"reference": transferData.Reference,
 	})
 }

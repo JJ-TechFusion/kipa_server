@@ -270,6 +270,14 @@ type VirtualAccountRepository interface {
 	GetByCustomerCode(ctx context.Context, customerCode string) (*domain.VirtualAccount, error)
 	Update(ctx context.Context, account *domain.VirtualAccount) error
 }
+
+type FlutterwaveSubaccountRepository interface {
+	Create(ctx context.Context, subaccount *domain.FlutterwaveSubaccount) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.FlutterwaveSubaccount, error)
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.FlutterwaveSubaccount, error)
+	GetByAccountRef(ctx context.Context, accountRef string) (*domain.FlutterwaveSubaccount, error)
+	Update(ctx context.Context, subaccount *domain.FlutterwaveSubaccount) error
+}
 type WithdrawalRepository interface {
 	Create(ctx context.Context, withdrawal *domain.Withdrawal) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Withdrawal, error)

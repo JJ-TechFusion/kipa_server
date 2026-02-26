@@ -9,17 +9,18 @@ import (
 )
 
 type Config struct {
-	Server     ServerConfig
-	Database   DatabaseConfig
-	Redis      RedisConfig
-	JWT        JWTConfig
-	OTP        OTPConfig
-	Twilio     TwilioConfig
-	Paystack   PaystackConfig
-	Worker     WorkerConfig
-	GoogleMaps GoogleMapsConfig
-	S3         S3Config
-	Firebase   FirebaseConfig
+	Server      ServerConfig
+	Database    DatabaseConfig
+	Redis       RedisConfig
+	JWT         JWTConfig
+	OTP         OTPConfig
+	Twilio      TwilioConfig
+	Paystack    PaystackConfig
+	Flutterwave FlutterwaveConfig
+	Worker      WorkerConfig
+	GoogleMaps  GoogleMapsConfig
+	S3          S3Config
+	Firebase    FirebaseConfig
 }
 
 type FirebaseConfig struct {
@@ -97,6 +98,12 @@ type TwilioConfig struct {
 }
 
 type PaystackConfig struct {
+	SecretKey string
+	PublicKey string
+	BaseURL   string
+}
+
+type FlutterwaveConfig struct {
 	SecretKey string
 	PublicKey string
 	BaseURL   string
@@ -183,6 +190,11 @@ func Load() (*Config, error) {
 			PublicKey: viper.GetString("paystack.public_key"),
 			BaseURL:   viper.GetString("paystack.base_url"),
 		},
+		Flutterwave: FlutterwaveConfig{
+			SecretKey: viper.GetString("flutterwave.secret_key"),
+			PublicKey: viper.GetString("flutterwave.public_key"),
+			BaseURL:   viper.GetString("flutterwave.base_url"),
+		},
 		Worker: WorkerConfig{
 			Enabled:                  viper.GetBool("worker.enabled"),
 			EscrowCheckInterval:      viper.GetDuration("worker.escrow_check_interval"),
@@ -251,6 +263,7 @@ func setDefaults() {
 	viper.SetDefault("otp.bcrypt_cost", 10)
 
 	viper.SetDefault("paystack.base_url", "https://api.paystack.co")
+	viper.SetDefault("flutterwave.base_url", "https://api.flutterwave.com/v3")
 	viper.SetDefault("worker.enabled", true)
 	viper.SetDefault("worker.escrow_check_interval", "1m")
 	viper.SetDefault("worker.rider_search_check_interval", "30s")

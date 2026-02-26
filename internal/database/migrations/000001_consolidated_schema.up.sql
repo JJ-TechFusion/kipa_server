@@ -649,7 +649,7 @@ CREATE TABLE errands (
     dropoff_lng DECIMAL(11,8) NOT NULL,
     dropoff_contact_name VARCHAR(255),
     dropoff_contact_phone VARCHAR(20),
-    package_description TEXT NOT NULL,
+    package_description TEXT,
     package_weight_kg DECIMAL(6,2),
     package_photo_url TEXT,
     vehicle_type vehicle_type NOT NULL,
@@ -884,6 +884,22 @@ CREATE TABLE virtual_accounts (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE flutterwave_subaccounts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    account_reference VARCHAR(100) NOT NULL UNIQUE,
+    account_bank VARCHAR(50),
+    account_number VARCHAR(20),
+    business_name VARCHAR(255),
+    email VARCHAR(255),
+    mobile_number VARCHAR(20),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_fw_subaccounts_user ON flutterwave_subaccounts(user_id);
+CREATE INDEX idx_fw_subaccounts_ref ON flutterwave_subaccounts(account_reference);
+
 CREATE TABLE withdrawals (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id),
@@ -895,6 +911,7 @@ CREATE TABLE withdrawals (
     status withdrawal_status DEFAULT 'pending',
     transfer_code VARCHAR(100),
     transfer_ref VARCHAR(100) NOT NULL,
+    payment_provider VARCHAR(50) DEFAULT 'flutterwave',
     failure_reason TEXT,
     processed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -910,7 +927,7 @@ CREATE TABLE top_ups (
     amount DECIMAL(18,2) NOT NULL,
     payment_method VARCHAR(50) NOT NULL,
     payment_ref VARCHAR(100) NOT NULL,
-    payment_provider VARCHAR(50) DEFAULT 'paystack',
+    payment_provider VARCHAR(50) DEFAULT 'flutterwave',
     status top_up_status DEFAULT 'pending',
     paid_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -1091,6 +1108,7 @@ CREATE TRIGGER update_payment_requests_updated_at BEFORE UPDATE ON payment_reque
 CREATE TRIGGER update_delivery_jobs_updated_at BEFORE UPDATE ON delivery_jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_bank_accounts_updated_at BEFORE UPDATE ON bank_accounts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_virtual_accounts_updated_at BEFORE UPDATE ON virtual_accounts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_fw_subaccounts_updated_at BEFORE UPDATE ON flutterwave_subaccounts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_withdrawals_updated_at BEFORE UPDATE ON withdrawals FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_top_ups_updated_at BEFORE UPDATE ON top_ups FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

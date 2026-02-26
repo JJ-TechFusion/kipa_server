@@ -10,6 +10,7 @@ import (
 
 	"kipa/internal/config"
 	"kipa/internal/domain"
+	"kipa/internal/integration/flutterwave"
 	"kipa/internal/integration/paystack"
 	"kipa/internal/repository"
 )
@@ -61,6 +62,7 @@ type OrderServiceImpl struct {
 	walletService            WalletService
 	logisticsDeliveryService LogisticsDeliveryService
 	paystack                 *paystack.Client
+	flutterwave              *flutterwave.Client
 	notificationService      NotificationService
 	config                   *config.Config
 	logger                   *zap.Logger
@@ -75,6 +77,7 @@ func NewOrderService(
 	logisticsDeliveryService LogisticsDeliveryService,
 	notificationService NotificationService,
 	paystackClient *paystack.Client,
+	flutterwaveClient *flutterwave.Client,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) OrderService {
@@ -87,6 +90,7 @@ func NewOrderService(
 		logisticsDeliveryService: logisticsDeliveryService,
 		notificationService:      notificationService,
 		paystack:                 paystackClient,
+		flutterwave:              flutterwaveClient,
 		config:                   cfg,
 		logger:                   logger,
 	}
@@ -123,38 +127,55 @@ func (s *OrderServiceImpl) InitializePayment(ctx context.Context, buyerID uuid.U
 		TotalAmount:         totalAmount,
 		Status:              domain.OrderStatusPending,
 	}
-	reference := domain.GeneratePaystackReference(order.ID)
-	order.PaystackReference = &reference
+
+	// Generate Flutterwave transaction reference
+	reference := fmt.Sprintf("kipa_ord_%s_%d", order.ID.String()[:8], time.Now().Unix())
+	order.PaystackReference = &reference // Reusing field for Flutterwave tx_ref
 
 	if err := s.orderRepo.Create(ctx, order); err != nil {
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
-	amountKobo := int64(totalAmount * 100) // Convert to kobo
-	paystackReq := &paystack.InitializeTransactionRequest{
-		Email:       req.Email,
-		Amount:      amountKobo,
-		Reference:   reference,
-		CallbackURL: req.CallbackURL,
-		Metadata: map[string]interface{}{
+
+	// Set default redirect URL if not provided
+	redirectURL := req.CallbackURL
+	if redirectURL == "" {
+		redirectURL = fmt.Sprintf("https://getkipa.com/pay/%s/verify?tx_ref=%s", paymentCode, reference)
+	}
+
+	// Initialize Flutterwave payment
+	flwReq := &flutterwave.InitializePaymentRequest{
+		TxRef:       reference,
+		Amount:      totalAmount,
+		Currency:    "NGN",
+		RedirectURL: redirectURL,
+		Customer: flutterwave.CustomerInfo{
+			Email: req.Email,
+		},
+		Customizations: &flutterwave.PaymentCustomization{
+			Title:       "Kipa Payment",
+			Description: fmt.Sprintf("Payment for %s", pr.ItemName),
+		},
+		Meta: map[string]interface{}{
 			"order_id":           order.ID.String(),
 			"payment_request_id": pr.ID.String(),
 			"buyer_id":           buyerID.String(),
 		},
 	}
 
-	paystackResp, err := s.paystack.InitializeTransaction(ctx, paystackReq)
+	flwResp, err := s.flutterwave.InitializePayment(ctx, flwReq)
 	if err != nil {
 		s.orderRepo.UpdatePaymentStatus(ctx, order.ID, domain.OrderPaymentFailed)
-		return nil, fmt.Errorf("failed to initialize Paystack payment: %w", err)
-	}
-	accessCode := paystackResp.Data.AccessCode
-	order.PaystackAccessCode = &accessCode
-	order.PaymentStatus = domain.OrderPaymentInitialized
-	if err := s.orderRepo.Update(ctx, order); err != nil {
-		s.logger.Error("failed to update order with access code", zap.Error(err))
+		return nil, fmt.Errorf("failed to initialize Flutterwave payment: %w", err)
 	}
 
-	s.logger.Info("payment initialized",
+	paymentLink := flwResp.Data.Link
+	order.PaystackAccessCode = &paymentLink // Reusing field for Flutterwave payment link
+	order.PaymentStatus = domain.OrderPaymentInitialized
+	if err := s.orderRepo.Update(ctx, order); err != nil {
+		s.logger.Error("failed to update order with payment link", zap.Error(err))
+	}
+
+	s.logger.Info("payment initialized via Flutterwave",
 		zap.String("order_id", order.ID.String()),
 		zap.String("reference", reference),
 	)
@@ -162,8 +183,8 @@ func (s *OrderServiceImpl) InitializePayment(ctx context.Context, buyerID uuid.U
 	return &InitializePaymentResponse{
 		OrderID:          order.ID,
 		PaymentRequestID: pr.ID,
-		AuthorizationURL: paystackResp.Data.AuthorizationURL,
-		AccessCode:       accessCode,
+		AuthorizationURL: paymentLink,
+		AccessCode:       paymentLink, // For compatibility
 		Reference:        reference,
 	}, nil
 }
@@ -184,20 +205,23 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 	if order.PaymentStatus != domain.OrderPaymentInitialized {
 		return nil, domain.ErrOrderPaymentFailed
 	}
-	verification, err := s.paystack.VerifyTransaction(ctx, reference)
+
+	// Verify with Flutterwave
+	verification, err := s.flutterwave.VerifyTransaction(ctx, reference)
 	if err != nil {
-		s.logger.Error("Paystack verification failed", zap.Error(err), zap.String("reference", reference))
+		s.logger.Error("Flutterwave verification failed", zap.Error(err), zap.String("reference", reference))
 		return nil, domain.ErrPaymentVerificationFailed
 	}
-	if verification.Data.Status != "success" {
+	if verification.Data.Status != "successful" {
 		s.orderRepo.UpdatePaymentStatus(ctx, order.ID, domain.OrderPaymentFailed)
 		return nil, domain.ErrPaymentNotSuccessful
 	}
-	expectedKobo := int64(order.TotalAmount * 100)
-	if verification.Data.Amount != expectedKobo {
+
+	// Flutterwave returns amount in the actual currency (not kobo)
+	if verification.Data.Amount != order.TotalAmount {
 		s.logger.Error("payment amount mismatch",
-			zap.Int64("expected", expectedKobo),
-			zap.Int64("actual", verification.Data.Amount),
+			zap.Float64("expected", order.TotalAmount),
+			zap.Float64("actual", verification.Data.Amount),
 		)
 		return nil, domain.ErrPaymentAmountMismatch
 	}
@@ -213,7 +237,7 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 		DeliveryFeeEstimate: order.DeliveryFeeEstimate,
 		BuyerFee:            order.BuyerServiceFee,
 		PaymentReference:    reference,
-		PaymentProvider:     "paystack",
+		PaymentProvider:     "flutterwave",
 	}
 
 	escrow, err := s.escrowService.CreateAndFund(ctx, escrowReq)

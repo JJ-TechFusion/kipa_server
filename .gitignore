@@ -1,0 +1,41 @@
+# Environment files (NEVER commit these)
+.env
+.env.local
+.env.staging
+.env.production
+!.env.example
+
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Logs
+*.log
+
+# Temp files
+tmp/
+temp/
+
+# Build artifacts
+dist/
+
+# Firebase credentials (if not needed in repo)
+# firebase-service-account.json

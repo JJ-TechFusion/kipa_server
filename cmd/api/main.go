@@ -19,6 +19,7 @@ import (
 	"kipa/internal/handler"
 	"kipa/internal/handler/middleware"
 	"kipa/internal/integration/fcm"
+	"kipa/internal/integration/flutterwave"
 	"kipa/internal/integration/maps"
 	"kipa/internal/integration/paystack"
 	"kipa/internal/integration/sms"
@@ -87,6 +88,7 @@ func main() {
 	virtualAccountRepo := postgres.NewVirtualAccountRepo(pgClient.DB)
 	withdrawalRepo := postgres.NewWithdrawalRepo(pgClient.DB)
 	topUpRepo := postgres.NewTopUpRepo(pgClient.DB)
+	flwSubaccountRepo := postgres.NewFlutterwaveSubaccountRepo(pgClient.DB)
 
 	// Order repository
 	orderRepo := postgres.NewOrderRepo(pgClient.DB)
@@ -120,6 +122,9 @@ func main() {
 
 	// Initialize Paystack client
 	paystackClient := paystack.NewClient(&cfg.Paystack, logger)
+
+	// Initialize Flutterwave client
+	flutterwaveClient := flutterwave.NewClient(&cfg.Flutterwave, logger)
 
 	// Initialize S3 storage client
 	s3Client, err := storage.NewS3Client(&cfg.S3)
@@ -171,6 +176,12 @@ func main() {
 	go wsHub.Run()
 
 	// Wallet funding service
+	walletFundingConfig := service.WalletFundingConfig{
+		MinTopUpAmount:      100,  // ₦100 minimum
+		MinWithdrawalAmount: 1000, // ₦1000 minimum
+		WithdrawalFee:       50,   // ₦50 fixed fee
+		WithdrawalFeeType:   "fixed",
+	}
 	walletFundingService := service.NewWalletFundingService(
 		bankAccountRepo,
 		virtualAccountRepo,
@@ -179,7 +190,10 @@ func main() {
 		walletRepo,
 		walletTxRepo,
 		userRepo,
+		flwSubaccountRepo,
 		paystackClient,
+		flutterwaveClient,
+		walletFundingConfig,
 		logger,
 	)
 
@@ -242,6 +256,7 @@ func main() {
 		logisticsService,
 		notificationService,
 		paystackClient,
+		flutterwaveClient,
 		cfg,
 		logger,
 	)
@@ -394,9 +409,10 @@ func main() {
 		authService,
 		userRepo,
 		paystackClient,
+		flutterwaveClient,
 		logger,
 	)
-	webhookHandler := handler.NewWebhookHandler(paystackClient, walletFundingService, orderService, logger)
+	webhookHandler := handler.NewWebhookHandler(paystackClient, flutterwaveClient, walletFundingService, orderService, logger)
 	sellerHandler := handler.NewSellerHandler(orderService, prService, escrowService, deliveryJobRepo, disputeResolutionService, driverService)
 	errandHandler := handler.NewErrandHandler(errandService)
 	disputeHandler := handler.NewDisputeHandler(disputeService)
