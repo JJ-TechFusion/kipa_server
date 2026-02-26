@@ -136,13 +136,10 @@ func (s *OrderServiceImpl) InitializePayment(ctx context.Context, buyerID uuid.U
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
 
-	// Set default redirect URL if not provided
 	redirectURL := req.CallbackURL
 	if redirectURL == "" {
 		redirectURL = fmt.Sprintf("https://getkipa.com/pay/%s/verify?tx_ref=%s", paymentCode, reference)
 	}
-
-	// Initialize Flutterwave payment
 	flwReq := &flutterwave.InitializePaymentRequest{
 		TxRef:       reference,
 		Amount:      totalAmount,
@@ -206,7 +203,6 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 		return nil, domain.ErrOrderPaymentFailed
 	}
 
-	// Verify with Flutterwave
 	verification, err := s.flutterwave.VerifyTransaction(ctx, reference)
 	if err != nil {
 		s.logger.Error("Flutterwave verification failed", zap.Error(err), zap.String("reference", reference))
@@ -245,7 +241,6 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 		return nil, fmt.Errorf("failed to create escrow: %w", err)
 	}
 
-	// Create logistics delivery for inter-state orders
 	var logisticsDeliveryID *uuid.UUID
 	if pr.IsInterStateDelivery() && s.logisticsDeliveryService != nil {
 		pickupAddress := ""
