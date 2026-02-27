@@ -85,6 +85,7 @@ type WalletFundingServiceImpl struct {
 	flwSubaccountRepo    repository.FlutterwaveSubaccountRepository
 	paystackClient       *paystack.Client
 	flutterwaveClient    *flutterwave.Client
+	notificationService  NotificationService
 	config               WalletFundingConfig
 	logger               *zap.Logger
 }
@@ -100,6 +101,7 @@ func NewWalletFundingService(
 	flwSubaccountRepo repository.FlutterwaveSubaccountRepository,
 	paystackClient *paystack.Client,
 	flutterwaveClient *flutterwave.Client,
+	notificationService NotificationService,
 	config WalletFundingConfig,
 	logger *zap.Logger,
 ) WalletFundingService {
@@ -118,18 +120,19 @@ func NewWalletFundingService(
 	}
 
 	return &WalletFundingServiceImpl{
-		bankAccountRepo:      bankAccountRepo,
-		virtualAccountRepo:   virtualAccountRepo,
-		withdrawalRepo:       withdrawalRepo,
-		topUpRepo:            topUpRepo,
-		walletRepo:           walletRepo,
-		walletTxRepo:         walletTxRepo,
-		userRepo:             userRepo,
-		flwSubaccountRepo:    flwSubaccountRepo,
-		paystackClient:       paystackClient,
-		flutterwaveClient:    flutterwaveClient,
-		config:               config,
-		logger:               logger,
+		bankAccountRepo:     bankAccountRepo,
+		virtualAccountRepo:  virtualAccountRepo,
+		withdrawalRepo:      withdrawalRepo,
+		topUpRepo:           topUpRepo,
+		walletRepo:          walletRepo,
+		walletTxRepo:        walletTxRepo,
+		userRepo:            userRepo,
+		flwSubaccountRepo:   flwSubaccountRepo,
+		paystackClient:      paystackClient,
+		flutterwaveClient:   flutterwaveClient,
+		notificationService: notificationService,
+		config:              config,
+		logger:              logger,
 	}
 }
 func (s *WalletFundingServiceImpl) AddBankAccount(ctx context.Context, userID uuid.UUID, bankCode, accountNumber string) (*domain.BankAccount, error) {
@@ -875,6 +878,23 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 		zap.String("reference", txRef),
 	)
 
+	// Send push notification
+	if s.notificationService != nil {
+		go func() {
+			_ = s.notificationService.SendToUser(
+				context.Background(),
+				topUp.UserID,
+				"Wallet Funded",
+				fmt.Sprintf("Your wallet has been credited with ₦%.2f", topUp.Amount),
+				map[string]string{
+					"amount":    fmt.Sprintf("%.2f", topUp.Amount),
+					"reference": txRef,
+				},
+				domain.NotificationTopUpSuccess,
+			)
+		}()
+	}
+
 	return nil
 }
 
@@ -938,6 +958,23 @@ func (s *WalletFundingServiceImpl) ProcessWalletFundingWebhook(ctx context.Conte
 		zap.Float64("amount", amount),
 		zap.String("reference", reference),
 	)
+
+	// Send push notification
+	if s.notificationService != nil {
+		go func() {
+			_ = s.notificationService.SendToUser(
+				context.Background(),
+				subaccount.UserID,
+				"Bank Transfer Received",
+				fmt.Sprintf("Your wallet has been credited with ₦%.2f via bank transfer", amount),
+				map[string]string{
+					"amount":    fmt.Sprintf("%.2f", amount),
+					"reference": reference,
+				},
+				domain.NotificationDVATransfer,
+			)
+		}()
+	}
 
 	return nil
 }
@@ -1083,6 +1120,25 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 		zap.String("reference", transferRef),
 	)
 
+	// Send push notification
+	if s.notificationService != nil {
+		go func() {
+			_ = s.notificationService.SendToUser(
+				context.Background(),
+				userID,
+				"Withdrawal Processing",
+				fmt.Sprintf("Your withdrawal of ₦%.2f is being processed", netAmount),
+				map[string]string{
+					"amount":      fmt.Sprintf("%.2f", netAmount),
+					"reference":   transferRef,
+					"bank_name":   bankAccount.BankName,
+					"account":     bankAccount.AccountNumber,
+				},
+				domain.NotificationWithdrawalInitiated,
+			)
+		}()
+	}
+
 	return withdrawal, nil
 }
 
@@ -1148,6 +1204,38 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveWithdrawalWebhook(ctx conte
 		zap.String("reference", reference),
 		zap.String("status", string(status)),
 	)
+
+	// Send push notification
+	if s.notificationService != nil {
+		go func() {
+			if status == domain.WithdrawalStatusSuccess {
+				_ = s.notificationService.SendToUser(
+					context.Background(),
+					withdrawal.UserID,
+					"Withdrawal Successful",
+					fmt.Sprintf("₦%.2f has been sent to your bank account", withdrawal.NetAmount),
+					map[string]string{
+						"amount":    fmt.Sprintf("%.2f", withdrawal.NetAmount),
+						"reference": reference,
+					},
+					domain.NotificationWithdrawalSuccess,
+				)
+			} else if status == domain.WithdrawalStatusFailed || status == domain.WithdrawalStatusReversed {
+				_ = s.notificationService.SendToUser(
+					context.Background(),
+					withdrawal.UserID,
+					"Withdrawal Failed",
+					fmt.Sprintf("Your withdrawal of ₦%.2f failed. Amount has been refunded to your wallet.", withdrawal.NetAmount),
+					map[string]string{
+						"amount":    fmt.Sprintf("%.2f", withdrawal.Amount),
+						"reference": reference,
+						"reason":    failureReason,
+					},
+					domain.NotificationWithdrawalFailed,
+				)
+			}
+		}()
+	}
 
 	return nil
 }

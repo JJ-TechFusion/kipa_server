@@ -201,6 +201,134 @@
 			]
 		},
 		{
+			"name": "Kipa API - Bank Accounts",
+			"description": "Manage saved bank accounts for withdrawals. You must add a bank account before you can withdraw.",
+			"item": [
+				{
+					"name": "Add Bank Account",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201 || pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.data && jsonData.data.bank_account && jsonData.data.bank_account.id) {",
+									"        pm.environment.set('bank_account_id', jsonData.data.bank_account.id);",
+									"        console.log('Bank account ID saved:', jsonData.data.bank_account.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bank_code\": \"044\",\n  \"account_number\": \"0123456789\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/bank-accounts",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "bank-accounts"]
+						},
+						"description": "Add a bank account for withdrawals.\n\nThe account will be verified via Flutterwave before saving.\n\n**Request Body:**\n- `bank_code` (required): Bank code from List Banks endpoint\n- `account_number` (required): 10-digit account number\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"bank_account\": {\n      \"id\": \"uuid\",\n      \"account_number\": \"0123456789\",\n      \"account_name\": \"JOHN DOE\",\n      \"bank_code\": \"044\",\n      \"bank_name\": \"Access Bank\",\n      \"is_default\": true\n    }\n  }\n}\n```\n\n**Note:** Use the returned `id` for withdrawal requests."
+					},
+					"response": []
+				},
+				{
+					"name": "List Bank Accounts",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/bank-accounts",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "bank-accounts"]
+						},
+						"description": "Get all saved bank accounts for the user.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"bank_accounts\": [\n      {\n        \"id\": \"uuid\",\n        \"account_number\": \"0123456789\",\n        \"account_name\": \"JOHN DOE\",\n        \"bank_code\": \"044\",\n        \"bank_name\": \"Access Bank\",\n        \"is_default\": true\n      }\n    ]\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Set Default Bank Account",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/bank-accounts/{{bank_account_id}}/default",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "bank-accounts", "{{bank_account_id}}", "default"]
+						},
+						"description": "Set a bank account as the default for withdrawals.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Bank account set as default\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Bank Account",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/bank-accounts/{{bank_account_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "bank-accounts", "{{bank_account_id}}"]
+						},
+						"description": "Delete a saved bank account.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Bank account deleted\"\n}\n```"
+					},
+					"response": []
+				}
+			]
+		},
+		{
 			"name": "Kipa API - Withdrawal",
 			"item": [
 				{
@@ -232,7 +360,7 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "wallet", "flutterwave", "withdraw"]
 						},
-						"description": "Withdraw from Flutterwave wallet to bank account.\n\nUses `debit_subaccount` with `account_reference` to specify which wallet to debit.\n\n**Request Body:**\n- `bank_account_id` (required): UUID of saved bank account\n- `amount` (required): Amount in NGN (min 1000)\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"withdrawal\": {\n      \"id\": \"uuid\",\n      \"amount\": 5000,\n      \"fee\": 50,\n      \"net_amount\": 4950,\n      \"status\": \"processing\"\n    }\n  }\n}\n```"
+						"description": "Withdraw from Flutterwave wallet to bank account.\n\n**Prerequisites:**\n1. Create a Flutterwave subaccount (wallet)\n2. Add a bank account via `POST /wallet/bank-accounts`\n3. Use the bank account's `id` for withdrawal\n\n**Request Body:**\n- `bank_account_id` (required): UUID of saved bank account (from Add Bank Account)\n- `amount` (required): Amount in NGN (min 1000)\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"withdrawal\": {\n      \"id\": \"uuid\",\n      \"amount\": 5000,\n      \"fee\": 50,\n      \"net_amount\": 4950,\n      \"status\": \"processing\"\n    }\n  }\n}\n```\n\n**Error Codes:**\n- `BANK_ACCOUNT_NOT_FOUND`: Add a bank account first\n- `INSUFFICIENT_BALANCE`: Not enough funds\n- `WITHDRAWAL_MINIMUM`: Amount below 1000 NGN"
 					},
 					"response": []
 				}

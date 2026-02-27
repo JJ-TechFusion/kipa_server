@@ -175,6 +175,14 @@ func main() {
 	wsHub := websocket.NewHub(logger)
 	go wsHub.Run()
 
+	// Notification service (created early as many services need it)
+	notificationService := service.NewNotificationService(
+		fcmClient,
+		deviceTokenRepo,
+		notificationLogRepo,
+		logger,
+	)
+
 	// Wallet funding service
 	walletFundingConfig := service.WalletFundingConfig{
 		MinTopUpAmount:      100,  // ₦100 minimum
@@ -193,20 +201,13 @@ func main() {
 		flwSubaccountRepo,
 		paystackClient,
 		flutterwaveClient,
+		notificationService,
 		walletFundingConfig,
 		logger,
 	)
 
 	// Payment request service
 	prService := service.NewPaymentRequestService(prRepo, prEventRepo, userRepo, deliveryJobRepo, feeCalculator, wsHub, cfg, logger)
-
-	// Notification service (created before wallet service as wallet needs it)
-	notificationService := service.NewNotificationService(
-		fcmClient,
-		deviceTokenRepo,
-		notificationLogRepo,
-		logger,
-	)
 
 	// Wallet service
 	walletService := service.NewWalletService(
