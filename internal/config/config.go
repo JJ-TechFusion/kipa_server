@@ -43,6 +43,7 @@ type WorkerConfig struct {
 	MaxBackoff       time.Duration
 	JitterPercent    int
 	ReminderCooldownMins int
+	WalletSyncInterval   time.Duration // Interval to sync Flutterwave wallets (default 5 min)
 }
 
 type ServerConfig struct {

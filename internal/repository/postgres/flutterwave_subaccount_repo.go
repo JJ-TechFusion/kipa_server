@@ -120,3 +120,15 @@ func (r *FlutterwaveSubaccountRepo) Update(ctx context.Context, subaccount *doma
 	)
 	return err
 }
+
+func (r *FlutterwaveSubaccountRepo) GetAllActiveUserIDs(ctx context.Context) ([]uuid.UUID, error) {
+	var userIDs []uuid.UUID
+	query := `SELECT user_id FROM flutterwave_subaccounts WHERE is_active = true`
+
+	err := r.db.SelectContext(ctx, &userIDs, query)
+	if err != nil {
+		return nil, err
+	}
+
+	return userIDs, nil
+}

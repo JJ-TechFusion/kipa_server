@@ -61,6 +61,19 @@ type WalletFundingService interface {
 	// Flutterwave banks
 	ListFlutterwaveBanks(ctx context.Context) ([]flutterwave.BankData, error)
 	ResolveFlutterwaveAccount(ctx context.Context, accountNumber, bankCode string) (*flutterwave.ResolveAccountData, error)
+
+	// Sync wallet with Flutterwave subaccount balance (for bank transfers that don't trigger webhooks)
+	SyncFlutterwaveWallet(ctx context.Context, userID uuid.UUID) (*WalletSyncResult, error)
+	GetAllActiveFlutterwaveSubaccounts(ctx context.Context) ([]uuid.UUID, error)
+}
+
+// WalletSyncResult contains the result of syncing wallet with Flutterwave
+type WalletSyncResult struct {
+	PreviousBalance   float64 `json:"previous_balance"`
+	FlutterwaveBalance float64 `json:"flutterwave_balance"`
+	NewBalance        float64 `json:"new_balance"`
+	AmountSynced      float64 `json:"amount_synced"`
+	WasSynced         bool    `json:"was_synced"`
 }
 type TopUpInitResult struct {
 	TopUpID          uuid.UUID `json:"top_up_id"`
@@ -1505,6 +1518,129 @@ func (s *WalletFundingServiceImpl) ResolveFlutterwaveAccount(ctx context.Context
 		return nil, fmt.Errorf("failed to resolve account: %w", err)
 	}
 	return &resp.Data, nil
+}
+
+// SyncFlutterwaveWallet syncs the internal wallet balance with the Flutterwave subaccount balance
+// This is used when bank transfers are made to the virtual account (no webhook is sent)
+func (s *WalletFundingServiceImpl) SyncFlutterwaveWallet(ctx context.Context, userID uuid.UUID) (*WalletSyncResult, error) {
+	// Get subaccount
+	subaccount, err := s.flwSubaccountRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subaccount: %w", err)
+	}
+	if subaccount == nil {
+		return nil, domain.ErrFlutterwaveSubaccountNotFound
+	}
+
+	// Get Flutterwave balance
+	balanceResp, err := s.flutterwaveClient.GetSubaccountBalance(ctx, subaccount.AccountReference)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Flutterwave balance: %w", err)
+	}
+	flwBalance := balanceResp.Data.AvailableBalance
+
+	// Get internal wallet
+	wallet, err := s.walletRepo.GetOrCreate(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get wallet: %w", err)
+	}
+	previousBalance := wallet.AvailableBalance
+
+	// Calculate difference
+	// If Flutterwave has more money than our internal wallet, credit the difference
+	diff := flwBalance - previousBalance
+
+	result := &WalletSyncResult{
+		PreviousBalance:    previousBalance,
+		FlutterwaveBalance: flwBalance,
+		NewBalance:         previousBalance,
+		AmountSynced:       0,
+		WasSynced:          false,
+	}
+
+	if diff > 0 {
+		// Flutterwave has more - credit internal wallet
+		idempotencyKey := fmt.Sprintf("sync_%s_%d", userID.String(), time.Now().Unix())
+
+		// Check idempotency (prevent rapid duplicate syncs)
+		existingTx, err := s.walletTxRepo.GetByIdempotencyKey(ctx, idempotencyKey)
+		if err != nil {
+			s.logger.Warn("idempotency check failed, proceeding anyway", zap.Error(err))
+		}
+		if existingTx != nil {
+			// Already synced very recently, return current state
+			result.NewBalance = wallet.AvailableBalance
+			return result, nil
+		}
+
+		// Credit wallet
+		if err := s.walletRepo.Credit(ctx, wallet.ID, diff); err != nil {
+			return nil, fmt.Errorf("failed to credit wallet: %w", err)
+		}
+
+		// Record transaction
+		wallet, _ = s.walletRepo.GetByID(ctx, wallet.ID)
+		refType := "wallet_sync"
+		description := "Sync with Flutterwave subaccount (bank transfer)"
+		tx := &domain.WalletTransaction{
+			WalletID:       wallet.ID,
+			Type:           domain.WalletTxTopUp,
+			Amount:         diff,
+			BalanceAfter:   wallet.AvailableBalance,
+			ReferenceType:  &refType,
+			Description:    &description,
+			IdempotencyKey: &idempotencyKey,
+		}
+		s.walletTxRepo.Create(ctx, tx)
+
+		result.NewBalance = wallet.AvailableBalance
+		result.AmountSynced = diff
+		result.WasSynced = true
+
+		s.logger.Info("wallet synced with Flutterwave",
+			zap.String("user_id", userID.String()),
+			zap.Float64("previous_balance", previousBalance),
+			zap.Float64("flw_balance", flwBalance),
+			zap.Float64("amount_synced", diff),
+		)
+
+		// Send push notification
+		if s.notificationService != nil {
+			go func() {
+				_ = s.notificationService.SendToUser(
+					context.Background(),
+					userID,
+					"Wallet Synced",
+					fmt.Sprintf("Your wallet has been credited with ₦%.2f from bank transfer", diff),
+					map[string]string{
+						"amount":      fmt.Sprintf("%.2f", diff),
+						"sync_type":   "bank_transfer",
+					},
+					domain.NotificationDVATransfer,
+				)
+			}()
+		}
+	} else if diff < 0 {
+		// Internal wallet has more than Flutterwave
+		// This could happen if:
+		// 1. User did a card top-up that was credited to internal wallet but Flutterwave funding failed
+		// 2. User spent from Flutterwave side directly (shouldn't happen normally)
+		// For safety, we log this but don't debit the user
+		s.logger.Warn("wallet has more than Flutterwave subaccount",
+			zap.String("user_id", userID.String()),
+			zap.Float64("wallet_balance", previousBalance),
+			zap.Float64("flw_balance", flwBalance),
+			zap.Float64("difference", diff),
+		)
+	}
+
+	return result, nil
+}
+
+// GetAllActiveFlutterwaveSubaccounts returns all user IDs with active Flutterwave subaccounts
+// Used by the background wallet sync job
+func (s *WalletFundingServiceImpl) GetAllActiveFlutterwaveSubaccounts(ctx context.Context) ([]uuid.UUID, error) {
+	return s.flwSubaccountRepo.GetAllActiveUserIDs(ctx)
 }
 
 var _ WalletFundingService = (*WalletFundingServiceImpl)(nil)

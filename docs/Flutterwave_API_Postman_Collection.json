@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "kipa-flutterwave-collection",
 		"name": "Kipa - Flutterwave Integration",
-		"description": "Flutterwave payment integration endpoints for Kipa Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nAll endpoints require a Bearer token in the Authorization header.\nGet the token by calling `/auth/otp/send` and `/auth/otp/verify`.\n\n## Flutterwave Integration Overview\nFlutterwave is the PRIMARY payment provider for Kipa, handling:\n- **Payout Subaccounts (Wallets)** - Each user gets a Flutterwave wallet with virtual account\n- **Wallet Funding** - Via bank transfer to virtual account or wallet-to-wallet transfer\n- **Withdrawals** - Users withdraw from their wallet to their bank account\n- **Balance Management** - Real-time balance queries and transaction history\n\n### Key Concepts\n- **account_reference**: Unique wallet identifier (e.g., `PSA14B6C11AE18421012`)\n- **barter_id**: Used for wallet-to-wallet transfers (e.g., `234000003363471`)\n- **nuban**: Virtual account number for bank transfers (e.g., `7353333250`)\n- **bank_code**: `035` (WEMA) or `232` (Sterling)\n\n### Wallet Creation Flow\n1. Create wallet → returns `account_reference`, `barter_id`, `nuban`\n2. User can fund via bank transfer to `nuban`\n3. Or fund via wallet-to-wallet using `barter_id`\n\n### Withdrawal Flow\n1. User requests withdrawal with bank details\n2. Transfer initiated with `debit_subaccount` = `account_reference`\n3. Funds sent from user's wallet to their bank\n\n## Variables\nSet these in your Postman environment:\n- `base_url`: API base URL (e.g., http://localhost:8080)\n- `access_token`: JWT access token\n- `bank_account_id`: User's saved bank account ID\n- `fw_tx_ref`: Flutterwave transaction reference\n- `fw_subaccount_ref`: Flutterwave wallet account_reference\n- `fw_barter_id`: Flutterwave wallet barter_id\n- `fw_base_url`: Flutterwave API base (https://api.flutterwave.com/v3)\n- `fw_secret_key`: Flutterwave secret key",
+		"description": "Flutterwave payment integration endpoints for Kipa Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nAll endpoints require a Bearer token in the Authorization header.\nGet the token by calling `/auth/otp/send` and `/auth/otp/verify`.\n\n## Flutterwave Integration Overview\nFlutterwave is the PRIMARY payment provider for Kipa, handling:\n- **Payout Subaccounts (Wallets)** - Each user gets a Flutterwave wallet with virtual account\n- **Wallet Funding** - Via bank transfer to virtual account or wallet-to-wallet transfer\n- **Withdrawals** - Users withdraw from their wallet to their bank account\n- **Balance Management** - Real-time balance queries and transaction history\n\n### Key Concepts\n- **account_reference**: Unique wallet identifier (e.g., `PSA14B6C11AE18421012`)\n- **barter_id**: Used for wallet-to-wallet transfers (e.g., `234000003363471`)\n- **nuban**: Virtual account number for bank transfers (e.g., `7353333250`)\n- **bank_code**: `035` (WEMA) or `232` (Sterling)\n\n### Wallet Creation Flow\n1. Create wallet → returns `account_reference`, `barter_id`, `nuban`\n2. User can fund via bank transfer to `nuban`\n3. Or fund via wallet-to-wallet using `barter_id`\n\n### ⚠️ IMPORTANT: Bank Transfer Sync\nFlutterwave does NOT send webhooks for bank transfers to PSA virtual accounts.\nAfter making a bank transfer to `nuban`, call `/wallet/flutterwave/sync` to update wallet balance.\n\n### Withdrawal Flow\n1. User requests withdrawal with bank details\n2. Transfer initiated with `debit_subaccount` = `account_reference`\n3. Funds sent from user's wallet to their bank\n\n## Variables\nSet these in your Postman environment:\n- `base_url`: API base URL (e.g., http://localhost:8080)\n- `access_token`: JWT access token\n- `bank_account_id`: User's saved bank account ID\n- `fw_tx_ref`: Flutterwave transaction reference\n- `fw_subaccount_ref`: Flutterwave wallet account_reference\n- `fw_barter_id`: Flutterwave wallet barter_id\n- `fw_base_url`: Flutterwave API base (https://api.flutterwave.com/v3)\n- `fw_secret_key`: Flutterwave secret key",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
@@ -108,6 +108,30 @@
 							"path": ["api", "v1", "wallet", "flutterwave", "subaccount", "balance"]
 						},
 						"description": "Get the balance of the user's Flutterwave wallet.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"balance\": 50000.00,\n    \"currency\": \"NGN\"\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Sync Wallet with Flutterwave",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/flutterwave/sync",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "flutterwave", "sync"]
+						},
+						"description": "Sync internal wallet balance with Flutterwave subaccount balance.\n\n**IMPORTANT:** Flutterwave does NOT send webhooks for bank transfers to payout subaccount virtual accounts. Call this endpoint after making a bank transfer to update your wallet balance.\n\n**Use Cases:**\n- After bank transfer to virtual account (nuban)\n- To verify wallet is in sync with Flutterwave\n- Troubleshooting balance discrepancies\n\n**Response (when synced):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"previous_balance\": 0.00,\n    \"flutterwave_balance\": 5000.00,\n    \"new_balance\": 5000.00,\n    \"amount_synced\": 5000.00,\n    \"was_synced\": true,\n    \"message\": \"Wallet synced successfully\"\n  }\n}\n```\n\n**Response (already in sync):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"previous_balance\": 5000.00,\n    \"flutterwave_balance\": 5000.00,\n    \"new_balance\": 5000.00,\n    \"amount_synced\": 0,\n    \"was_synced\": false,\n    \"message\": \"Wallet is already in sync\"\n  }\n}\n```"
 					},
 					"response": []
 				}

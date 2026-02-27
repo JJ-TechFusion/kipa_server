@@ -73,6 +73,7 @@ func (h *WalletFundingHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware
 			fw.POST("/topup/initialize", h.InitializeFlutterwaveTopUp)
 			fw.POST("/topup/verify", h.VerifyFlutterwaveTopUp)
 			fw.POST("/withdraw", h.RequestFlutterwaveWithdrawal)
+			fw.POST("/sync", h.SyncFlutterwaveWallet)
 			fw.GET("/banks", h.ListFlutterwaveBanks)
 			fw.POST("/resolve-account", h.ResolveFlutterwaveAccount)
 		}
@@ -726,6 +727,41 @@ func (h *WalletFundingHandler) RequestFlutterwaveWithdrawal(c *gin.Context) {
 			"created_at":       withdrawal.CreatedAt,
 		},
 		"message": "Withdrawal initiated via Flutterwave. You will receive the funds shortly.",
+	})
+}
+
+// SyncFlutterwaveWallet syncs internal wallet with Flutterwave subaccount balance
+// This is needed because Flutterwave doesn't send webhooks for bank transfers to PSA virtual accounts
+func (h *WalletFundingHandler) SyncFlutterwaveWallet(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	result, err := h.fundingService.SyncFlutterwaveWallet(c.Request.Context(), userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrFlutterwaveSubaccountNotFound) {
+			util.Error(c, http.StatusNotFound, "SUBACCOUNT_NOT_FOUND", "Flutterwave subaccount not found. Create one first.")
+			return
+		}
+		h.logger.Error("failed to sync Flutterwave wallet", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to sync wallet")
+		return
+	}
+
+	message := "Wallet is already in sync"
+	if result.WasSynced {
+		message = "Wallet synced successfully"
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"previous_balance":    result.PreviousBalance,
+		"flutterwave_balance": result.FlutterwaveBalance,
+		"new_balance":         result.NewBalance,
+		"amount_synced":       result.AmountSynced,
+		"was_synced":          result.WasSynced,
+		"message":             message,
 	})
 }
 

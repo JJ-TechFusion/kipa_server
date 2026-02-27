@@ -11,6 +11,7 @@ import (
 	"kipa/internal/config"
 	"kipa/internal/database"
 	"kipa/internal/integration/fcm"
+	"kipa/internal/integration/flutterwave"
 	"kipa/internal/repository/postgres"
 	redisrepo "kipa/internal/repository/redis"
 	"kipa/internal/service"
@@ -74,6 +75,14 @@ func main() {
 	driverDeliveryRepo := postgres.NewDriverDeliveryRepo(db)
 	driverDeliveryEventRepo := postgres.NewDriverDeliveryEventRepo(db)
 	driverOfferRepo := postgres.NewDriverOfferRepo(db)
+
+	// Wallet funding repositories (for wallet sync job)
+	bankAccountRepo := postgres.NewBankAccountRepo(db)
+	virtualAccountRepo := postgres.NewVirtualAccountRepo(db)
+	withdrawalRepo := postgres.NewWithdrawalRepo(db)
+	topUpRepo := postgres.NewTopUpRepo(db)
+	flwSubaccountRepo := postgres.NewFlutterwaveSubaccountRepo(db)
+	userRepo := postgres.NewUserRepo(db)
 
 	// Initialize services
 	// Note: Wallet service in worker doesn't need PIN reset capabilities,
@@ -139,6 +148,7 @@ func main() {
 		MaxBackoff:               cfg.Worker.MaxBackoff,
 		JitterPercent:            cfg.Worker.JitterPercent,
 		ReminderCooldownMins:     cfg.Worker.ReminderCooldownMins,
+		WalletSyncInterval:       cfg.Worker.WalletSyncInterval,
 	}
 
 	// Initialize job processor
@@ -161,6 +171,27 @@ func main() {
 
 	// Set notification service for rebook expiry notifications
 	processor.SetNotificationService(notificationService)
+
+	// Initialize Flutterwave client for wallet sync
+	flutterwaveClient := flutterwave.NewClient(&cfg.Flutterwave, log)
+
+	// Initialize wallet funding service for wallet sync job
+	walletFundingService := service.NewWalletFundingService(
+		bankAccountRepo,
+		virtualAccountRepo,
+		withdrawalRepo,
+		topUpRepo,
+		walletRepo,
+		walletTxRepo,
+		userRepo,
+		flwSubaccountRepo,
+		nil, // paystack client not needed for sync
+		flutterwaveClient,
+		notificationService,
+		service.WalletFundingConfig{},
+		log,
+	)
+	processor.SetWalletSyncService(walletFundingService)
 
 	// Create context that can be cancelled
 	ctx, cancel := context.WithCancel(context.Background())

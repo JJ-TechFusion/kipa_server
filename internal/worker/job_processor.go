@@ -40,6 +40,9 @@ type WorkerConfig struct {
 
 	// Rebook expiry job
 	RebookExpiryCheckInterval time.Duration // Check for expired rebook deadlines
+
+	// Wallet sync job (Flutterwave PSA doesn't send webhooks for bank transfers)
+	WalletSyncInterval time.Duration // Interval to sync wallets with Flutterwave
 }
 func DefaultWorkerConfig() *WorkerConfig {
 	return &WorkerConfig{
@@ -68,6 +71,9 @@ func DefaultWorkerConfig() *WorkerConfig {
 
 		// Rebook expiry job
 		RebookExpiryCheckInterval: 5 * time.Minute, // Check expired rebook deadlines every 5 min
+
+		// Wallet sync job
+		WalletSyncInterval: 5 * time.Minute, // Sync wallets every 5 min
 	}
 }
 type DistributedLock interface {
@@ -95,6 +101,9 @@ type JobProcessor struct {
 	// Nearby riders broadcasting
 	nearbyRidersFinder      NearbyRidersFinder
 	nearbyRidersBroadcaster NearbyRidersBroadcaster
+
+	// Wallet sync
+	walletSyncService WalletSyncServiceInterface
 }
 type EscrowServiceInterface interface {
 	ProcessPendingConfirmationWindows(ctx context.Context) error
@@ -152,6 +161,10 @@ func (p *JobProcessor) Start(ctx context.Context) {
 
 	// Nearby riders broadcast job
 	go p.runWithRecovery(ctx, "nearby_riders", p.runNearbyRidersJob)
+
+	// Wallet sync job (Flutterwave doesn't send webhooks for bank transfers to PSA)
+	// TODO: Enable when ready - currently users can manually sync via /wallet/flutterwave/sync
+	// go p.runWithRecovery(ctx, "wallet_sync", p.runWalletSyncJob)
 
 	p.logger.Info("all background jobs started")
 }
