@@ -453,7 +453,41 @@ func (h *WebhookHandler) handleFlutterwaveTransferCompleted(c *gin.Context, even
 		zap.String("reference", transferData.Reference),
 		zap.Float64("amount", transferData.Amount),
 		zap.String("status", transferData.Status),
+		zap.String("debit_currency", transferData.DebitCurrency),
+		zap.String("narration", transferData.Narration),
 	)
+
+	// Check if this is a wallet funding (bank transfer to virtual account)
+	// Wallet funding has debit_currency="PSA" and reference starts with "PSA_"
+	if transferData.DebitCurrency == "PSA" || (len(transferData.Reference) >= 4 && transferData.Reference[:4] == "PSA_") {
+		h.logger.Info("Processing wallet funding from bank transfer",
+			zap.String("account_number", transferData.AccountNumber),
+			zap.Float64("amount", transferData.Amount),
+		)
+
+		if err := h.fundingService.ProcessWalletFundingWebhook(
+			c.Request.Context(),
+			transferData.AccountNumber,
+			transferData.Amount,
+			transferData.Reference,
+		); err != nil {
+			h.logger.Error("failed to process wallet funding webhook",
+				zap.String("reference", transferData.Reference),
+				zap.Error(err),
+			)
+		} else {
+			h.logger.Info("Wallet funding processed successfully",
+				zap.String("reference", transferData.Reference),
+				zap.Float64("amount", transferData.Amount),
+			)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Wallet funding acknowledged",
+			"reference": transferData.Reference,
+		})
+		return
+	}
 
 	// Process withdrawal webhook
 	if err := h.fundingService.ProcessFlutterwaveWithdrawalWebhook(

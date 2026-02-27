@@ -88,6 +88,21 @@ func (r *FlutterwaveSubaccountRepo) GetByAccountRef(ctx context.Context, account
 	return &subaccount, nil
 }
 
+func (r *FlutterwaveSubaccountRepo) GetByAccountNumber(ctx context.Context, accountNumber string) (*domain.FlutterwaveSubaccount, error) {
+	var subaccount domain.FlutterwaveSubaccount
+	query := `SELECT * FROM flutterwave_subaccounts WHERE account_number = $1 AND is_active = true`
+
+	err := r.db.GetContext(ctx, &subaccount, query, accountNumber)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // Return nil, nil to allow caller to handle "not found" gracefully
+		}
+		return nil, err
+	}
+
+	return &subaccount, nil
+}
+
 func (r *FlutterwaveSubaccountRepo) Update(ctx context.Context, subaccount *domain.FlutterwaveSubaccount) error {
 	query := `
 		UPDATE flutterwave_subaccounts

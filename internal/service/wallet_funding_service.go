@@ -50,6 +50,9 @@ type WalletFundingService interface {
 	RequestFlutterwaveWithdrawal(ctx context.Context, userID, bankAccountID uuid.UUID, amount float64) (*domain.Withdrawal, error)
 	ProcessFlutterwaveWithdrawalWebhook(ctx context.Context, reference string, status domain.WithdrawalStatus, failureReason string) error
 
+	// Flutterwave wallet funding (bank transfer to virtual account)
+	ProcessWalletFundingWebhook(ctx context.Context, accountNumber string, amount float64, reference string) error
+
 	// Flutterwave synced wallet operations (credit/debit wallet + subaccount atomically)
 	CreditWalletWithFlutterwave(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, idempotencyKey string) error
 	DebitWalletWithFlutterwave(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, idempotencyKey string) error
@@ -870,6 +873,70 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 		zap.String("user_id", topUp.UserID.String()),
 		zap.Float64("amount", topUp.Amount),
 		zap.String("reference", txRef),
+	)
+
+	return nil
+}
+
+// ProcessWalletFundingWebhook handles bank transfers to the user's virtual account (nuban)
+// This is called when Flutterwave sends a webhook for transfers into a payout subaccount
+func (s *WalletFundingServiceImpl) ProcessWalletFundingWebhook(ctx context.Context, accountNumber string, amount float64, reference string) error {
+	// Idempotency check
+	idempotencyKey := fmt.Sprintf("wallet_funding_%s", reference)
+	existingTx, err := s.walletTxRepo.GetByIdempotencyKey(ctx, idempotencyKey)
+	if err != nil {
+		return fmt.Errorf("failed to check idempotency: %w", err)
+	}
+	if existingTx != nil {
+		s.logger.Info("wallet funding already processed (idempotent)",
+			zap.String("reference", reference),
+		)
+		return nil
+	}
+
+	// Find subaccount by account number (nuban)
+	subaccount, err := s.flwSubaccountRepo.GetByAccountNumber(ctx, accountNumber)
+	if err != nil {
+		return fmt.Errorf("failed to find subaccount: %w", err)
+	}
+	if subaccount == nil {
+		s.logger.Warn("wallet funding webhook for unknown account",
+			zap.String("account_number", accountNumber),
+			zap.String("reference", reference),
+		)
+		return fmt.Errorf("subaccount not found for account_number: %s", accountNumber)
+	}
+
+	// Get or create wallet for user
+	wallet, err := s.walletRepo.GetOrCreate(ctx, subaccount.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to get wallet: %w", err)
+	}
+
+	// Credit the internal wallet
+	if err := s.walletRepo.Credit(ctx, wallet.ID, amount); err != nil {
+		return fmt.Errorf("failed to credit wallet: %w", err)
+	}
+
+	// Create transaction record
+	wallet, _ = s.walletRepo.GetByID(ctx, wallet.ID)
+	refType := "wallet_funding"
+	description := "Bank transfer to virtual account"
+	tx := &domain.WalletTransaction{
+		WalletID:       wallet.ID,
+		Type:           domain.WalletTxTopUp,
+		Amount:         amount,
+		BalanceAfter:   wallet.AvailableBalance,
+		ReferenceType:  &refType,
+		Description:    &description,
+		IdempotencyKey: &idempotencyKey,
+	}
+	s.walletTxRepo.Create(ctx, tx)
+
+	s.logger.Info("wallet funding processed from bank transfer",
+		zap.String("user_id", subaccount.UserID.String()),
+		zap.Float64("amount", amount),
+		zap.String("reference", reference),
 	)
 
 	return nil

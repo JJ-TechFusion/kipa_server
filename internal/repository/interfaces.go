@@ -276,6 +276,7 @@ type FlutterwaveSubaccountRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.FlutterwaveSubaccount, error)
 	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.FlutterwaveSubaccount, error)
 	GetByAccountRef(ctx context.Context, accountRef string) (*domain.FlutterwaveSubaccount, error)
+	GetByAccountNumber(ctx context.Context, accountNumber string) (*domain.FlutterwaveSubaccount, error)
 	Update(ctx context.Context, subaccount *domain.FlutterwaveSubaccount) error
 }
 type WithdrawalRepository interface {
