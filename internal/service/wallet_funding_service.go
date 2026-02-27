@@ -644,10 +644,10 @@ func (s *WalletFundingServiceImpl) GetOrCreateFlutterwaveSubaccount(ctx context.
 
 	// Create subaccount in Flutterwave
 	resp, err := s.flutterwaveClient.CreateSubaccount(ctx, &flutterwave.CreateSubaccountRequest{
-		AccountName:  businessName,
-		Email:        email,
-		MobileNumber: phone,
-		Country:      "NG",
+		AccountName: businessName,
+		Email:       email,
+		Country:     "NG",
+		BankCode:    "035", // WEMA Bank
 	})
 	if err != nil {
 		s.logger.Error("failed to create Flutterwave subaccount",
@@ -662,10 +662,10 @@ func (s *WalletFundingServiceImpl) GetOrCreateFlutterwaveSubaccount(ctx context.
 		UserID:           userID,
 		AccountReference: resp.Data.AccountReference,
 		AccountBank:      &resp.Data.BankName,
-		AccountNumber:    &resp.Data.NubanAccount,
+		AccountNumber:    &resp.Data.Nuban,
+		BarterID:         &resp.Data.BarterID,
 		BusinessName:     &businessName,
 		Email:            &email,
-		MobileNumber:     &phone,
 		IsActive:         true,
 	}
 
@@ -812,6 +812,33 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 
 	if err := s.walletRepo.Credit(ctx, wallet.ID, topUp.Amount); err != nil {
 		return fmt.Errorf("failed to credit wallet: %w", err)
+	}
+
+	// Fund user's Flutterwave subaccount (transfer from platform to user's wallet)
+	subaccount, err := s.flwSubaccountRepo.GetByUserID(ctx, topUp.UserID)
+	if err != nil {
+		s.logger.Error("failed to get Flutterwave subaccount for top-up sync",
+			zap.String("user_id", topUp.UserID.String()),
+			zap.Error(err),
+		)
+	} else if subaccount != nil && subaccount.BarterID != nil && *subaccount.BarterID != "" {
+		fundRef := fmt.Sprintf("topup_%s", txRef)
+		_, fundErr := s.flutterwaveClient.FundWallet(ctx, *subaccount.BarterID, topUp.Amount, fundRef, "Wallet top-up")
+		if fundErr != nil {
+			s.logger.Error("failed to fund Flutterwave subaccount after top-up",
+				zap.String("user_id", topUp.UserID.String()),
+				zap.String("barter_id", *subaccount.BarterID),
+				zap.Float64("amount", topUp.Amount),
+				zap.Error(fundErr),
+			)
+			// Note: Internal wallet is credited but subaccount funding failed
+			// This creates a sync issue - should be handled by reconciliation job
+		} else {
+			s.logger.Info("Flutterwave subaccount funded after top-up",
+				zap.String("user_id", topUp.UserID.String()),
+				zap.Float64("amount", topUp.Amount),
+			)
+		}
 	}
 
 	// Create transaction record
@@ -1094,11 +1121,15 @@ func (s *WalletFundingServiceImpl) CreditWalletWithFlutterwave(ctx context.Conte
 		return fmt.Errorf("failed to get/create subaccount: %w", err)
 	}
 
-	// Fund subaccount first (atomic with wallet credit)
+	if subaccount.BarterID == nil || *subaccount.BarterID == "" {
+		return fmt.Errorf("subaccount missing barter_id for wallet transfer")
+	}
+
+	// Fund wallet using barter_id (wallet-to-wallet transfer)
 	fundRef := fmt.Sprintf("fund_%s_%d", uuid.New().String()[:8], time.Now().Unix())
 	narration := fmt.Sprintf("Credit: %s", refType)
 
-	_, err = s.flutterwaveClient.FundSubaccount(ctx, subaccount.AccountReference, amount, fundRef, narration)
+	_, err = s.flutterwaveClient.FundWallet(ctx, *subaccount.BarterID, amount, fundRef, narration)
 	if err != nil {
 		s.logger.Error("failed to fund Flutterwave subaccount",
 			zap.String("user_id", userID.String()),

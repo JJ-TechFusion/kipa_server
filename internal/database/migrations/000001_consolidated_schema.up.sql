@@ -890,9 +890,9 @@ CREATE TABLE flutterwave_subaccounts (
     account_reference VARCHAR(100) NOT NULL UNIQUE,
     account_bank VARCHAR(50),
     account_number VARCHAR(20),
+    barter_id VARCHAR(50),
     business_name VARCHAR(255),
     email VARCHAR(255),
-    mobile_number VARCHAR(20),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

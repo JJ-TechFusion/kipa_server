@@ -535,12 +535,13 @@ func (h *WalletFundingHandler) CreateFlutterwaveSubaccount(c *gin.Context) {
 		"subaccount": gin.H{
 			"id":                subaccount.ID,
 			"account_reference": subaccount.AccountReference,
+			"barter_id":         subaccount.BarterID,
 			"account_bank":      subaccount.AccountBank,
 			"account_number":    subaccount.AccountNumber,
 			"business_name":     subaccount.BusinessName,
 			"is_active":         subaccount.IsActive,
 		},
-		"message": "Flutterwave subaccount created successfully",
+		"message": "Wallet created. Fund via bank transfer to account_number.",
 	})
 }
 
@@ -570,6 +571,7 @@ func (h *WalletFundingHandler) GetFlutterwaveSubaccount(c *gin.Context) {
 		"subaccount": gin.H{
 			"id":                subaccount.ID,
 			"account_reference": subaccount.AccountReference,
+			"barter_id":         subaccount.BarterID,
 			"account_bank":      subaccount.AccountBank,
 			"account_number":    subaccount.AccountNumber,
 			"business_name":     subaccount.BusinessName,

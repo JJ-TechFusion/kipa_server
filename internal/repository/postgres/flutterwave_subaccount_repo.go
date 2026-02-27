@@ -22,7 +22,7 @@ func NewFlutterwaveSubaccountRepo(db *sqlx.DB) repository.FlutterwaveSubaccountR
 
 func (r *FlutterwaveSubaccountRepo) Create(ctx context.Context, subaccount *domain.FlutterwaveSubaccount) error {
 	query := `
-		INSERT INTO flutterwave_subaccounts (id, user_id, account_reference, account_bank, account_number, business_name, email, mobile_number, is_active)
+		INSERT INTO flutterwave_subaccounts (id, user_id, account_reference, account_bank, account_number, barter_id, business_name, email, is_active)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING created_at, updated_at`
 
@@ -36,9 +36,9 @@ func (r *FlutterwaveSubaccountRepo) Create(ctx context.Context, subaccount *doma
 		subaccount.AccountReference,
 		subaccount.AccountBank,
 		subaccount.AccountNumber,
+		subaccount.BarterID,
 		subaccount.BusinessName,
 		subaccount.Email,
-		subaccount.MobileNumber,
 		subaccount.IsActive,
 	).Scan(&subaccount.CreatedAt, &subaccount.UpdatedAt)
 }
@@ -91,16 +91,16 @@ func (r *FlutterwaveSubaccountRepo) GetByAccountRef(ctx context.Context, account
 func (r *FlutterwaveSubaccountRepo) Update(ctx context.Context, subaccount *domain.FlutterwaveSubaccount) error {
 	query := `
 		UPDATE flutterwave_subaccounts
-		SET account_bank = $2, account_number = $3, business_name = $4, email = $5, mobile_number = $6, is_active = $7, updated_at = NOW()
+		SET account_bank = $2, account_number = $3, barter_id = $4, business_name = $5, email = $6, is_active = $7, updated_at = NOW()
 		WHERE id = $1`
 
 	_, err := r.db.ExecContext(ctx, query,
 		subaccount.ID,
 		subaccount.AccountBank,
 		subaccount.AccountNumber,
+		subaccount.BarterID,
 		subaccount.BusinessName,
 		subaccount.Email,
-		subaccount.MobileNumber,
 		subaccount.IsActive,
 	)
 	return err

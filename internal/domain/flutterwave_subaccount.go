@@ -13,9 +13,9 @@ type FlutterwaveSubaccount struct {
 	AccountReference string     `db:"account_reference" json:"account_reference"`
 	AccountBank      *string    `db:"account_bank" json:"account_bank,omitempty"`
 	AccountNumber    *string    `db:"account_number" json:"account_number,omitempty"`
+	BarterID         *string    `db:"barter_id" json:"barter_id,omitempty"` // For wallet-to-wallet transfers
 	BusinessName     *string    `db:"business_name" json:"business_name,omitempty"`
 	Email            *string    `db:"email" json:"email,omitempty"`
-	MobileNumber     *string    `db:"mobile_number" json:"mobile_number,omitempty"`
 	IsActive         bool       `db:"is_active" json:"is_active"`
 	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`

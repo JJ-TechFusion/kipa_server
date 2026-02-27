@@ -70,29 +70,24 @@ type CustomerData struct {
 }
 
 type CreateSubaccountRequest struct {
-	AccountName    string `json:"account_name"`
-	Email          string `json:"email"`
-	MobileNumber   string `json:"mobilenumber"`
-	Country        string `json:"country"`
-	AccountBank    string `json:"account_bank,omitempty"`
-	AccountNumber  string `json:"account_number,omitempty"`
-	BankCode       string `json:"bank_code,omitempty"`
+	AccountName string `json:"account_name"`
+	Email       string `json:"email"`
+	Country     string `json:"country"`
+	BankCode    string `json:"bank_code,omitempty"` // "035" (WEMA) or "232" (Sterling)
 }
 
 type SubaccountData struct {
-	ID               int64   `json:"id"`
-	AccountReference string  `json:"account_reference"`
-	AccountName      string  `json:"account_name"`
-	BVN              string  `json:"bvn"`
-	Country          string  `json:"country"`
-	NubanBank        string  `json:"nuban_bank"`
-	NubanAccount     string  `json:"nuban_account"`
-	BankName         string  `json:"bank_name"`
-	BankCode         string  `json:"bank_code"`
-	Email            string  `json:"email"`
-	MobileNumber     string  `json:"mobilenumber"`
-	Status           string  `json:"status"`
-	CreatedAt        string  `json:"created_at"`
+	ID               int64  `json:"id"`
+	AccountReference string `json:"account_reference"`
+	AccountName      string `json:"account_name"`
+	BarterID         string `json:"barter_id"` // Needed for wallet-to-wallet transfers
+	Email            string `json:"email"`
+	Country          string `json:"country"`
+	Nuban            string `json:"nuban"` // Virtual account number
+	BankName         string `json:"bank_name"`
+	BankCode         string `json:"bank_code"`
+	Status           string `json:"status"`
+	CreatedAt        string `json:"created_at"`
 }
 
 type SubaccountBalanceData struct {
@@ -162,17 +157,55 @@ type BankData struct {
 	Name string `json:"name"`
 }
 
-type FundSubaccountRequest struct {
-	AccountReference string  `json:"account_reference"`
-	Amount           float64 `json:"amount"`
-	Currency         string  `json:"currency"`
-	Reference        string  `json:"reference"`
-	Narration        string  `json:"narration,omitempty"`
+// StaticAccountData is the response from fetching a virtual account for wallet funding
+type StaticAccountData struct {
+	StaticAccount string `json:"static_account"`
+	BankName      string `json:"bank_name"`
+	BankCode      string `json:"bank_code"`
+	Currency      string `json:"currency"`
 }
 
-type FundSubaccountData struct {
+// WalletTransferRequest is for wallet-to-wallet transfers using barter_id
+type WalletTransferRequest struct {
+	AccountBank   string  `json:"account_bank"`   // "flutterwave" for wallet transfers
+	AccountNumber string  `json:"account_number"` // Destination wallet's barter_id
+	Amount        float64 `json:"amount"`
+	Currency      string  `json:"currency"`
+	Reference     string  `json:"reference,omitempty"`
+	Narration     string  `json:"narration,omitempty"`
+}
+
+// UpdateWalletRequest is for updating wallet details
+type UpdateWalletRequest struct {
+	AccountName  string `json:"account_name,omitempty"`
+	Email        string `json:"email,omitempty"`
+	MobileNumber string `json:"mobilenumber,omitempty"`
+	Country      string `json:"country,omitempty"`
+}
+
+// WalletTransaction represents a single transaction in wallet history
+type WalletTransaction struct {
 	ID        int64   `json:"id"`
-	Reference string  `json:"reference"`
+	Type      string  `json:"type"`
 	Amount    float64 `json:"amount"`
+	Currency  string  `json:"currency"`
 	Status    string  `json:"status"`
+	Reference string  `json:"reference"`
+	Narration string  `json:"narration"`
+	CreatedAt string  `json:"created_at"`
+}
+
+// WalletTransactionsData is the response from fetching wallet transactions
+type WalletTransactionsData struct {
+	Transactions []WalletTransaction `json:"transactions"`
+}
+
+// ListWalletsData is the response from listing wallets with pagination
+type ListWalletsData struct {
+	PayoutSubaccounts []SubaccountData `json:"payout_subaccounts"`
+	Cursor            struct {
+		Next         int  `json:"next"`
+		Limit        int  `json:"limit"`
+		HasMoreItems bool `json:"has_more_items"`
+	} `json:"cursor"`
 }

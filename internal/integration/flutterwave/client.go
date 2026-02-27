@@ -158,27 +158,49 @@ func (c *Client) GetSubaccountBalance(ctx context.Context, accountRef string) (*
 	return &result, nil
 }
 
-func (c *Client) FundSubaccount(ctx context.Context, accountRef string, amount float64, reference, narration string) (*APIResponse[FundSubaccountData], error) {
-	req := &FundSubaccountRequest{
-		AccountReference: accountRef,
-		Amount:           amount,
-		Currency:         "NGN",
-		Reference:        reference,
-		Narration:        narration,
-	}
-
-	respBody, err := c.doRequest(ctx, http.MethodPost, "/payout-subaccounts/transfer", req, nil)
+// FetchStaticAccount gets the virtual account details for funding a wallet via bank transfer
+func (c *Client) FetchStaticAccount(ctx context.Context, accountRef string) (*APIResponse[StaticAccountData], error) {
+	endpoint := fmt.Sprintf("/payout-subaccounts/%s/static-accounts", url.PathEscape(accountRef))
+	respBody, err := c.doRequest(ctx, http.MethodGet, endpoint, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var result APIResponse[FundSubaccountData]
+	var result APIResponse[StaticAccountData]
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if result.Status != "success" {
-		return &result, fmt.Errorf("failed to fund subaccount: %s", result.Message)
+		return &result, fmt.Errorf("failed to fetch static account: %s", result.Message)
+	}
+
+	return &result, nil
+}
+
+// FundWallet transfers funds to a wallet using barter_id (wallet-to-wallet transfer)
+func (c *Client) FundWallet(ctx context.Context, barterID string, amount float64, reference, narration string) (*APIResponse[TransferData], error) {
+	req := &WalletTransferRequest{
+		AccountBank:   "flutterwave",
+		AccountNumber: barterID,
+		Amount:        amount,
+		Currency:      "NGN",
+		Reference:     reference,
+		Narration:     narration,
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodPost, "/transfers", req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result APIResponse[TransferData]
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if result.Status != "success" {
+		return &result, fmt.Errorf("failed to fund wallet: %s", result.Message)
 	}
 
 	return &result, nil
@@ -215,6 +237,93 @@ func (c *Client) GetTransfer(ctx context.Context, transferID int64) (*APIRespons
 	}
 
 	var result APIResponse[GetTransferData]
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetWalletTransactions fetches transaction history for a wallet
+func (c *Client) GetWalletTransactions(ctx context.Context, accountRef, from, to string) (*APIResponse[WalletTransactionsData], error) {
+	endpoint := fmt.Sprintf("/payout-subaccounts/%s/transactions", url.PathEscape(accountRef))
+	params := map[string]string{}
+	if from != "" {
+		params["from"] = from
+	}
+	if to != "" {
+		params["to"] = to
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, endpoint, nil, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var result APIResponse[WalletTransactionsData]
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// UpdateWallet updates wallet details (name, email, mobilenumber, country)
+func (c *Client) UpdateWallet(ctx context.Context, accountRef string, req *UpdateWalletRequest) (*APIResponse[SubaccountData], error) {
+	endpoint := fmt.Sprintf("/payout-subaccounts/%s", url.PathEscape(accountRef))
+	respBody, err := c.doRequest(ctx, http.MethodPut, endpoint, req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result APIResponse[SubaccountData]
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if result.Status != "success" {
+		return &result, fmt.Errorf("failed to update wallet: %s", result.Message)
+	}
+
+	return &result, nil
+}
+
+// DeleteWallet deactivates/deletes a wallet (cannot be re-enabled)
+func (c *Client) DeleteWallet(ctx context.Context, accountRef string) (*APIResponse[any], error) {
+	endpoint := fmt.Sprintf("/payout-subaccounts/%s", url.PathEscape(accountRef))
+	respBody, err := c.doRequest(ctx, http.MethodDelete, endpoint, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result APIResponse[any]
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if result.Status != "success" {
+		return &result, fmt.Errorf("failed to delete wallet: %s", result.Message)
+	}
+
+	return &result, nil
+}
+
+// ListWallets fetches all wallets with pagination
+func (c *Client) ListWallets(ctx context.Context, limit int, nextCursor int) (*APIResponse[ListWalletsData], error) {
+	params := map[string]string{}
+	if limit > 0 {
+		params["limit"] = fmt.Sprintf("%d", limit)
+	}
+	if nextCursor > 0 {
+		params["next_cursor"] = fmt.Sprintf("%d", nextCursor)
+	}
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, "/payout-subaccounts", nil, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var result APIResponse[ListWalletsData]
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
