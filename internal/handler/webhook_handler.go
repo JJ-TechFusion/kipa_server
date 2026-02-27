@@ -357,6 +357,15 @@ func (h *WebhookHandler) HandleFlutterwaveWebhook(c *gin.Context) {
 		return
 	}
 
+	// Log raw webhook body for debugging (truncate if too long)
+	rawBody := string(body)
+	if len(rawBody) > 2000 {
+		rawBody = rawBody[:2000] + "...(truncated)"
+	}
+	h.logger.Debug("Flutterwave raw webhook body",
+		zap.String("body", rawBody),
+	)
+
 	// Verify webhook signature using verif-hash header
 	verifHash := c.GetHeader("verif-hash")
 	if !h.flutterwaveClient.VerifyWebhookSignature(verifHash) {
@@ -376,6 +385,7 @@ func (h *WebhookHandler) HandleFlutterwaveWebhook(c *gin.Context) {
 
 	h.logger.Info("received Flutterwave webhook",
 		zap.String("event", event.Event),
+		zap.String("raw_data_preview", string(event.Data)[:min(500, len(event.Data))]),
 	)
 
 	switch event.Event {
@@ -385,6 +395,8 @@ func (h *WebhookHandler) HandleFlutterwaveWebhook(c *gin.Context) {
 		h.handleFlutterwaveTransferCompleted(c, event)
 	case flutterwave.EventTransferFailed:
 		h.handleFlutterwaveTransferFailed(c, event)
+	case flutterwave.EventPayoutCredit, flutterwave.EventVirtualAccountCredit, flutterwave.EventPayoutSubaccountCredit:
+		h.handleFlutterwavePayoutCredit(c, event)
 	default:
 		h.logger.Info("unhandled Flutterwave webhook event type",
 			zap.String("event", event.Event),
@@ -454,40 +466,14 @@ func (h *WebhookHandler) handleFlutterwaveTransferCompleted(c *gin.Context, even
 		zap.Float64("amount", transferData.Amount),
 		zap.String("status", transferData.Status),
 		zap.String("debit_currency", transferData.DebitCurrency),
+		zap.String("currency", transferData.Currency),
 		zap.String("narration", transferData.Narration),
+		zap.String("account_number", transferData.AccountNumber),
+		zap.String("bank_name", transferData.BankName),
 	)
 
-	// Check if this is a wallet funding (bank transfer to virtual account)
-	// Wallet funding has debit_currency="PSA" and reference starts with "PSA_"
-	if transferData.DebitCurrency == "PSA" || (len(transferData.Reference) >= 4 && transferData.Reference[:4] == "PSA_") {
-		h.logger.Info("Processing wallet funding from bank transfer",
-			zap.String("account_number", transferData.AccountNumber),
-			zap.Float64("amount", transferData.Amount),
-		)
-
-		if err := h.fundingService.ProcessWalletFundingWebhook(
-			c.Request.Context(),
-			transferData.AccountNumber,
-			transferData.Amount,
-			transferData.Reference,
-		); err != nil {
-			h.logger.Error("failed to process wallet funding webhook",
-				zap.String("reference", transferData.Reference),
-				zap.Error(err),
-			)
-		} else {
-			h.logger.Info("Wallet funding processed successfully",
-				zap.String("reference", transferData.Reference),
-				zap.Float64("amount", transferData.Amount),
-			)
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"message":   "Wallet funding acknowledged",
-			"reference": transferData.Reference,
-		})
-		return
-	}
+	// Note: Incoming bank transfers to PSA virtual accounts are handled by payout.credit event
+	// This handler is for outgoing transfers (withdrawals)
 
 	// Process withdrawal webhook
 	if err := h.fundingService.ProcessFlutterwaveWithdrawalWebhook(
@@ -538,5 +524,71 @@ func (h *WebhookHandler) handleFlutterwaveTransferFailed(c *gin.Context, event *
 	c.JSON(http.StatusOK, gin.H{
 		"message":   "Transfer failed acknowledged",
 		"reference": transferData.Reference,
+	})
+}
+
+// handleFlutterwavePayoutCredit handles bank transfers TO a payout subaccount (virtual account)
+// This is triggered when someone sends money to the user's nuban virtual account
+func (h *WebhookHandler) handleFlutterwavePayoutCredit(c *gin.Context, event *flutterwave.WebhookEvent) {
+	creditData, err := h.flutterwaveClient.GetPayoutCreditDataFromEvent(event)
+	if err != nil {
+		h.logger.Error("failed to parse Flutterwave payout credit data", zap.Error(err))
+		util.Error(c, http.StatusBadRequest, "INVALID_DATA", "Failed to parse payout credit data")
+		return
+	}
+
+	h.logger.Info("Flutterwave payout credit webhook received (bank transfer to virtual account)",
+		zap.String("account_reference", creditData.AccountReference),
+		zap.String("account_number", creditData.AccountNumber),
+		zap.Float64("amount", creditData.Amount),
+		zap.String("reference", creditData.Reference),
+		zap.String("sender_name", creditData.SenderName),
+		zap.String("sender_bank", creditData.SenderBank),
+		zap.String("event", event.Event),
+	)
+
+	// Determine which identifier to use for lookup
+	// Try account_reference first, then account_number (nuban)
+	var lookupErr error
+	if creditData.AccountReference != "" {
+		lookupErr = h.fundingService.ProcessWalletFundingByAccountRef(
+			c.Request.Context(),
+			creditData.AccountReference,
+			creditData.Amount,
+			creditData.Reference,
+		)
+	} else if creditData.AccountNumber != "" {
+		lookupErr = h.fundingService.ProcessWalletFundingWebhook(
+			c.Request.Context(),
+			creditData.AccountNumber,
+			creditData.Amount,
+			creditData.Reference,
+		)
+	} else {
+		h.logger.Error("payout credit webhook missing account identifiers",
+			zap.String("reference", creditData.Reference),
+		)
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Payout credit received but no account identifier",
+			"reference": creditData.Reference,
+		})
+		return
+	}
+
+	if lookupErr != nil {
+		h.logger.Error("failed to process payout credit webhook",
+			zap.String("reference", creditData.Reference),
+			zap.Error(lookupErr),
+		)
+	} else {
+		h.logger.Info("Payout credit processed successfully",
+			zap.String("reference", creditData.Reference),
+			zap.Float64("amount", creditData.Amount),
+		)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Payout credit acknowledged",
+		"reference": creditData.Reference,
 	})
 }

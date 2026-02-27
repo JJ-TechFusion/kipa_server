@@ -402,6 +402,14 @@ func (c *Client) GetTransferDataFromEvent(event *WebhookEvent) (*TransferWebhook
 	return &data, nil
 }
 
+func (c *Client) GetPayoutCreditDataFromEvent(event *WebhookEvent) (*PayoutCreditWebhookData, error) {
+	var data PayoutCreditWebhookData
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return nil, fmt.Errorf("failed to parse payout credit data: %w", err)
+	}
+	return &data, nil
+}
+
 func (c *Client) GetPublicKey() string {
 	return c.publicKey
 }
