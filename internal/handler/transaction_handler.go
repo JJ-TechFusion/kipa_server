@@ -171,6 +171,20 @@ func (h *TransactionHandler) buildTransactionListItem(c *gin.Context, pr *domain
 		}
 	}
 
+	// Get delivery job info if available
+	if pr.DeliveryJobID != nil {
+		item.DeliveryJobID = pr.DeliveryJobID
+		job, err := h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
+		if err == nil {
+			item.PickupAddress = &job.PickupAddress
+			item.PickupLat = &job.PickupLat
+			item.PickupLng = &job.PickupLng
+			item.DropoffAddress = &job.DropoffAddress
+			item.DropoffLat = &job.DropoffLat
+			item.DropoffLng = &job.DropoffLng
+		}
+	}
+
 	return item
 }
 
@@ -349,7 +363,11 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 				Status:         string(job.Status),
 				RiderAssigned:  job.RiderID != nil,
 				PickupAddress:  job.PickupAddress,
+				PickupLat:      job.PickupLat,
+				PickupLng:      job.PickupLng,
 				DropoffAddress: job.DropoffAddress,
+				DropoffLat:     job.DropoffLat,
+				DropoffLng:     job.DropoffLng,
 			}
 			if job.AcceptedAt != nil {
 				t := job.AcceptedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -466,7 +484,11 @@ type TransactionDeliveryInfo struct {
 	Status         string    `json:"status"`
 	RiderAssigned  bool      `json:"rider_assigned"`
 	PickupAddress  string    `json:"pickup_address"`
+	PickupLat      float64   `json:"pickup_lat"`
+	PickupLng      float64   `json:"pickup_lng"`
 	DropoffAddress string    `json:"dropoff_address"`
+	DropoffLat     float64   `json:"dropoff_lat"`
+	DropoffLng     float64   `json:"dropoff_lng"`
 	AcceptedAt     *string   `json:"accepted_at,omitempty"`
 	PickedUpAt     *string   `json:"picked_up_at,omitempty"`
 	DeliveredAt    *string   `json:"delivered_at,omitempty"`
@@ -613,16 +635,23 @@ type ActiveDeliveryPartyInfo struct {
 
 // TransactionListItem represents a transaction in the list view
 type TransactionListItem struct {
-	PaymentRequestID uuid.UUID `json:"payment_request_id"` // Use this to fetch details
-	Role             string    `json:"role"`               // "buyer" or "seller"
-	ItemName         string    `json:"item_name"`
-	ItemPrice        float64   `json:"item_price"`
-	TotalAmount      *float64  `json:"total_amount,omitempty"`
-	Status           string    `json:"status"`
-	StatusText       string    `json:"status_text"` // Human readable status
-	DeliveryType     string    `json:"delivery_type"`
-	CounterpartyName string    `json:"counterparty_name,omitempty"`
-	CounterpartyRole string    `json:"counterparty_role,omitempty"` // "Buyer" or "Seller"
-	CreatedAt        string    `json:"created_at"`
-	PaidAt           *string   `json:"paid_at,omitempty"`
+	PaymentRequestID uuid.UUID  `json:"payment_request_id"` // Use this to fetch details
+	Role             string     `json:"role"`               // "buyer" or "seller"
+	ItemName         string     `json:"item_name"`
+	ItemPrice        float64    `json:"item_price"`
+	TotalAmount      *float64   `json:"total_amount,omitempty"`
+	Status           string     `json:"status"`
+	StatusText       string     `json:"status_text"` // Human readable status
+	DeliveryType     string     `json:"delivery_type"`
+	CounterpartyName string     `json:"counterparty_name,omitempty"`
+	CounterpartyRole string     `json:"counterparty_role,omitempty"` // "Buyer" or "Seller"
+	CreatedAt        string     `json:"created_at"`
+	PaidAt           *string    `json:"paid_at,omitempty"`
+	DeliveryJobID    *uuid.UUID `json:"delivery_job_id,omitempty"`
+	PickupAddress    *string    `json:"pickup_address,omitempty"`
+	PickupLat        *float64   `json:"pickup_lat,omitempty"`
+	PickupLng        *float64   `json:"pickup_lng,omitempty"`
+	DropoffAddress   *string    `json:"dropoff_address,omitempty"`
+	DropoffLat       *float64   `json:"dropoff_lat,omitempty"`
+	DropoffLng       *float64   `json:"dropoff_lng,omitempty"`
 }

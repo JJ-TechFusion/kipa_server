@@ -88,7 +88,7 @@ func main() {
 	virtualAccountRepo := postgres.NewVirtualAccountRepo(pgClient.DB)
 	withdrawalRepo := postgres.NewWithdrawalRepo(pgClient.DB)
 	topUpRepo := postgres.NewTopUpRepo(pgClient.DB)
-	flwSubaccountRepo := postgres.NewFlutterwaveSubaccountRepo(pgClient.DB)
+	flwVirtualAccountRepo := postgres.NewFlutterwaveVirtualAccountRepo(pgClient.DB)
 
 	// Order repository
 	orderRepo := postgres.NewOrderRepo(pgClient.DB)
@@ -198,7 +198,7 @@ func main() {
 		walletRepo,
 		walletTxRepo,
 		userRepo,
-		flwSubaccountRepo,
+		flwVirtualAccountRepo,
 		paystackClient,
 		flutterwaveClient,
 		notificationService,

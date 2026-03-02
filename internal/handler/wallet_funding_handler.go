@@ -67,13 +67,15 @@ func (h *WalletFundingHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware
 		// Flutterwave routes
 		fw := wallet.Group("/flutterwave")
 		{
-			fw.POST("/subaccount", h.CreateFlutterwaveSubaccount)
-			fw.GET("/subaccount", h.GetFlutterwaveSubaccount)
-			fw.GET("/subaccount/balance", h.GetFlutterwaveBalance)
+			// Virtual account for bank transfer funding
+			fw.GET("/virtual-account/status", h.GetFlutterwaveVirtualAccountStatus)
+			fw.GET("/virtual-account", h.GetFlutterwaveVirtualAccount)
+			fw.POST("/virtual-account", h.CreateFlutterwaveVirtualAccount)
+			fw.POST("/virtual-account/decline", h.DeclineFlutterwaveVirtualAccount)
+
 			fw.POST("/topup/initialize", h.InitializeFlutterwaveTopUp)
 			fw.POST("/topup/verify", h.VerifyFlutterwaveTopUp)
 			fw.POST("/withdraw", h.RequestFlutterwaveWithdrawal)
-			fw.POST("/sync", h.SyncFlutterwaveWallet)
 			fw.GET("/banks", h.ListFlutterwaveBanks)
 			fw.POST("/resolve-account", h.ResolveFlutterwaveAccount)
 		}
@@ -507,100 +509,115 @@ func getIntQuery(c *gin.Context, key string, defaultValue int) int {
 // FLUTTERWAVE HANDLERS
 // ============================================
 
-func (h *WalletFundingHandler) CreateFlutterwaveSubaccount(c *gin.Context) {
+// GetFlutterwaveVirtualAccountStatus returns the user's virtual account status
+// Frontend uses this to determine whether to show the VA creation prompt
+func (h *WalletFundingHandler) GetFlutterwaveVirtualAccountStatus(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
 		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
 		return
 	}
 
-	user, err := h.userRepo.GetByID(c.Request.Context(), userID)
+	status, err := h.fundingService.GetFlutterwaveVirtualAccountStatus(c.Request.Context(), userID)
 	if err != nil {
-		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get user")
+		h.logger.Error("failed to get virtual account status", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get virtual account status")
 		return
 	}
 
-	email := user.PhoneNumber + "@kipa.ng"
-	if user.Email != nil {
-		email = *user.Email
+	util.Success(c, http.StatusOK, status)
+}
+
+// GetFlutterwaveVirtualAccount returns the user's existing virtual account details
+func (h *WalletFundingHandler) GetFlutterwaveVirtualAccount(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
 	}
 
-	subaccount, err := h.fundingService.GetOrCreateFlutterwaveSubaccount(c.Request.Context(), userID, email, user.PhoneNumber)
+	va, err := h.fundingService.GetFlutterwaveVirtualAccount(c.Request.Context(), userID)
 	if err != nil {
-		h.logger.Error("failed to create Flutterwave subaccount", zap.Error(err))
-		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to create subaccount")
+		h.logger.Error("failed to get Flutterwave virtual account", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get virtual account")
+		return
+	}
+
+	if va == nil {
+		util.Error(c, http.StatusNotFound, "VIRTUAL_ACCOUNT_NOT_FOUND", "No virtual account found. Create one first.")
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{
+		"virtual_account": gin.H{
+			"account_number": va.AccountNumber,
+			"bank_name":      va.BankName,
+			"email":          va.Email,
+			"is_active":      va.IsActive,
+			"created_at":     va.CreatedAt,
+		},
+		"message": "Transfer any amount to this account to fund your wallet",
+	})
+}
+
+type CreateFlutterwaveVARequest struct {
+	BVN string `json:"bvn" binding:"required,len=11"`
+}
+
+// CreateFlutterwaveVirtualAccount creates a static virtual account for the user
+// Requires BVN for CBN compliance
+func (h *WalletFundingHandler) CreateFlutterwaveVirtualAccount(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	var req CreateFlutterwaveVARequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	va, err := h.fundingService.CreateFlutterwaveVirtualAccount(c.Request.Context(), userID, req.BVN)
+	if err != nil {
+		if errors.Is(err, domain.ErrProfileIncomplete) {
+			util.Error(c, http.StatusBadRequest, "PROFILE_INCOMPLETE", "Please complete your profile (email, first name, last name) before creating a virtual account")
+			return
+		}
+		h.logger.Error("failed to create Flutterwave virtual account", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to create virtual account")
 		return
 	}
 
 	util.Success(c, http.StatusCreated, gin.H{
-		"subaccount": gin.H{
-			"id":                subaccount.ID,
-			"account_reference": subaccount.AccountReference,
-			"barter_id":         subaccount.BarterID,
-			"account_bank":      subaccount.AccountBank,
-			"account_number":    subaccount.AccountNumber,
-			"business_name":     subaccount.BusinessName,
-			"is_active":         subaccount.IsActive,
+		"virtual_account": gin.H{
+			"account_number": va.AccountNumber,
+			"bank_name":      va.BankName,
+			"email":          va.Email,
+			"is_active":      va.IsActive,
+			"created_at":     va.CreatedAt,
 		},
-		"message": "Wallet created. Fund via bank transfer to account_number.",
+		"message": "Virtual account created successfully. Transfer any amount to fund your wallet.",
 	})
 }
 
-func (h *WalletFundingHandler) GetFlutterwaveSubaccount(c *gin.Context) {
+// DeclineFlutterwaveVirtualAccount marks the user as having declined the VA prompt
+func (h *WalletFundingHandler) DeclineFlutterwaveVirtualAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
 		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
 		return
 	}
 
-	subaccount, err := h.fundingService.GetFlutterwaveSubaccount(c.Request.Context(), userID)
-	if err != nil {
-		h.logger.Error("failed to get Flutterwave subaccount", zap.Error(err))
-		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get subaccount")
-		return
-	}
-
-	if subaccount == nil {
-		util.Success(c, http.StatusOK, gin.H{
-			"subaccount": nil,
-			"message":    "No Flutterwave subaccount found. Create one to use Flutterwave features.",
-		})
+	if err := h.fundingService.DeclineFlutterwaveVirtualAccount(c.Request.Context(), userID); err != nil {
+		h.logger.Error("failed to decline virtual account", zap.Error(err))
+		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to save preference")
 		return
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
-		"subaccount": gin.H{
-			"id":                subaccount.ID,
-			"account_reference": subaccount.AccountReference,
-			"barter_id":         subaccount.BarterID,
-			"account_bank":      subaccount.AccountBank,
-			"account_number":    subaccount.AccountNumber,
-			"business_name":     subaccount.BusinessName,
-			"is_active":         subaccount.IsActive,
-		},
-	})
-}
-
-func (h *WalletFundingHandler) GetFlutterwaveBalance(c *gin.Context) {
-	userID, ok := middleware.GetUserID(c)
-	if !ok {
-		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
-		return
-	}
-
-	balance, err := h.fundingService.GetFlutterwaveSubaccountBalance(c.Request.Context(), userID)
-	if err != nil {
-		if errors.Is(err, domain.ErrFlutterwaveSubaccountNotFound) {
-			util.Error(c, http.StatusNotFound, "SUBACCOUNT_NOT_FOUND", "Flutterwave subaccount not found. Create one first.")
-			return
-		}
-		h.logger.Error("failed to get Flutterwave balance", zap.Error(err))
-		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get balance")
-		return
-	}
-
-	util.Success(c, http.StatusOK, gin.H{
-		"balance": balance,
+		"message": "Virtual account creation declined",
 	})
 }
 
@@ -727,41 +744,6 @@ func (h *WalletFundingHandler) RequestFlutterwaveWithdrawal(c *gin.Context) {
 			"created_at":       withdrawal.CreatedAt,
 		},
 		"message": "Withdrawal initiated via Flutterwave. You will receive the funds shortly.",
-	})
-}
-
-// SyncFlutterwaveWallet syncs internal wallet with Flutterwave subaccount balance
-// This is needed because Flutterwave doesn't send webhooks for bank transfers to PSA virtual accounts
-func (h *WalletFundingHandler) SyncFlutterwaveWallet(c *gin.Context) {
-	userID, ok := middleware.GetUserID(c)
-	if !ok {
-		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
-		return
-	}
-
-	result, err := h.fundingService.SyncFlutterwaveWallet(c.Request.Context(), userID)
-	if err != nil {
-		if errors.Is(err, domain.ErrFlutterwaveSubaccountNotFound) {
-			util.Error(c, http.StatusNotFound, "SUBACCOUNT_NOT_FOUND", "Flutterwave subaccount not found. Create one first.")
-			return
-		}
-		h.logger.Error("failed to sync Flutterwave wallet", zap.Error(err))
-		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to sync wallet")
-		return
-	}
-
-	message := "Wallet is already in sync"
-	if result.WasSynced {
-		message = "Wallet synced successfully"
-	}
-
-	util.Success(c, http.StatusOK, gin.H{
-		"previous_balance":    result.PreviousBalance,
-		"flutterwave_balance": result.FlutterwaveBalance,
-		"new_balance":         result.NewBalance,
-		"amount_synced":       result.AmountSynced,
-		"was_synced":          result.WasSynced,
-		"message":             message,
 	})
 }
 

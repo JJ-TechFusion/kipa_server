@@ -23,6 +23,9 @@ type User struct {
 	SuspensionReason *string    `db:"suspension_reason" json:"suspension_reason,omitempty"`
 	LastLoginAt      *time.Time `db:"last_login_at" json:"last_login_at,omitempty"`
 
+	// Flutterwave virtual account preference
+	FlwVirtualAccountDeclinedAt *time.Time `db:"flw_virtual_account_declined_at" json:"flw_virtual_account_declined_at,omitempty"`
+
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }

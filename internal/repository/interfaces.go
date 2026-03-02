@@ -280,6 +280,16 @@ type FlutterwaveSubaccountRepository interface {
 	GetAllActiveUserIDs(ctx context.Context) ([]uuid.UUID, error)
 	Update(ctx context.Context, subaccount *domain.FlutterwaveSubaccount) error
 }
+
+type FlutterwaveVirtualAccountRepository interface {
+	Create(ctx context.Context, va *domain.FlutterwaveVirtualAccount) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.FlutterwaveVirtualAccount, error)
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.FlutterwaveVirtualAccount, error)
+	GetByTxRef(ctx context.Context, txRef string) (*domain.FlutterwaveVirtualAccount, error)
+	GetByAccountNumber(ctx context.Context, accountNumber string) (*domain.FlutterwaveVirtualAccount, error)
+	Update(ctx context.Context, va *domain.FlutterwaveVirtualAccount) error
+}
+
 type WithdrawalRepository interface {
 	Create(ctx context.Context, withdrawal *domain.Withdrawal) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Withdrawal, error)

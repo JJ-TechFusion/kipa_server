@@ -2,36 +2,64 @@
 	"info": {
 		"_postman_id": "kipa-flutterwave-collection",
 		"name": "Kipa - Flutterwave Integration",
-		"description": "Flutterwave payment integration endpoints for Kipa Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nAll endpoints require a Bearer token in the Authorization header.\nGet the token by calling `/auth/otp/send` and `/auth/otp/verify`.\n\n## Flutterwave Integration Overview\nFlutterwave is the PRIMARY payment provider for Kipa, handling:\n- **Payout Subaccounts (Wallets)** - Each user gets a Flutterwave wallet with virtual account\n- **Wallet Funding** - Via bank transfer to virtual account or wallet-to-wallet transfer\n- **Withdrawals** - Users withdraw from their wallet to their bank account\n- **Balance Management** - Real-time balance queries and transaction history\n\n### Key Concepts\n- **account_reference**: Unique wallet identifier (e.g., `PSA14B6C11AE18421012`)\n- **barter_id**: Used for wallet-to-wallet transfers (e.g., `234000003363471`)\n- **nuban**: Virtual account number for bank transfers (e.g., `7353333250`)\n- **bank_code**: `035` (WEMA) or `232` (Sterling)\n\n### Wallet Creation Flow\n1. Create wallet → returns `account_reference`, `barter_id`, `nuban`\n2. User can fund via bank transfer to `nuban`\n3. Or fund via wallet-to-wallet using `barter_id`\n\n### ⚠️ IMPORTANT: Bank Transfer Sync\nFlutterwave does NOT send webhooks for bank transfers to PSA virtual accounts.\nAfter making a bank transfer to `nuban`, call `/wallet/flutterwave/sync` to update wallet balance.\n\n### Withdrawal Flow\n1. User requests withdrawal with bank details\n2. Transfer initiated with `debit_subaccount` = `account_reference`\n3. Funds sent from user's wallet to their bank\n\n## Variables\nSet these in your Postman environment:\n- `base_url`: API base URL (e.g., http://localhost:8080)\n- `access_token`: JWT access token\n- `bank_account_id`: User's saved bank account ID\n- `fw_tx_ref`: Flutterwave transaction reference\n- `fw_subaccount_ref`: Flutterwave wallet account_reference\n- `fw_barter_id`: Flutterwave wallet barter_id\n- `fw_base_url`: Flutterwave API base (https://api.flutterwave.com/v3)\n- `fw_secret_key`: Flutterwave secret key",
+		"description": "Flutterwave payment integration endpoints for Kipa Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Authentication\nAll endpoints require a Bearer token in the Authorization header.\nGet the token by calling `/auth/otp/send` and `/auth/otp/verify`.\n\n## Flutterwave Integration Overview\nFlutterwave handles:\n- **Virtual Accounts** - Static bank account for wallet funding via bank transfer\n- **Top-up** - Card/bank payments via Flutterwave checkout\n- **Withdrawals** - Transfer from internal wallet to user's bank account\n\n### Virtual Account Flow (Bank Transfer Funding)\n1. User requests virtual account creation (requires BVN for CBN compliance)\n2. User receives a permanent bank account number (Wema Bank)\n3. User transfers any amount to fund their wallet\n4. Webhook credits user's internal wallet automatically\n\n### Key Concepts\n- **BVN**: Bank Verification Number (11 digits) - required for VA creation\n- **tx_ref**: Transaction reference pattern `va-{userID}` for virtual accounts\n- Internal wallet balance is managed by Kipa, not Flutterwave\n\n## Variables\nSet these in your Postman environment:\n- `base_url`: API base URL (e.g., http://localhost:8080)\n- `access_token`: JWT access token\n- `bank_account_id`: User's saved bank account ID\n- `fw_tx_ref`: Flutterwave transaction reference\n- `fw_base_url`: Flutterwave API base (https://api.flutterwave.com/v3)\n- `fw_secret_key`: Flutterwave secret key",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
 		{
-			"name": "Kipa API - Subaccount",
+			"name": "Virtual Account (Bank Transfer Funding)",
+			"description": "Static virtual account for funding wallet via bank transfer.\n\n**Requirements:**\n- User must have complete profile (email, first name, last name)\n- BVN (Bank Verification Number) required for CBN compliance\n\n**Flow:**\n1. Check status → if no account and not declined, show prompt\n2. User provides BVN → create virtual account\n3. User transfers to the bank account\n4. Webhook auto-credits wallet",
 			"item": [
 				{
-					"name": "Create Subaccount",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    var jsonData = pm.response.json();",
-									"    if (jsonData.data && jsonData.data.account_reference) {",
-									"        pm.environment.set('fw_subaccount_ref', jsonData.data.account_reference);",
-									"        console.log('Subaccount reference saved:', jsonData.data.account_reference);",
-									"    }",
-									"    if (jsonData.data && jsonData.data.barter_id) {",
-									"        pm.environment.set('fw_barter_id', jsonData.data.barter_id);",
-									"        console.log('Barter ID saved:', jsonData.data.barter_id);",
-									"    }",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
+					"name": "Get Virtual Account Status",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/flutterwave/virtual-account/status",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "flutterwave", "virtual-account", "status"]
+						},
+						"description": "Check user's virtual account status.\n\nUse this to determine whether to show the VA creation prompt on the wallet page.\n\n**Response (no account, not declined - show prompt):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"has_account\": false,\n    \"declined\": false,\n    \"account\": null\n  }\n}\n```\n\n**Response (has account - show details):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"has_account\": true,\n    \"declined\": false,\n    \"account\": {\n      \"id\": \"uuid\",\n      \"account_number\": \"7353333250\",\n      \"bank_name\": \"Wema Bank\",\n      \"email\": \"user@example.com\",\n      \"is_active\": true,\n      \"created_at\": \"2025-01-15T10:00:00Z\"\n    }\n  }\n}\n```\n\n**Response (declined - don't show prompt):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"has_account\": false,\n    \"declined\": true,\n    \"account\": null\n  }\n}\n```\n\n**Frontend Logic:**\n- `has_account: true` → Show account details\n- `declined: true` → Don't show prompt\n- Both false → Show creation prompt"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Virtual Account Details",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/wallet/flutterwave/virtual-account",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "wallet", "flutterwave", "virtual-account"]
+						},
+						"description": "Get the user's virtual account details for bank transfer funding.\n\n**Response (success):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"virtual_account\": {\n      \"account_number\": \"7353333250\",\n      \"bank_name\": \"Wema Bank\",\n      \"email\": \"user@example.com\",\n      \"is_active\": true,\n      \"created_at\": \"2025-01-15T10:00:00Z\"\n    },\n    \"message\": \"Transfer any amount to this account to fund your wallet\"\n  }\n}\n```\n\n**Response (not found):**\n```json\n{\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"VIRTUAL_ACCOUNT_NOT_FOUND\",\n    \"message\": \"No virtual account found. Create one first.\"\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Virtual Account",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -52,67 +80,19 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"email\": \"user@example.com\"\n}"
+							"raw": "{\n  \"bvn\": \"12345678901\"\n}"
 						},
 						"url": {
-							"raw": "{{base_url}}/api/v1/wallet/flutterwave/subaccount",
+							"raw": "{{base_url}}/api/v1/wallet/flutterwave/virtual-account",
 							"host": ["{{base_url}}"],
-							"path": ["api", "v1", "wallet", "flutterwave", "subaccount"]
+							"path": ["api", "v1", "wallet", "flutterwave", "virtual-account"]
 						},
-						"description": "Create a Flutterwave payout subaccount (wallet) for the authenticated user.\n\n**Request Body:**\n- `email` (required): User's email address\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"id\": \"uuid\",\n    \"account_reference\": \"PSA14B6C11AE18421012\",\n    \"barter_id\": \"234000003363471\",\n    \"account_bank\": \"Wema Bank PLC\",\n    \"account_number\": \"7353333250\",\n    \"business_name\": \"User Name\",\n    \"is_active\": true\n  }\n}\n```\n\n**Key Fields:**\n- `account_reference`: Use for withdrawals (debit_subaccount)\n- `barter_id`: Use for wallet-to-wallet transfers\n- `account_number`: Virtual account for bank transfers"
+						"description": "Create a static virtual account for the user.\n\n**Prerequisites:**\n- User must have complete profile (email, first name, last name)\n- Valid BVN (11 digits)\n\n**Request Body:**\n```json\n{\n  \"bvn\": \"12345678901\"\n}\n```\n\n**BVN Requirements:**\n- Must be exactly 11 digits\n- Required by CBN (Central Bank of Nigeria) regulations\n- Used for KYC verification\n\n**Response (success):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"virtual_account\": {\n      \"account_number\": \"7353333250\",\n      \"bank_name\": \"Wema Bank\",\n      \"email\": \"user@example.com\",\n      \"is_active\": true,\n      \"created_at\": \"2025-01-15T10:00:00Z\"\n    },\n    \"message\": \"Virtual account created successfully. Transfer any amount to fund your wallet.\"\n  }\n}\n```\n\n**Response (profile incomplete):**\n```json\n{\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"PROFILE_INCOMPLETE\",\n    \"message\": \"Please complete your profile (email, first name, last name) before creating a virtual account\"\n  }\n}\n```\n\n**Response (invalid BVN):**\n```json\n{\n  \"status\": \"error\",\n  \"error\": {\n    \"code\": \"INVALID_INPUT\",\n    \"message\": \"bvn must be 11 characters\"\n  }\n}\n```"
 					},
 					"response": []
 				},
 				{
-					"name": "Get Subaccount",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/v1/wallet/flutterwave/subaccount",
-							"host": ["{{base_url}}"],
-							"path": ["api", "v1", "wallet", "flutterwave", "subaccount"]
-						},
-						"description": "Get the authenticated user's Flutterwave wallet details.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"subaccount\": {\n      \"id\": \"uuid\",\n      \"account_reference\": \"PSA14B6C11AE18421012\",\n      \"barter_id\": \"234000003363471\",\n      \"account_bank\": \"Wema Bank PLC\",\n      \"account_number\": \"7353333250\",\n      \"business_name\": \"User Name\",\n      \"email\": \"user@example.com\",\n      \"is_active\": true\n    }\n  }\n}\n```"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Subaccount Balance",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/v1/wallet/flutterwave/subaccount/balance",
-							"host": ["{{base_url}}"],
-							"path": ["api", "v1", "wallet", "flutterwave", "subaccount", "balance"]
-						},
-						"description": "Get the balance of the user's Flutterwave wallet.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"balance\": 50000.00,\n    \"currency\": \"NGN\"\n  }\n}\n```"
-					},
-					"response": []
-				},
-				{
-					"name": "Sync Wallet with Flutterwave",
+					"name": "Decline Virtual Account",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -127,18 +107,19 @@
 						"method": "POST",
 						"header": [],
 						"url": {
-							"raw": "{{base_url}}/api/v1/wallet/flutterwave/sync",
+							"raw": "{{base_url}}/api/v1/wallet/flutterwave/virtual-account/decline",
 							"host": ["{{base_url}}"],
-							"path": ["api", "v1", "wallet", "flutterwave", "sync"]
+							"path": ["api", "v1", "wallet", "flutterwave", "virtual-account", "decline"]
 						},
-						"description": "Sync internal wallet balance with Flutterwave subaccount balance.\n\n**IMPORTANT:** Flutterwave does NOT send webhooks for bank transfers to payout subaccount virtual accounts. Call this endpoint after making a bank transfer to update your wallet balance.\n\n**Use Cases:**\n- After bank transfer to virtual account (nuban)\n- To verify wallet is in sync with Flutterwave\n- Troubleshooting balance discrepancies\n\n**Response (when synced):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"previous_balance\": 0.00,\n    \"flutterwave_balance\": 5000.00,\n    \"new_balance\": 5000.00,\n    \"amount_synced\": 5000.00,\n    \"was_synced\": true,\n    \"message\": \"Wallet synced successfully\"\n  }\n}\n```\n\n**Response (already in sync):**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"previous_balance\": 5000.00,\n    \"flutterwave_balance\": 5000.00,\n    \"new_balance\": 5000.00,\n    \"amount_synced\": 0,\n    \"was_synced\": false,\n    \"message\": \"Wallet is already in sync\"\n  }\n}\n```"
+						"description": "Mark user as having declined the virtual account creation prompt.\n\nCall this when user dismisses/declines the VA creation prompt so it won't be shown again.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"message\": \"Virtual account creation declined\"\n  }\n}\n```\n\n**Note:** User can still create a virtual account later by explicitly navigating to the creation flow."
 					},
 					"response": []
 				}
 			]
 		},
 		{
-			"name": "Kipa API - Top-up",
+			"name": "Top-up (Card/Bank Payment)",
+			"description": "Fund wallet via Flutterwave checkout page.\n\nSupports card, bank transfer, USSD payments.",
 			"item": [
 				{
 					"name": "Initialize Top-up",
@@ -185,7 +166,7 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "wallet", "flutterwave", "topup", "initialize"]
 						},
-						"description": "Initialize a wallet top-up via Flutterwave checkout.\n\n**Request Body:**\n- `amount` (required): Amount in NGN (min 100)\n- `email` (required): User's email\n- `callback_url` (required): Redirect URL after payment\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"top_up_id\": \"uuid\",\n    \"payment_reference\": \"KIP_FW_xxxxx\",\n    \"payment_link\": \"https://checkout.flutterwave.com/v3/hosted/pay/xxxxx\"\n  }\n}\n```"
+						"description": "Initialize a wallet top-up via Flutterwave checkout.\n\n**Request Body:**\n- `amount` (required): Amount in NGN (min 100)\n- `email` (required): User's email\n- `callback_url` (required): Redirect URL after payment\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"top_up_id\": \"uuid\",\n    \"payment_reference\": \"KIP_FW_xxxxx\",\n    \"payment_link\": \"https://checkout.flutterwave.com/v3/hosted/pay/xxxxx\"\n  }\n}\n```\n\n**Flow:**\n1. Call this endpoint to get payment link\n2. Redirect user to `payment_link`\n3. User completes payment\n4. Webhook credits wallet automatically\n5. User redirected to `callback_url`"
 					},
 					"response": []
 				},
@@ -218,15 +199,15 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "wallet", "flutterwave", "topup", "verify"]
 						},
-						"description": "Manually verify a top-up (fallback if webhook missed).\n\n**Request Body:**\n- `tx_ref` (required): Transaction reference\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Top-up verified and processed successfully\"\n}\n```"
+						"description": "Manually verify a top-up (fallback if webhook missed).\n\n**Request Body:**\n- `tx_ref` (required): Transaction reference from initialize response\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Top-up verified and processed successfully\"\n}\n```"
 					},
 					"response": []
 				}
 			]
 		},
 		{
-			"name": "Kipa API - Bank Accounts",
-			"description": "Manage saved bank accounts for withdrawals. You must add a bank account before you can withdraw.",
+			"name": "Bank Accounts",
+			"description": "Manage saved bank accounts for withdrawals.\n\nYou must add a bank account before you can withdraw.",
 			"item": [
 				{
 					"name": "Add Bank Account",
@@ -353,7 +334,8 @@
 			]
 		},
 		{
-			"name": "Kipa API - Withdrawal",
+			"name": "Withdrawal",
+			"description": "Withdraw from internal wallet to bank account.\n\nFunds are transferred from Kipa's Flutterwave account to user's bank.",
 			"item": [
 				{
 					"name": "Request Withdrawal",
@@ -384,14 +366,15 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "wallet", "flutterwave", "withdraw"]
 						},
-						"description": "Withdraw from Flutterwave wallet to bank account.\n\n**Prerequisites:**\n1. Create a Flutterwave subaccount (wallet)\n2. Add a bank account via `POST /wallet/bank-accounts`\n3. Use the bank account's `id` for withdrawal\n\n**Request Body:**\n- `bank_account_id` (required): UUID of saved bank account (from Add Bank Account)\n- `amount` (required): Amount in NGN (min 1000)\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"withdrawal\": {\n      \"id\": \"uuid\",\n      \"amount\": 5000,\n      \"fee\": 50,\n      \"net_amount\": 4950,\n      \"status\": \"processing\"\n    }\n  }\n}\n```\n\n**Error Codes:**\n- `BANK_ACCOUNT_NOT_FOUND`: Add a bank account first\n- `INSUFFICIENT_BALANCE`: Not enough funds\n- `WITHDRAWAL_MINIMUM`: Amount below 1000 NGN"
+						"description": "Withdraw from wallet to bank account.\n\n**Prerequisites:**\n1. Add a bank account via `POST /wallet/bank-accounts`\n2. Have sufficient wallet balance\n\n**Request Body:**\n- `bank_account_id` (required): UUID of saved bank account\n- `amount` (required): Amount in NGN (min 1000)\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"withdrawal\": {\n      \"id\": \"uuid\",\n      \"amount\": 5000,\n      \"fee\": 50,\n      \"net_amount\": 4950,\n      \"status\": \"processing\"\n    }\n  }\n}\n```\n\n**Error Codes:**\n- `BANK_ACCOUNT_NOT_FOUND`: Add a bank account first\n- `INSUFFICIENT_BALANCE`: Not enough funds\n- `WITHDRAWAL_MINIMUM`: Amount below 1000 NGN"
 					},
 					"response": []
 				}
 			]
 		},
 		{
-			"name": "Kipa API - Banks",
+			"name": "Banks",
+			"description": "Bank lookup utilities.",
 			"item": [
 				{
 					"name": "List Banks",
@@ -446,35 +429,52 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "wallet", "flutterwave", "resolve-account"]
 						},
-						"description": "Verify bank account details.\n\n**Request Body:**\n- `account_number`: 10-digit account number\n- `bank_code`: Bank code from List Banks\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"account\": {\n      \"account_number\": \"0123456789\",\n      \"account_name\": \"JOHN DOE\"\n    }\n  }\n}\n```"
+						"description": "Verify bank account details before adding.\n\n**Request Body:**\n- `account_number`: 10-digit account number\n- `bank_code`: Bank code from List Banks\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"account\": {\n      \"account_number\": \"0123456789\",\n      \"account_name\": \"JOHN DOE\"\n    }\n  }\n}\n```"
 					},
 					"response": []
 				}
 			]
 		},
 		{
-			"name": "Flutterwave Direct API",
+			"name": "Webhooks",
+			"description": "Webhook endpoints for Flutterwave events.",
 			"item": [
 				{
-					"name": "Wallet - Create",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    var jsonData = pm.response.json();",
-									"    if (jsonData.data) {",
-									"        pm.environment.set('fw_subaccount_ref', jsonData.data.account_reference);",
-									"        pm.environment.set('fw_barter_id', jsonData.data.barter_id);",
-									"        console.log('Wallet created:', jsonData.data);",
-									"    }",
-									"}"
-								],
-								"type": "text/javascript"
+					"name": "Flutterwave Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "verif-hash",
+								"value": "{{fw_webhook_secret}}",
+								"description": "Webhook signature"
 							}
-						}
-					],
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"event\": \"charge.completed\",\n  \"data\": {\n    \"id\": 123456789,\n    \"tx_ref\": \"va-550e8400-e29b-41d4-a716-446655440000\",\n    \"flw_ref\": \"FLW-MOCK-xxxxx\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"successful\",\n    \"payment_type\": \"BANK_TRANSFER_TRANSACTION\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/webhooks/flutterwave",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "webhooks", "flutterwave"]
+						},
+						"description": "Flutterwave webhook endpoint.\n\n**Events Handled:**\n\n### charge.completed\nPayment successful (card, bank transfer, USSD).\n\n**Virtual Account Bank Transfer:**\n```json\n{\n  \"event\": \"charge.completed\",\n  \"data\": {\n    \"id\": 123456789,\n    \"tx_ref\": \"va-550e8400-e29b-41d4-a716-446655440000\",\n    \"flw_ref\": \"FLW123456\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"successful\",\n    \"payment_type\": \"BANK_TRANSFER_TRANSACTION\"\n  }\n}\n```\n\nNote: `tx_ref` starting with `va-` indicates virtual account funding.\n\n**Card/Checkout Top-up:**\n```json\n{\n  \"event\": \"charge.completed\",\n  \"data\": {\n    \"id\": 123456789,\n    \"tx_ref\": \"KIP_FW_xxxxx\",\n    \"flw_ref\": \"FLW123456\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"successful\",\n    \"payment_type\": \"card\"\n  }\n}\n```\n\n### transfer.completed\nWithdrawal to bank successful.\n```json\n{\n  \"event\": \"transfer.completed\",\n  \"data\": {\n    \"id\": 85677894,\n    \"reference\": \"KIP_WD_xxxxx\",\n    \"amount\": 5000,\n    \"status\": \"SUCCESSFUL\"\n  }\n}\n```\n\n### transfer.failed\nWithdrawal to bank failed.\n```json\n{\n  \"event\": \"transfer.failed\",\n  \"data\": {\n    \"id\": 85677894,\n    \"reference\": \"KIP_WD_xxxxx\",\n    \"amount\": 5000,\n    \"status\": \"FAILED\",\n    \"complete_message\": \"Transfer failed due to insufficient funds\"\n  }\n}\n```"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Flutterwave Direct API (Reference)",
+			"description": "Direct Flutterwave API endpoints for reference and debugging.\n\nBase URL: https://api.flutterwave.com/v3\n\nAuthentication: Bearer token using your Flutterwave secret key.",
+			"item": [
+				{
+					"name": "Virtual Account - Create Static",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -495,199 +495,19 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"account_name\": \"John Doe\",\n  \"email\": \"user@example.com\",\n  \"country\": \"NG\",\n  \"bank_code\": \"035\"\n}"
+							"raw": "{\n  \"email\": \"user@example.com\",\n  \"is_permanent\": true,\n  \"bvn\": \"12345678901\",\n  \"tx_ref\": \"va-unique-user-id\",\n  \"phonenumber\": \"08012345678\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"narration\": \"Kipa Wallet - John Doe\"\n}"
 						},
 						"url": {
-							"raw": "{{fw_base_url}}/payout-subaccounts",
+							"raw": "{{fw_base_url}}/virtual-account-numbers",
 							"host": ["{{fw_base_url}}"],
-							"path": ["payout-subaccounts"]
+							"path": ["virtual-account-numbers"]
 						},
-						"description": "Create a Flutterwave Payout Subaccount (Wallet).\n\n**Request Body:**\n- `account_name` (required): Wallet holder name\n- `email` (required): Email address\n- `country` (required): Country code (NG)\n- `bank_code` (optional): `035` (WEMA) or `232` (Sterling)\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Payout subaccount created\",\n  \"data\": {\n    \"id\": 453748,\n    \"account_reference\": \"PSA14B6C11AE18421012\",\n    \"account_name\": \"John Doe\",\n    \"barter_id\": \"234000003363471\",\n    \"email\": \"user@example.com\",\n    \"country\": \"NG\",\n    \"nuban\": \"7353333250\",\n    \"bank_name\": \"Wema Bank PLC\",\n    \"bank_code\": \"035\",\n    \"status\": \"ACTIVE\",\n    \"created_at\": \"2025-08-26T11:40:27.000Z\"\n  }\n}\n```\n\n**Key Fields:**\n- `account_reference`: Wallet identifier for API calls\n- `barter_id`: Use for wallet-to-wallet transfers\n- `nuban`: Virtual account number for bank transfers"
+						"description": "Create a static (permanent) virtual account for bank transfer collection.\n\n**Request Body:**\n- `email` (required): User's email\n- `is_permanent` (required): `true` for static account\n- `bvn` (required): 11-digit Bank Verification Number\n- `tx_ref` (required): Unique reference (use `va-{userID}`)\n- `phonenumber` (optional): User's phone number\n- `firstname` (optional): User's first name\n- `lastname` (optional): User's last name\n- `narration` (optional): Account description\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Virtual account created\",\n  \"data\": {\n    \"response_code\": \"02\",\n    \"response_message\": \"Transaction in progress\",\n    \"flw_ref\": \"FLW-VA-123456\",\n    \"order_ref\": \"URF_123456\",\n    \"account_number\": \"7353333250\",\n    \"frequency\": \"N/A\",\n    \"bank_name\": \"Wema Bank\",\n    \"created_at\": \"2025-01-15 10:00:00\",\n    \"expiry_date\": \"N/A\",\n    \"note\": \"Please make payment...\",\n    \"amount\": null\n  }\n}\n```"
 					},
 					"response": []
 				},
 				{
-					"name": "Wallet - Fetch Static Account",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{fw_secret_key}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{fw_base_url}}/payout-subaccounts/{{fw_subaccount_ref}}/static-accounts",
-							"host": ["{{fw_base_url}}"],
-							"path": ["payout-subaccounts", "{{fw_subaccount_ref}}", "static-accounts"]
-						},
-						"description": "Get the virtual account for funding a wallet via bank transfer.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"SERVICE-RESPONSE\",\n  \"data\": {\n    \"static_account\": \"8523283309\",\n    \"bank_name\": \"Sterling Bank PLC\",\n    \"bank_code\": \"232\",\n    \"currency\": \"NGN\"\n  }\n}\n```\n\nUsers can transfer to this account to fund their wallet."
-					},
-					"response": []
-				},
-				{
-					"name": "Wallet - Get Balance",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{fw_secret_key}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{fw_base_url}}/payout-subaccounts/{{fw_subaccount_ref}}/balances?currency=NGN",
-							"host": ["{{fw_base_url}}"],
-							"path": ["payout-subaccounts", "{{fw_subaccount_ref}}", "balances"],
-							"query": [
-								{
-									"key": "currency",
-									"value": "NGN"
-								}
-							]
-						},
-						"description": "Get wallet balance.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"currency\": \"NGN\",\n    \"available_balance\": 50000.00,\n    \"ledger_balance\": 50000.00\n  }\n}\n```"
-					},
-					"response": []
-				},
-				{
-					"name": "Wallet - Get Transactions",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{fw_secret_key}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{fw_base_url}}/payout-subaccounts/{{fw_subaccount_ref}}/transactions?from=2025-01-01&to=2025-12-31",
-							"host": ["{{fw_base_url}}"],
-							"path": ["payout-subaccounts", "{{fw_subaccount_ref}}", "transactions"],
-							"query": [
-								{
-									"key": "from",
-									"value": "2025-01-01"
-								},
-								{
-									"key": "to",
-									"value": "2025-12-31"
-								}
-							]
-						},
-						"description": "Get wallet transaction history.\n\n**Query Params:**\n- `from`: Start date (YYYY-MM-DD)\n- `to`: End date (YYYY-MM-DD)\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"transactions\": [\n      {\n        \"id\": 123,\n        \"type\": \"credit\",\n        \"amount\": 10000,\n        \"currency\": \"NGN\",\n        \"status\": \"successful\",\n        \"reference\": \"xxx\",\n        \"narration\": \"Wallet funding\",\n        \"created_at\": \"2025-01-15T10:00:00Z\"\n      }\n    ]\n  }\n}\n```"
-					},
-					"response": []
-				},
-				{
-					"name": "Wallet - Update Details",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{fw_secret_key}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"account_name\": \"Updated Name\",\n  \"email\": \"newemail@example.com\",\n  \"mobilenumber\": \"08012345678\",\n  \"country\": \"NG\"\n}"
-						},
-						"url": {
-							"raw": "{{fw_base_url}}/payout-subaccounts/{{fw_subaccount_ref}}",
-							"host": ["{{fw_base_url}}"],
-							"path": ["payout-subaccounts", "{{fw_subaccount_ref}}"]
-						},
-						"description": "Update wallet details.\n\n**Request Body (all optional):**\n- `account_name`: New wallet name\n- `email`: New email\n- `mobilenumber`: New phone number\n- `country`: Country code\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Payout subaccount updated\",\n  \"data\": { ... }\n}\n```"
-					},
-					"response": []
-				},
-				{
-					"name": "Wallet - Delete",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{fw_secret_key}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{fw_base_url}}/payout-subaccounts/{{fw_subaccount_ref}}",
-							"host": ["{{fw_base_url}}"],
-							"path": ["payout-subaccounts", "{{fw_subaccount_ref}}"]
-						},
-						"description": "Delete/deactivate a wallet.\n\n**WARNING:**\n- Deleted wallets CANNOT be re-enabled\n- Transfers to deleted wallets are returned to sender\n- Cannot fetch static accounts for deleted wallets\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Payout sub-account deactivation has been submitted for processing.\",\n  \"data\": null\n}\n```"
-					},
-					"response": []
-				},
-				{
-					"name": "Wallet - List All",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{fw_secret_key}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{fw_base_url}}/payout-subaccounts?limit=10",
-							"host": ["{{fw_base_url}}"],
-							"path": ["payout-subaccounts"],
-							"query": [
-								{
-									"key": "limit",
-									"value": "10"
-								},
-								{
-									"key": "next_cursor",
-									"value": "",
-									"disabled": true
-								}
-							]
-						},
-						"description": "List all wallets with pagination.\n\n**Query Params:**\n- `limit`: Number of results per page\n- `next_cursor`: Cursor from previous response for pagination\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"payout_subaccounts\": [\n      {\n        \"id\": 4058,\n        \"account_reference\": \"PSAC6A05465972178946\",\n        \"account_name\": \"John Doe\",\n        \"barter_id\": \"234000001536470\",\n        \"email\": \"john@example.com\",\n        \"nuban\": \"8222459588\",\n        \"bank_name\": \"Sterling Bank PLC\",\n        \"status\": \"ACTIVE\"\n      }\n    ],\n    \"cursor\": {\n      \"next\": 5040,\n      \"limit\": 10,\n      \"has_more_items\": true\n    }\n  }\n}\n```"
-					},
-					"response": []
-				},
-				{
-					"name": "Transfer - Wallet to Wallet",
+					"name": "Transfer - To Bank Account",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -708,47 +528,14 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"account_bank\": \"flutterwave\",\n  \"account_number\": \"{{fw_barter_id}}\",\n  \"amount\": 10000,\n  \"currency\": \"NGN\",\n  \"narration\": \"Wallet funding\"\n}"
+							"raw": "{\n  \"account_bank\": \"044\",\n  \"account_number\": \"0690000040\",\n  \"amount\": 5000,\n  \"narration\": \"Wallet withdrawal\",\n  \"currency\": \"NGN\",\n  \"reference\": \"KIP_WD_unique_reference\",\n  \"callback_url\": \"https://yourapi.com/webhooks/flutterwave\"\n}"
 						},
 						"url": {
 							"raw": "{{fw_base_url}}/transfers",
 							"host": ["{{fw_base_url}}"],
 							"path": ["transfers"]
 						},
-						"description": "Transfer funds between Flutterwave wallets.\n\nUsed to fund a user's wallet from the platform's main wallet.\n\n**Request Body:**\n- `account_bank`: Must be `\"flutterwave\"` for wallet transfers\n- `account_number`: Destination wallet's `barter_id`\n- `amount`: Amount in NGN\n- `currency`: `\"NGN\"`\n- `narration` (optional): Transfer description\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Transfer Queued Successfully\",\n  \"data\": {\n    \"id\": 2024116,\n    \"account_number\": \"49851890\",\n    \"bank_code\": \"flutterwave\",\n    \"full_name\": \"PAYOUTSUB John Doe\",\n    \"amount\": 10000,\n    \"fee\": 0,\n    \"status\": \"NEW\",\n    \"reference\": \"9833d05412688b4a\"\n  }\n}\n```"
-					},
-					"response": []
-				},
-				{
-					"name": "Transfer - Withdrawal to Bank",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{fw_secret_key}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"account_bank\": \"044\",\n  \"account_number\": \"0690000040\",\n  \"amount\": 5500,\n  \"narration\": \"Wallet withdrawal\",\n  \"currency\": \"NGN\",\n  \"reference\": \"unique_reference_123\",\n  \"debit_currency\": \"NGN\",\n  \"debit_subaccount\": \"{{fw_subaccount_ref}}\"\n}"
-						},
-						"url": {
-							"raw": "{{fw_base_url}}/transfers",
-							"host": ["{{fw_base_url}}"],
-							"path": ["transfers"]
-						},
-						"description": "Withdraw from wallet to bank account.\n\n**IMPORTANT:** Include `debit_subaccount` to specify which wallet to debit.\n\n**Request Body:**\n- `account_bank`: Bank code (e.g., `\"044\"` for Access Bank)\n- `account_number`: Beneficiary's account number\n- `amount`: Amount in NGN\n- `currency`: `\"NGN\"`\n- `reference`: Unique reference for this transfer\n- `debit_subaccount`: Wallet's `account_reference` to debit\n- `debit_currency`: `\"NGN\"`\n- `narration` (optional): Transfer description\n- `callback_url` (optional): Webhook URL\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Transfer Queued Successfully\",\n  \"data\": {\n    \"id\": 123456,\n    \"account_number\": \"0690000040\",\n    \"bank_code\": \"044\",\n    \"full_name\": \"JOHN DOE\",\n    \"amount\": 5500,\n    \"fee\": 10.75,\n    \"status\": \"NEW\",\n    \"reference\": \"unique_reference_123\"\n  }\n}\n```"
+						"description": "Transfer funds to a bank account (for withdrawals).\n\n**Request Body:**\n- `account_bank`: Bank code (e.g., `\"044\"` for Access Bank)\n- `account_number`: Beneficiary's account number\n- `amount`: Amount in NGN\n- `currency`: `\"NGN\"`\n- `reference`: Unique reference for this transfer\n- `narration` (optional): Transfer description\n- `callback_url` (optional): Webhook URL\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Transfer Queued Successfully\",\n  \"data\": {\n    \"id\": 123456,\n    \"account_number\": \"0690000040\",\n    \"bank_code\": \"044\",\n    \"full_name\": \"JOHN DOE\",\n    \"amount\": 5000,\n    \"fee\": 10.75,\n    \"status\": \"NEW\",\n    \"reference\": \"KIP_WD_unique_reference\"\n  }\n}\n```"
 					},
 					"response": []
 				},
@@ -772,7 +559,7 @@
 							"host": ["{{fw_base_url}}"],
 							"path": ["transfers", "123456"]
 						},
-						"description": "Get transfer status by ID.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"id\": 123456,\n    \"account_number\": \"0690000040\",\n    \"bank_code\": \"044\",\n    \"bank_name\": \"Access Bank\",\n    \"full_name\": \"JOHN DOE\",\n    \"currency\": \"NGN\",\n    \"amount\": 5500,\n    \"fee\": 10.75,\n    \"status\": \"SUCCESSFUL\",\n    \"reference\": \"unique_reference_123\",\n    \"narration\": \"Wallet withdrawal\",\n    \"created_at\": \"2025-01-15T10:00:00Z\"\n  }\n}\n```\n\n**Status Values:**\n- `NEW`: Transfer queued\n- `PENDING`: Processing\n- `SUCCESSFUL`: Completed\n- `FAILED`: Failed"
+						"description": "Get transfer status by ID.\n\n**Response:**\n```json\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"id\": 123456,\n    \"account_number\": \"0690000040\",\n    \"bank_code\": \"044\",\n    \"bank_name\": \"Access Bank\",\n    \"full_name\": \"JOHN DOE\",\n    \"currency\": \"NGN\",\n    \"amount\": 5000,\n    \"fee\": 10.75,\n    \"status\": \"SUCCESSFUL\",\n    \"reference\": \"KIP_WD_unique_reference\",\n    \"narration\": \"Wallet withdrawal\",\n    \"created_at\": \"2025-01-15T10:00:00Z\"\n  }\n}\n```\n\n**Status Values:**\n- `NEW`: Transfer queued\n- `PENDING`: Processing\n- `SUCCESSFUL`: Completed\n- `FAILED`: Failed"
 					},
 					"response": []
 				},
@@ -833,40 +620,6 @@
 					},
 					"response": []
 				}
-			],
-			"description": "Direct Flutterwave API endpoints (for reference and debugging).\n\nBase URL: https://api.flutterwave.com/v3\n\nAuthentication: Bearer token using your Flutterwave secret key."
-		},
-		{
-			"name": "Webhooks",
-			"item": [
-				{
-					"name": "Flutterwave Webhook",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							},
-							{
-								"key": "verif-hash",
-								"value": "{{fw_secret_key}}",
-								"description": "Webhook signature"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"event\": \"charge.completed\",\n  \"data\": {\n    \"id\": 123456789,\n    \"tx_ref\": \"KIP_FW_xxxxx\",\n    \"flw_ref\": \"FLW-MOCK-xxxxx\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\",\n    \"status\": \"successful\"\n  }\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/v1/webhooks/flutterwave",
-							"host": ["{{base_url}}"],
-							"path": ["api", "v1", "webhooks", "flutterwave"]
-						},
-						"description": "Flutterwave webhook endpoint.\n\n**Events:**\n- `charge.completed`: Payment successful\n- `transfer.completed`: Withdrawal successful\n- `transfer.failed`: Withdrawal failed\n\n**Wallet Funding Webhook (transfer into virtual account):**\n```json\n{\n  \"event\": \"transfer.completed\",\n  \"event.type\": \"Transfer\",\n  \"data\": {\n    \"id\": 85677894,\n    \"account_number\": \"9461801496\",\n    \"bank_name\": \"Wema Bank PLC\",\n    \"amount\": \"200000\",\n    \"status\": \"SUCCESSFUL\",\n    \"reference\": \"PSA_100004241030233238121386040596\",\n    \"narration\": \"WALLET FUNDING\"\n  }\n}\n```"
-					},
-					"response": []
-				}
 			]
 		}
 	],
@@ -923,17 +676,12 @@
 			"type": "string"
 		},
 		{
-			"key": "fw_subaccount_ref",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "fw_barter_id",
-			"value": "",
-			"type": "string"
-		},
-		{
 			"key": "fw_secret_key",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "fw_webhook_secret",
 			"value": "",
 			"type": "string"
 		}

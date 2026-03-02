@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -395,8 +396,6 @@ func (h *WebhookHandler) HandleFlutterwaveWebhook(c *gin.Context) {
 		h.handleFlutterwaveTransferCompleted(c, event)
 	case flutterwave.EventTransferFailed:
 		h.handleFlutterwaveTransferFailed(c, event)
-	case flutterwave.EventPayoutCredit, flutterwave.EventVirtualAccountCredit, flutterwave.EventPayoutSubaccountCredit:
-		h.handleFlutterwavePayoutCredit(c, event)
 	default:
 		h.logger.Info("unhandled Flutterwave webhook event type",
 			zap.String("event", event.Event),
@@ -417,7 +416,35 @@ func (h *WebhookHandler) handleFlutterwaveChargeCompleted(c *gin.Context, event 
 		zap.String("tx_ref", chargeData.TxRef),
 		zap.Float64("amount", chargeData.Amount),
 		zap.String("status", chargeData.Status),
+		zap.String("payment_type", chargeData.PaymentType),
 	)
+
+	// Check if this is a virtual account bank transfer (tx_ref starts with "va-")
+	if len(chargeData.TxRef) >= 3 && chargeData.TxRef[:3] == "va-" {
+		// Generate a unique reference for idempotency (use FlwRef if available)
+		reference := chargeData.FlwRef
+		if reference == "" {
+			reference = fmt.Sprintf("%d", chargeData.ID)
+		}
+
+		if err := h.fundingService.ProcessVirtualAccountPayment(c.Request.Context(), chargeData.TxRef, chargeData.Amount, reference); err != nil {
+			h.logger.Error("failed to process virtual account payment from webhook",
+				zap.String("tx_ref", chargeData.TxRef),
+				zap.Error(err),
+			)
+		} else {
+			h.logger.Info("Virtual account payment processed from webhook",
+				zap.String("tx_ref", chargeData.TxRef),
+				zap.Float64("amount", chargeData.Amount),
+			)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Virtual account payment acknowledged",
+			"tx_ref":  chargeData.TxRef,
+		})
+		return
+	}
 
 	// Check if this is a top-up (tx_ref starts with "fw_topup_")
 	if len(chargeData.TxRef) >= 9 && chargeData.TxRef[:9] == "fw_topup_" {
@@ -524,71 +551,5 @@ func (h *WebhookHandler) handleFlutterwaveTransferFailed(c *gin.Context, event *
 	c.JSON(http.StatusOK, gin.H{
 		"message":   "Transfer failed acknowledged",
 		"reference": transferData.Reference,
-	})
-}
-
-// handleFlutterwavePayoutCredit handles bank transfers TO a payout subaccount (virtual account)
-// This is triggered when someone sends money to the user's nuban virtual account
-func (h *WebhookHandler) handleFlutterwavePayoutCredit(c *gin.Context, event *flutterwave.WebhookEvent) {
-	creditData, err := h.flutterwaveClient.GetPayoutCreditDataFromEvent(event)
-	if err != nil {
-		h.logger.Error("failed to parse Flutterwave payout credit data", zap.Error(err))
-		util.Error(c, http.StatusBadRequest, "INVALID_DATA", "Failed to parse payout credit data")
-		return
-	}
-
-	h.logger.Info("Flutterwave payout credit webhook received (bank transfer to virtual account)",
-		zap.String("account_reference", creditData.AccountReference),
-		zap.String("account_number", creditData.AccountNumber),
-		zap.Float64("amount", creditData.Amount),
-		zap.String("reference", creditData.Reference),
-		zap.String("sender_name", creditData.SenderName),
-		zap.String("sender_bank", creditData.SenderBank),
-		zap.String("event", event.Event),
-	)
-
-	// Determine which identifier to use for lookup
-	// Try account_reference first, then account_number (nuban)
-	var lookupErr error
-	if creditData.AccountReference != "" {
-		lookupErr = h.fundingService.ProcessWalletFundingByAccountRef(
-			c.Request.Context(),
-			creditData.AccountReference,
-			creditData.Amount,
-			creditData.Reference,
-		)
-	} else if creditData.AccountNumber != "" {
-		lookupErr = h.fundingService.ProcessWalletFundingWebhook(
-			c.Request.Context(),
-			creditData.AccountNumber,
-			creditData.Amount,
-			creditData.Reference,
-		)
-	} else {
-		h.logger.Error("payout credit webhook missing account identifiers",
-			zap.String("reference", creditData.Reference),
-		)
-		c.JSON(http.StatusOK, gin.H{
-			"message":   "Payout credit received but no account identifier",
-			"reference": creditData.Reference,
-		})
-		return
-	}
-
-	if lookupErr != nil {
-		h.logger.Error("failed to process payout credit webhook",
-			zap.String("reference", creditData.Reference),
-			zap.Error(lookupErr),
-		)
-	} else {
-		h.logger.Info("Payout credit processed successfully",
-			zap.String("reference", creditData.Reference),
-			zap.Float64("amount", creditData.Amount),
-		)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":   "Payout credit acknowledged",
-		"reference": creditData.Reference,
 	})
 }

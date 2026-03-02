@@ -354,6 +354,27 @@ func (c *Client) ResolveBankAccount(ctx context.Context, accountNumber, bankCode
 	return &result, nil
 }
 
+// CreateStaticVirtualAccount creates a permanent virtual account for receiving bank transfers
+func (c *Client) CreateStaticVirtualAccount(ctx context.Context, req *CreateVirtualAccountRequest) (*APIResponse[VirtualAccountData], error) {
+	req.IsPermanent = true // Ensure it's permanent
+
+	respBody, err := c.doRequest(ctx, http.MethodPost, "/virtual-account-numbers", req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result APIResponse[VirtualAccountData]
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if result.Status != "success" {
+		return &result, fmt.Errorf("failed to create virtual account: %s", result.Message)
+	}
+
+	return &result, nil
+}
+
 func (c *Client) ListBanks(ctx context.Context, country string) (*APIResponse[[]BankData], error) {
 	endpoint := fmt.Sprintf("/banks/%s", country)
 	respBody, err := c.doRequest(ctx, http.MethodGet, endpoint, nil, nil)

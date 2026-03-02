@@ -209,3 +209,30 @@ type ListWalletsData struct {
 		HasMoreItems bool `json:"has_more_items"`
 	} `json:"cursor"`
 }
+
+// CreateVirtualAccountRequest is for creating a static virtual account for bank transfer funding
+type CreateVirtualAccountRequest struct {
+	Email       string `json:"email"`
+	IsPermanent bool   `json:"is_permanent"`
+	TxRef       string `json:"tx_ref"`
+	PhoneNumber string `json:"phonenumber,omitempty"`
+	FirstName   string `json:"firstname,omitempty"`
+	LastName    string `json:"lastname,omitempty"`
+	Narration   string `json:"narration,omitempty"`
+	BVN         string `json:"bvn,omitempty"`
+}
+
+// VirtualAccountData is the response from creating a virtual account
+type VirtualAccountData struct {
+	ResponseCode    string      `json:"response_code"`
+	ResponseMessage string      `json:"response_message"`
+	FlwRef          string      `json:"flw_ref"`
+	OrderRef        string      `json:"order_ref"`
+	AccountNumber   string      `json:"account_number"`
+	Frequency       interface{} `json:"frequency"` // Can be string or number from API
+	BankName        string      `json:"bank_name"`
+	CreatedAt       string      `json:"created_at"`
+	ExpiryDate      interface{} `json:"expiry_date"` // Can be string or null
+	Note            string      `json:"note"`
+	Amount          interface{} `json:"amount"` // Can be string or number
+}

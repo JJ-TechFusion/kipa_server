@@ -397,6 +397,8 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
 	idempotencyKey := fmt.Sprintf("order_%s", order.ID.String())
+
+	// Debit buyer's wallet
 	_, err = s.walletService.Debit(
 		ctx,
 		buyerID,
