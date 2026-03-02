@@ -103,7 +103,16 @@ func (r *PaymentRequestRepo) GetByPaymentCode(ctx context.Context, code string) 
 
 func (r *PaymentRequestRepo) GetBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error) {
 	var requests []*domain.PaymentRequest
-	query := `SELECT * FROM payment_requests WHERE seller_id = $1 AND status != 'cancelled' ORDER BY created_at DESC LIMIT $2 OFFSET $3`
+	query := `
+		SELECT
+			*,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM payment_requests
+		WHERE seller_id = $1 AND status != 'cancelled'
+		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
 
 	err := r.db.SelectContext(ctx, &requests, query, sellerID, limit, offset)
 	if err != nil {
@@ -115,7 +124,16 @@ func (r *PaymentRequestRepo) GetBySellerID(ctx context.Context, sellerID uuid.UU
 
 func (r *PaymentRequestRepo) GetByBuyerID(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error) {
 	var requests []*domain.PaymentRequest
-	query := `SELECT * FROM payment_requests WHERE buyer_id = $1 AND status != 'cancelled' ORDER BY created_at DESC LIMIT $2 OFFSET $3`
+	query := `
+		SELECT
+			*,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM payment_requests
+		WHERE buyer_id = $1 AND status != 'cancelled'
+		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
 
 	err := r.db.SelectContext(ctx, &requests, query, buyerID, limit, offset)
 	if err != nil {

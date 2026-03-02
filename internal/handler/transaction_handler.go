@@ -190,12 +190,25 @@ func (h *TransactionHandler) buildTransactionListItem(c *gin.Context, pr *domain
 		item.LogisticsDeliveryID = pr.LogisticsDeliveryID
 	}
 
-	// Include addresses from payment request if not already set (for inter-state or before delivery job created)
+	// Include addresses and coordinates from payment request if not already set
+	// (for inter-state or before delivery job created)
 	if item.PickupAddress == nil && pr.PickupAddress != nil {
 		item.PickupAddress = pr.PickupAddress
 	}
 	if item.DropoffAddress == nil && pr.DropoffAddress != nil {
 		item.DropoffAddress = pr.DropoffAddress
+	}
+	if item.PickupLat == nil && pr.PickupLat != 0 {
+		item.PickupLat = &pr.PickupLat
+	}
+	if item.PickupLng == nil && pr.PickupLng != 0 {
+		item.PickupLng = &pr.PickupLng
+	}
+	if item.DropoffLat == nil && pr.DropoffLat != 0 {
+		item.DropoffLat = &pr.DropoffLat
+	}
+	if item.DropoffLng == nil && pr.DropoffLng != 0 {
+		item.DropoffLng = &pr.DropoffLng
 	}
 
 	return item
