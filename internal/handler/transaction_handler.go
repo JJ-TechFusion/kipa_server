@@ -171,7 +171,7 @@ func (h *TransactionHandler) buildTransactionListItem(c *gin.Context, pr *domain
 		}
 	}
 
-	// Get delivery job info if available
+	// For intra-state: get delivery job info if available
 	if pr.DeliveryJobID != nil {
 		item.DeliveryJobID = pr.DeliveryJobID
 		job, err := h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
@@ -183,6 +183,19 @@ func (h *TransactionHandler) buildTransactionListItem(c *gin.Context, pr *domain
 			item.DropoffLat = &job.DropoffLat
 			item.DropoffLng = &job.DropoffLng
 		}
+	}
+
+	// For inter-state: include logistics delivery ID and addresses from payment request
+	if pr.LogisticsDeliveryID != nil {
+		item.LogisticsDeliveryID = pr.LogisticsDeliveryID
+	}
+
+	// Include addresses from payment request if not already set (for inter-state or before delivery job created)
+	if item.PickupAddress == nil && pr.PickupAddress != nil {
+		item.PickupAddress = pr.PickupAddress
+	}
+	if item.DropoffAddress == nil && pr.DropoffAddress != nil {
+		item.DropoffAddress = pr.DropoffAddress
 	}
 
 	return item
@@ -635,23 +648,24 @@ type ActiveDeliveryPartyInfo struct {
 
 // TransactionListItem represents a transaction in the list view
 type TransactionListItem struct {
-	PaymentRequestID uuid.UUID  `json:"payment_request_id"` // Use this to fetch details
-	Role             string     `json:"role"`               // "buyer" or "seller"
-	ItemName         string     `json:"item_name"`
-	ItemPrice        float64    `json:"item_price"`
-	TotalAmount      *float64   `json:"total_amount,omitempty"`
-	Status           string     `json:"status"`
-	StatusText       string     `json:"status_text"` // Human readable status
-	DeliveryType     string     `json:"delivery_type"`
-	CounterpartyName string     `json:"counterparty_name,omitempty"`
-	CounterpartyRole string     `json:"counterparty_role,omitempty"` // "Buyer" or "Seller"
-	CreatedAt        string     `json:"created_at"`
-	PaidAt           *string    `json:"paid_at,omitempty"`
-	DeliveryJobID    *uuid.UUID `json:"delivery_job_id,omitempty"`
-	PickupAddress    *string    `json:"pickup_address,omitempty"`
-	PickupLat        *float64   `json:"pickup_lat,omitempty"`
-	PickupLng        *float64   `json:"pickup_lng,omitempty"`
-	DropoffAddress   *string    `json:"dropoff_address,omitempty"`
-	DropoffLat       *float64   `json:"dropoff_lat,omitempty"`
-	DropoffLng       *float64   `json:"dropoff_lng,omitempty"`
+	PaymentRequestID    uuid.UUID  `json:"payment_request_id"` // Use for intra-state rider search
+	Role                string     `json:"role"`               // "buyer" or "seller"
+	ItemName            string     `json:"item_name"`
+	ItemPrice           float64    `json:"item_price"`
+	TotalAmount         *float64   `json:"total_amount,omitempty"`
+	Status              string     `json:"status"`
+	StatusText          string     `json:"status_text"` // Human readable status
+	DeliveryType        string     `json:"delivery_type"`
+	CounterpartyName    string     `json:"counterparty_name,omitempty"`
+	CounterpartyRole    string     `json:"counterparty_role,omitempty"` // "Buyer" or "Seller"
+	CreatedAt           string     `json:"created_at"`
+	PaidAt              *string    `json:"paid_at,omitempty"`
+	DeliveryJobID       *uuid.UUID `json:"delivery_job_id,omitempty"`       // For intra-state
+	LogisticsDeliveryID *uuid.UUID `json:"logistics_delivery_id,omitempty"` // For inter-state mark shipped
+	PickupAddress       *string    `json:"pickup_address,omitempty"`
+	PickupLat           *float64   `json:"pickup_lat,omitempty"`
+	PickupLng           *float64   `json:"pickup_lng,omitempty"`
+	DropoffAddress      *string    `json:"dropoff_address,omitempty"`
+	DropoffLat          *float64   `json:"dropoff_lat,omitempty"`
+	DropoffLng          *float64   `json:"dropoff_lng,omitempty"`
 }

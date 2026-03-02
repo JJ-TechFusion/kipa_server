@@ -183,14 +183,36 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 			return
 		}
 
-		util.Success(c, http.StatusOK, gin.H{
+		// Get payment request details for delivery info
+		pr, _ := h.prService.GetByID(c.Request.Context(), resp.PaymentRequestID)
+
+		response := gin.H{
 			"order_id":           resp.OrderID,
 			"payment_request_id": resp.PaymentRequestID,
 			"escrow_id":          resp.EscrowID,
 			"status":             resp.Status,
 			"payment_method":     "wallet",
 			"message":            "Payment completed successfully",
-		})
+		}
+
+		if pr != nil {
+			response["delivery_type"] = string(pr.DeliveryType)
+			response["pickup_address"] = pr.PickupAddress
+			response["dropoff_address"] = pr.DropoffAddress
+
+			// For inter-state, include logistics_delivery_id
+			if resp.LogisticsDeliveryID != nil {
+				response["logistics_delivery_id"] = resp.LogisticsDeliveryID
+			}
+
+			// For intra-state, delivery_job_id is created when seller marks ready
+			// So we just include the payment_request_id which is used to initiate rider search
+			if pr.DeliveryJobID != nil {
+				response["delivery_job_id"] = pr.DeliveryJobID
+			}
+		}
+
+		util.Success(c, http.StatusOK, response)
 
 	default:
 		util.Error(c, http.StatusBadRequest, "INVALID_PAYMENT_METHOD", "Payment method must be 'card' or 'wallet'")
@@ -209,14 +231,35 @@ func (h *BuyerHandler) VerifyPayment(c *gin.Context) {
 		return
 	}
 
-	util.Success(c, http.StatusOK, gin.H{
+	// Get payment request details for delivery info
+	pr, _ := h.prService.GetByID(c.Request.Context(), resp.PaymentRequestID)
+
+	response := gin.H{
 		"order_id":           resp.OrderID,
 		"payment_request_id": resp.PaymentRequestID,
 		"payment_status":     resp.PaymentStatus,
 		"escrow_id":          resp.EscrowID,
 		"status":             resp.Status,
 		"message":            "Payment verified successfully",
-	})
+	}
+
+	if pr != nil {
+		response["delivery_type"] = string(pr.DeliveryType)
+		response["pickup_address"] = pr.PickupAddress
+		response["dropoff_address"] = pr.DropoffAddress
+
+		// For inter-state, include logistics_delivery_id
+		if resp.LogisticsDeliveryID != nil {
+			response["logistics_delivery_id"] = resp.LogisticsDeliveryID
+		}
+
+		// For intra-state, delivery_job_id is created when seller marks ready
+		if pr.DeliveryJobID != nil {
+			response["delivery_job_id"] = pr.DeliveryJobID
+		}
+	}
+
+	util.Success(c, http.StatusOK, response)
 }
 func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
