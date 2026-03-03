@@ -449,6 +449,8 @@ type RiderProfileResponse struct {
 	Status          string    `json:"status"`
 	IsOnline        bool      `json:"is_online"`
 	VehicleType     *string   `json:"vehicle_type,omitempty"`
+	VehicleBrand    *string   `json:"vehicle_brand,omitempty"`
+	VehicleColor    *string   `json:"vehicle_color,omitempty"`
 	VehiclePlate    *string   `json:"vehicle_plate,omitempty"`
 	Rating          float64   `json:"rating"`
 	TotalDeliveries int       `json:"total_deliveries"`
@@ -463,6 +465,8 @@ func riderProfileToResponse(p *domain.RiderProfile) RiderProfileResponse {
 		Status:          string(p.Status),
 		IsOnline:        p.IsOnline,
 		VehicleType:     p.VehicleType,
+		VehicleBrand:    p.VehicleBrand,
+		VehicleColor:    p.VehicleColor,
 		VehiclePlate:    p.VehiclePlate,
 		Rating:          p.Rating,
 		TotalDeliveries: p.TotalDeliveries,

@@ -24,8 +24,8 @@ func (r *RiderProfileRepo) Create(ctx context.Context, profile *domain.RiderProf
 	query := `
 		INSERT INTO rider_profiles (
 			id, user_id, license_number, nin_number, license_photo_url, nin_photo_url,
-			face_verification_url, vehicle_type, vehicle_plate, vehicle_photo_url, status
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			face_verification_url, vehicle_type, vehicle_brand, vehicle_color, vehicle_plate, vehicle_photo_url, status
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING created_at, updated_at`
 
 	if profile.ID == uuid.Nil {
@@ -41,6 +41,8 @@ func (r *RiderProfileRepo) Create(ctx context.Context, profile *domain.RiderProf
 		profile.NINPhotoURL,
 		profile.FaceVerificationURL,
 		profile.VehicleType,
+		profile.VehicleBrand,
+		profile.VehicleColor,
 		profile.VehiclePlate,
 		profile.VehiclePhotoURL,
 		profile.Status,
@@ -86,12 +88,14 @@ func (r *RiderProfileRepo) Update(ctx context.Context, profile *domain.RiderProf
 			nin_photo_url = $5,
 			face_verification_url = $6,
 			vehicle_type = $7,
-			vehicle_plate = $8,
-			vehicle_photo_url = $9,
-			status = $10,
-			rating = $11,
-			total_deliveries = $12,
-			total_earnings = $13
+			vehicle_brand = $8,
+			vehicle_color = $9,
+			vehicle_plate = $10,
+			vehicle_photo_url = $11,
+			status = $12,
+			rating = $13,
+			total_deliveries = $14,
+			total_earnings = $15
 		WHERE id = $1`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -102,6 +106,8 @@ func (r *RiderProfileRepo) Update(ctx context.Context, profile *domain.RiderProf
 		profile.NINPhotoURL,
 		profile.FaceVerificationURL,
 		profile.VehicleType,
+		profile.VehicleBrand,
+		profile.VehicleColor,
 		profile.VehiclePlate,
 		profile.VehiclePhotoURL,
 		profile.Status,

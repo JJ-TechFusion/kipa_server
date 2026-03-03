@@ -22,6 +22,8 @@ type RiderProfile struct {
 	NINPhotoURL         *string `db:"nin_photo_url" json:"nin_photo_url,omitempty"`
 	FaceVerificationURL *string `db:"face_verification_url" json:"face_verification_url,omitempty"`
 	VehicleType     *string `db:"vehicle_type" json:"vehicle_type,omitempty"`
+	VehicleBrand    *string `db:"vehicle_brand" json:"vehicle_brand,omitempty"`
+	VehicleColor    *string `db:"vehicle_color" json:"vehicle_color,omitempty"`
 	VehiclePlate    *string `db:"vehicle_plate" json:"vehicle_plate,omitempty"`
 	VehiclePhotoURL *string `db:"vehicle_photo_url" json:"vehicle_photo_url,omitempty"`
 	Status             RiderStatus `db:"status" json:"status"`

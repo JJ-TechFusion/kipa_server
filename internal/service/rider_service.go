@@ -40,12 +40,16 @@ type CreateRiderProfileRequest struct {
 	NINPhotoURL         string `json:"nin_photo_url" binding:"required"`
 	FaceVerificationURL string `json:"face_verification_url" binding:"required"`
 	VehicleType         string `json:"vehicle_type" binding:"required"`
+	VehicleBrand        string `json:"vehicle_brand" binding:"required"`
+	VehicleColor        string `json:"vehicle_color" binding:"required"`
 	VehiclePlate        string `json:"vehicle_plate" binding:"required"`
 	VehiclePhotoURL     string `json:"vehicle_photo_url" binding:"required"`
 }
 
 type UpdateRiderProfileRequest struct {
 	VehicleType     *string `json:"vehicle_type"`
+	VehicleBrand    *string `json:"vehicle_brand"`
+	VehicleColor    *string `json:"vehicle_color"`
 	VehiclePlate    *string `json:"vehicle_plate"`
 	VehiclePhotoURL *string `json:"vehicle_photo_url"`
 }
@@ -173,6 +177,8 @@ func (s *RiderServiceImpl) CreateProfile(ctx context.Context, userID uuid.UUID, 
 		NINPhotoURL:         &req.NINPhotoURL,
 		FaceVerificationURL: &req.FaceVerificationURL,
 		VehicleType:         &req.VehicleType,
+		VehicleBrand:        &req.VehicleBrand,
+		VehicleColor:        &req.VehicleColor,
 		VehiclePlate:        &req.VehiclePlate,
 		VehiclePhotoURL:     &req.VehiclePhotoURL,
 		Status:              domain.RiderStatusPendingVerification,
@@ -203,6 +209,12 @@ func (s *RiderServiceImpl) UpdateProfile(ctx context.Context, userID uuid.UUID, 
 
 	if req.VehicleType != nil {
 		profile.VehicleType = req.VehicleType
+	}
+	if req.VehicleBrand != nil {
+		profile.VehicleBrand = req.VehicleBrand
+	}
+	if req.VehicleColor != nil {
+		profile.VehicleColor = req.VehicleColor
 	}
 	if req.VehiclePlate != nil {
 		profile.VehiclePlate = req.VehiclePlate
