@@ -435,6 +435,24 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 			deliveryFee = *pr.EstimatedDeliveryFee
 		}
 
+		// Calculate distance and duration for the job
+		var distanceKM *float64
+		var estimatedMinutes *int
+		if pr.PickupLat != 0 && pr.DropoffLat != 0 {
+			estimate, err := s.feeCalculator.CalculateDeliveryFee(ctx, pr.PickupLat, pr.PickupLng, pr.DropoffLat, pr.DropoffLng)
+			if err == nil {
+				distanceKM = &estimate.DistanceKM
+				estimatedMinutes = &estimate.DurationMinutes
+			}
+		}
+
+		// Set search timeout (default 3 minutes)
+		searchTimeoutMins := 3
+		if s.config != nil && s.config.Worker.RiderSearchTimeoutMins > 0 {
+			searchTimeoutMins = s.config.Worker.RiderSearchTimeoutMins
+		}
+		searchTimeout := now.Add(time.Duration(searchTimeoutMins) * time.Minute)
+
 		job := &domain.DeliveryJob{
 			ID:                  uuid.New(),
 			PaymentRequestID:    pr.ID,
@@ -444,10 +462,13 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 			DropoffAddress:      stringValue(pr.DropoffAddress),
 			DropoffLat:          pr.DropoffLat,
 			DropoffLng:          pr.DropoffLng,
+			DistanceKM:          distanceKM,
+			CurrentETAMinutes:   estimatedMinutes,
 			DeliveryFee:         deliveryFee,
 			RequiredVehicleType: vehicleType,
 			SearchRadiusKM:      5, // Default 5km search radius
 			SearchStartedAt:     &now,
+			SearchTimeoutAt:     &searchTimeout,
 			Status:              domain.DJStatusSearching,
 		}
 

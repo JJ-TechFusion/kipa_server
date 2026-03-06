@@ -20,8 +20,9 @@ type RiderService interface {
 	GoOffline(ctx context.Context, userID uuid.UUID) error
 	UpdateLocation(ctx context.Context, userID uuid.UUID, lat, lng, heading, speed float64) error
 	GetAvailableJobs(ctx context.Context, userID uuid.UUID) ([]*domain.DeliveryJob, error)
+	GetAvailableJobByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error)
 	AcceptJob(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, error)
-	GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, error)
+	GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error)
 	ConfirmPickup(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 	ConfirmDelivery(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 	GetJobHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DeliveryJob, error)
@@ -188,6 +189,7 @@ func (s *RiderServiceImpl) CreateProfile(ctx context.Context, userID uuid.UUID, 
 	}
 
 	if err := s.riderRepo.Create(ctx, profile); err != nil {
+		s.logger.Error("failed to create rider profile", zap.Error(err), zap.String("user_id", userID.String()))
 		return nil, fmt.Errorf("failed to create rider profile: %w", err)
 	}
 
@@ -295,6 +297,51 @@ func (s *RiderServiceImpl) GetAvailableJobs(ctx context.Context, userID uuid.UUI
 	}
 	return s.jobRepo.GetSearchingJobs(ctx, 50)
 }
+
+func (s *RiderServiceImpl) GetAvailableJobByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error) {
+	profile, err := s.riderRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if !profile.IsOnline {
+		return nil, nil, domain.ErrRiderNotOnline
+	}
+
+	job, err := s.jobRepo.GetByID(ctx, jobID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Verify job is still available (searching status)
+	if job.Status != domain.DJStatusSearching {
+		return nil, nil, domain.ErrJobAlreadyAccepted
+	}
+
+	// Verify vehicle type matches if required
+	if job.RequiredVehicleType != "" {
+		if profile.VehicleType == nil || *profile.VehicleType == "" {
+			return nil, nil, domain.ErrVehicleTypeMismatch
+		}
+		if domain.VehicleType(*profile.VehicleType) != job.RequiredVehicleType {
+			return nil, nil, domain.ErrVehicleTypeMismatch
+		}
+	}
+
+	// Get payment request for package details
+	var pr *domain.PaymentRequest
+	if job.PaymentRequestID != uuid.Nil {
+		pr, err = s.prRepo.GetByID(ctx, job.PaymentRequestID)
+		if err != nil {
+			s.logger.Warn("failed to get payment request for job",
+				zap.String("job_id", jobID.String()),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return job, pr, nil
+}
 func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -399,13 +446,33 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 
 	return job, nil
 }
-func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, error) {
+func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return s.jobRepo.GetActiveByRiderID(ctx, profile.ID)
+	job, err := s.jobRepo.GetActiveByRiderID(ctx, profile.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if job == nil {
+		return nil, nil, nil
+	}
+
+	// Get payment request for package details
+	var pr *domain.PaymentRequest
+	if job.PaymentRequestID != uuid.Nil {
+		pr, err = s.prRepo.GetByID(ctx, job.PaymentRequestID)
+		if err != nil {
+			s.logger.Warn("failed to get payment request for active job",
+				zap.String("job_id", job.ID.String()),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return job, pr, nil
 }
 func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)

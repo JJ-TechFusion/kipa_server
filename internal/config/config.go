@@ -270,7 +270,7 @@ func setDefaults() {
 	viper.SetDefault("worker.link_expiry_check_interval", "5m")
 	viper.SetDefault("worker.radius_expand_interval", "2m")
 	viper.SetDefault("worker.timer_expiry_check_interval", "1m")
-	viper.SetDefault("worker.rider_search_timeout_mins", 15)
+	viper.SetDefault("worker.rider_search_timeout_mins", 3)
 	viper.SetDefault("worker.radius_expand_steps", []int{3, 5, 8, 12})
 	viper.SetDefault("worker.radius_expand_interval_mins", 3)
 	viper.SetDefault("worker.rider_offer_timeout_mins", 2)

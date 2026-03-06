@@ -37,13 +37,14 @@ type FeeCalculatorService interface {
 }
 
 type DeliveryFeeEstimate struct {
-	ZoneID      uuid.UUID `json:"zone_id"`
-	ZoneName    string    `json:"zone_name"`
-	DistanceKM  float64   `json:"distance_km"`
-	BaseFee     float64   `json:"base_fee"`
-	PerKMFee    float64   `json:"per_km_fee"`
-	TotalFee    float64   `json:"total_fee"`
-	IsEstimate  bool      `json:"is_estimate"` 
+	ZoneID          uuid.UUID `json:"zone_id"`
+	ZoneName        string    `json:"zone_name"`
+	DistanceKM      float64   `json:"distance_km"`
+	DurationMinutes int       `json:"duration_minutes"`
+	BaseFee         float64   `json:"base_fee"`
+	PerKMFee        float64   `json:"per_km_fee"`
+	TotalFee        float64   `json:"total_fee"`
+	IsEstimate      bool      `json:"is_estimate"`
 }
 
 type SettlementBreakdown struct {
@@ -92,6 +93,7 @@ func NewFeeCalculatorService(
 }
 func (s *FeeCalculatorServiceImpl) CalculateDeliveryFee(ctx context.Context, pickupLat, pickupLng, dropoffLat, dropoffLng float64) (*DeliveryFeeEstimate, error) {
 	var distanceKM float64
+	var durationMinutes int
 	if s.mapsClient != nil {
 		etaResult, err := s.mapsClient.GetETA(ctx, pickupLat, pickupLng, dropoffLat, dropoffLng)
 		if err != nil {
@@ -99,27 +101,30 @@ func (s *FeeCalculatorServiceImpl) CalculateDeliveryFee(ctx context.Context, pic
 				zap.Error(err),
 			)
 			distanceKM = s.calculateDistanceKM(pickupLat, pickupLng, dropoffLat, dropoffLng)
+			// Estimate duration: ~30 km/h average speed in traffic
+			durationMinutes = int(distanceKM * 2)
 		} else {
 			distanceKM = etaResult.DistanceKM
+			durationMinutes = etaResult.DurationMinutes
 		}
 	} else {
 		distanceKM = s.calculateDistanceKM(pickupLat, pickupLng, dropoffLat, dropoffLng)
+		durationMinutes = int(distanceKM * 2)
 	}
 
-	
 	baseFee := s.getBaseDeliveryFee()  // Default: 500 NGN
 	perKMFee := s.getPerKMFee()        // Default: 100 NGN per km
 
-	
 	totalFee := baseFee + (distanceKM * perKMFee)
 	totalFee = math.Round(totalFee*100) / 100
 
 	return &DeliveryFeeEstimate{
-		DistanceKM: distanceKM,
-		BaseFee:    baseFee,
-		PerKMFee:   perKMFee,
-		TotalFee:   totalFee,
-		IsEstimate: true,
+		DistanceKM:      distanceKM,
+		DurationMinutes: durationMinutes,
+		BaseFee:         baseFee,
+		PerKMFee:        perKMFee,
+		TotalFee:        totalFee,
+		IsEstimate:      true,
 	}, nil
 }
 func (s *FeeCalculatorServiceImpl) CalculateDeliveryFeeWithVehicle(ctx context.Context, pickupLat, pickupLng, dropoffLat, dropoffLng float64, vehicleType domain.VehicleType) (*DeliveryFeeEstimate, error) {

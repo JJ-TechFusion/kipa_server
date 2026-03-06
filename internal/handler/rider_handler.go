@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -32,6 +33,7 @@ func (h *RiderHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		rider.POST("/go-offline", h.GoOffline)
 		rider.PATCH("/location", h.UpdateLocation)
 		rider.GET("/available-jobs", h.GetAvailableJobs)
+		rider.GET("/available-jobs/:id", h.GetAvailableJobByID)
 		rider.POST("/jobs/:id/accept", h.AcceptJob)
 		rider.GET("/jobs/active", h.GetActiveJob)
 		rider.POST("/jobs/:id/pickup", h.ConfirmPickup)
@@ -213,7 +215,7 @@ func (h *RiderHandler) GetActiveJob(c *gin.Context) {
 		return
 	}
 
-	job, err := h.riderService.GetActiveJob(c.Request.Context(), userID)
+	job, pr, err := h.riderService.GetActiveJob(c.Request.Context(), userID)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -224,7 +226,30 @@ func (h *RiderHandler) GetActiveJob(c *gin.Context) {
 		return
 	}
 
-	util.Success(c, http.StatusOK, deliveryJobToResponse(job))
+	resp := DeliveryJobDetailResponse{
+		DeliveryJobResponse: deliveryJobToResponse(job),
+		PickupLat:           job.PickupLat,
+		PickupLng:           job.PickupLng,
+		DropoffLat:          job.DropoffLat,
+		DropoffLng:          job.DropoffLng,
+	}
+
+	if pr != nil {
+		var images []string
+		if len(pr.ItemImages) > 0 {
+			_ = json.Unmarshal(pr.ItemImages, &images)
+		}
+		resp.PackageDetails = &PackageDetailsResponse{
+			ItemName:        pr.ItemName,
+			ItemDescription: pr.ItemDescription,
+			ItemPrice:       pr.ItemPrice,
+			ItemImages:      images,
+			IsPaid:          pr.Status.IsPaid(),
+			OrderStatus:     string(pr.Status),
+		}
+	}
+
+	util.Success(c, http.StatusOK, resp)
 }
 func (h *RiderHandler) ConfirmPickup(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -484,21 +509,22 @@ type JobOfferResponse struct {
 
 
 type DeliveryJobResponse struct {
-	ID                  uuid.UUID                  `json:"id"`
-	Status              string                     `json:"status"`
-	PickupAddress       string                     `json:"pickup_address"`
-	DropoffAddress      string                     `json:"dropoff_address"`
-	DistanceKM          *float64                   `json:"distance_km,omitempty"`
-	DeliveryFee         float64                    `json:"delivery_fee"`
-	RequiredVehicleType string                     `json:"required_vehicle_type"`
-	RiderPayout         *float64                   `json:"rider_payout,omitempty"`
-	FeeBreakdown        *FeeBreakdownResponse      `json:"fee_breakdown,omitempty"`
-	PickupCode          *string                    `json:"pickup_code,omitempty"`
-	DropoffCode         *string                    `json:"dropoff_code,omitempty"`
-	AcceptedAt          *string                    `json:"accepted_at,omitempty"`
-	PickedUpAt          *string                    `json:"picked_up_at,omitempty"`
-	DeliveredAt         *string                    `json:"delivered_at,omitempty"`
-	CreatedAt           string                     `json:"created_at"`
+	ID                  uuid.UUID             `json:"id"`
+	Status              string                `json:"status"`
+	PickupAddress       string                `json:"pickup_address"`
+	DropoffAddress      string                `json:"dropoff_address"`
+	DistanceKM          *float64              `json:"distance_km,omitempty"`
+	EstimatedMinutes    *int                  `json:"estimated_minutes,omitempty"`
+	DeliveryFee         float64               `json:"delivery_fee"`
+	RequiredVehicleType string                `json:"required_vehicle_type"`
+	RiderPayout         *float64              `json:"rider_payout,omitempty"`
+	FeeBreakdown        *FeeBreakdownResponse `json:"fee_breakdown,omitempty"`
+	PickupCode          *string               `json:"pickup_code,omitempty"`
+	DropoffCode         *string               `json:"dropoff_code,omitempty"`
+	AcceptedAt          *string               `json:"accepted_at,omitempty"`
+	PickedUpAt          *string               `json:"picked_up_at,omitempty"`
+	DeliveredAt         *string               `json:"delivered_at,omitempty"`
+	CreatedAt           string                `json:"created_at"`
 }
 type FeeBreakdownResponse struct {
 	DeliveryFee        float64 `json:"delivery_fee"`        // Full fee buyer pays: ₦2,500
@@ -514,6 +540,7 @@ func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
 		PickupAddress:       j.PickupAddress,
 		DropoffAddress:      j.DropoffAddress,
 		DistanceKM:          j.DistanceKM,
+		EstimatedMinutes:    j.CurrentETAMinutes,
 		DeliveryFee:         j.DeliveryFee,
 		RequiredVehicleType: string(j.RequiredVehicleType),
 		RiderPayout:         j.RiderPayout,
@@ -545,5 +572,69 @@ func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
 	}
 
 	return resp
+}
+
+// DeliveryJobDetailResponse includes full job details with coordinates and package info
+type DeliveryJobDetailResponse struct {
+	DeliveryJobResponse
+	PickupLat      float64             `json:"pickup_lat"`
+	PickupLng      float64             `json:"pickup_lng"`
+	DropoffLat     float64             `json:"dropoff_lat"`
+	DropoffLng     float64             `json:"dropoff_lng"`
+	PackageDetails *PackageDetailsResponse `json:"package_details,omitempty"`
+}
+
+type PackageDetailsResponse struct {
+	ItemName        string   `json:"item_name"`
+	ItemDescription *string  `json:"item_description,omitempty"`
+	ItemPrice       float64  `json:"item_price"`
+	ItemImages      []string `json:"item_images,omitempty"`
+	IsPaid          bool     `json:"is_paid"`
+	OrderStatus     string   `json:"order_status"`
+}
+
+func (h *RiderHandler) GetAvailableJobByID(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid job ID")
+		return
+	}
+
+	job, pr, err := h.riderService.GetAvailableJobByID(c.Request.Context(), userID, jobID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	resp := DeliveryJobDetailResponse{
+		DeliveryJobResponse: deliveryJobToResponse(job),
+		PickupLat:           job.PickupLat,
+		PickupLng:           job.PickupLng,
+		DropoffLat:          job.DropoffLat,
+		DropoffLng:          job.DropoffLng,
+	}
+
+	if pr != nil {
+		var images []string
+		if len(pr.ItemImages) > 0 {
+			_ = json.Unmarshal(pr.ItemImages, &images)
+		}
+		resp.PackageDetails = &PackageDetailsResponse{
+			ItemName:        pr.ItemName,
+			ItemDescription: pr.ItemDescription,
+			ItemPrice:       pr.ItemPrice,
+			ItemImages:      images,
+			IsPaid:          pr.Status.IsPaid(),
+			OrderStatus:     string(pr.Status),
+		}
+	}
+
+	util.Success(c, http.StatusOK, resp)
 }
 

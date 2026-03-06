@@ -32,7 +32,7 @@ func (r *DeliveryJobRepo) Create(ctx context.Context, job *domain.DeliveryJob) e
 		INSERT INTO delivery_jobs (
 			id, payment_request_id, errand_id, source_type,
 			pickup_address, pickup_location, dropoff_address, dropoff_location,
-			distance_km, delivery_fee, rider_payout, platform_delivery_fee,
+			distance_km, current_eta_minutes, delivery_fee, rider_payout, platform_delivery_fee,
 			required_vehicle_type, status, search_radius_km, search_started_at, search_timeout_at,
 			pickup_code, dropoff_code, is_forced_return, rider_id,
 			is_return, original_job_id, dispute_id
@@ -40,8 +40,8 @@ func (r *DeliveryJobRepo) Create(ctx context.Context, job *domain.DeliveryJob) e
 			$1, $2, $3, $4,
 			$5, ST_SetSRID(ST_MakePoint($6, $7), 4326)::geography,
 			$8, ST_SetSRID(ST_MakePoint($9, $10), 4326)::geography,
-			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
-			$24, $25, $26
+			$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+			$25, $26, $27
 		)
 		RETURNING created_at, updated_at`
 
@@ -59,6 +59,7 @@ func (r *DeliveryJobRepo) Create(ctx context.Context, job *domain.DeliveryJob) e
 		job.DropoffAddress,
 		job.DropoffLng, job.DropoffLat,
 		job.DistanceKM,
+		job.CurrentETAMinutes,
 		job.DeliveryFee,
 		job.RiderPayout,
 		job.PlatformDeliveryFee,
@@ -172,7 +173,12 @@ func (r *DeliveryJobRepo) GetActiveByRiderID(ctx context.Context, riderID uuid.U
 func (r *DeliveryJobRepo) GetSearchingJobs(ctx context.Context, limit int) ([]*domain.DeliveryJob, error) {
 	var jobs []*domain.DeliveryJob
 	query := `
-		SELECT * FROM delivery_jobs
+		SELECT *,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM delivery_jobs
 		WHERE status = 'searching'
 		AND (search_timeout_at IS NULL OR search_timeout_at > NOW())
 		ORDER BY created_at ASC
@@ -189,7 +195,12 @@ func (r *DeliveryJobRepo) GetSearchingJobs(ctx context.Context, limit int) ([]*d
 func (r *DeliveryJobRepo) GetSearchingJobsByVehicleType(ctx context.Context, vehicleType domain.VehicleType, limit int) ([]*domain.DeliveryJob, error) {
 	var jobs []*domain.DeliveryJob
 	query := `
-		SELECT * FROM delivery_jobs
+		SELECT *,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM delivery_jobs
 		WHERE status = 'searching'
 		AND required_vehicle_type = $1
 		AND (search_timeout_at IS NULL OR search_timeout_at > NOW())
