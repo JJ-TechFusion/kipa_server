@@ -199,15 +199,20 @@ func (h *RiderHandler) AcceptJob(c *gin.Context) {
 		return
 	}
 
-	job, err := h.riderService.AcceptJob(c.Request.Context(), userID, jobID)
+	job, errand, err := h.riderService.AcceptJob(c.Request.Context(), userID, jobID)
 	if err != nil {
 		h.handleError(c, err)
 		return
 	}
 
+	jobResp := deliveryJobToResponse(job)
+	if errand != nil {
+		jobResp.ErrandDetails = errandToDetailsResponse(errand)
+	}
+
 	util.Success(c, http.StatusOK, gin.H{
 		"message":     "Job accepted successfully",
-		"job":         deliveryJobToResponse(job),
+		"job":         jobResp,
 		"pickup_code": job.PickupCode,
 	})
 }
