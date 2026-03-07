@@ -311,6 +311,7 @@ func main() {
 		deliveryJobRepo,
 		riderJobOfferRepo,
 		prRepo,
+		userRepo,
 		escrowService,
 		walletService,
 		commissionService,

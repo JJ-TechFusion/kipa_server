@@ -215,16 +215,19 @@ func (h *RiderHandler) GetActiveJob(c *gin.Context) {
 		return
 	}
 
-	job, pr, err := h.riderService.GetActiveJob(c.Request.Context(), userID)
+	details, err := h.riderService.GetActiveJob(c.Request.Context(), userID)
 	if err != nil {
 		h.handleError(c, err)
 		return
 	}
 
-	if job == nil {
+	if details == nil {
 		util.Success(c, http.StatusOK, gin.H{"job": nil, "message": "No active job"})
 		return
 	}
+
+	job := details.Job
+	pr := details.PaymentRequest
 
 	resp := DeliveryJobDetailResponse{
 		DeliveryJobResponse: deliveryJobToResponse(job),
@@ -246,6 +249,20 @@ func (h *RiderHandler) GetActiveJob(c *gin.Context) {
 			ItemImages:      images,
 			IsPaid:          pr.Status.IsPaid(),
 			OrderStatus:     string(pr.Status),
+		}
+	}
+
+	if details.Buyer != nil {
+		resp.Buyer = &ContactInfoResponse{
+			Name:  details.Buyer.Name,
+			Phone: details.Buyer.Phone,
+		}
+	}
+
+	if details.Seller != nil {
+		resp.Seller = &ContactInfoResponse{
+			Name:  details.Seller.Name,
+			Phone: details.Seller.Phone,
 		}
 	}
 
@@ -577,11 +594,18 @@ func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
 // DeliveryJobDetailResponse includes full job details with coordinates and package info
 type DeliveryJobDetailResponse struct {
 	DeliveryJobResponse
-	PickupLat      float64             `json:"pickup_lat"`
-	PickupLng      float64             `json:"pickup_lng"`
-	DropoffLat     float64             `json:"dropoff_lat"`
-	DropoffLng     float64             `json:"dropoff_lng"`
+	PickupLat      float64                 `json:"pickup_lat"`
+	PickupLng      float64                 `json:"pickup_lng"`
+	DropoffLat     float64                 `json:"dropoff_lat"`
+	DropoffLng     float64                 `json:"dropoff_lng"`
 	PackageDetails *PackageDetailsResponse `json:"package_details,omitempty"`
+	Buyer          *ContactInfoResponse    `json:"buyer,omitempty"`
+	Seller         *ContactInfoResponse    `json:"seller,omitempty"`
+}
+
+type ContactInfoResponse struct {
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
 }
 
 type PackageDetailsResponse struct {

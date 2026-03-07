@@ -22,7 +22,7 @@ type RiderService interface {
 	GetAvailableJobs(ctx context.Context, userID uuid.UUID) ([]*domain.DeliveryJob, error)
 	GetAvailableJobByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error)
 	AcceptJob(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, error)
-	GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error)
+	GetActiveJob(ctx context.Context, userID uuid.UUID) (*ActiveJobDetails, error)
 	ConfirmPickup(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 	ConfirmDelivery(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 	GetJobHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DeliveryJob, error)
@@ -68,6 +68,18 @@ type ForcedReturnInfo struct {
 	RebookDeadline    string `json:"rebook_deadline"`
 }
 
+type ContactInfo struct {
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
+}
+
+type ActiveJobDetails struct {
+	Job            *domain.DeliveryJob
+	PaymentRequest *domain.PaymentRequest
+	Buyer          *ContactInfo
+	Seller         *ContactInfo
+}
+
 type JobStatusBroadcaster interface {
 	BroadcastJobStatus(jobID, status string)
 }
@@ -82,6 +94,7 @@ type RiderServiceImpl struct {
 	jobRepo              repository.DeliveryJobRepository
 	offerRepo            repository.RiderJobOfferRepository
 	prRepo               repository.PaymentRequestRepository
+	userRepo             repository.UserRepository
 	escrowService        EscrowService
 	walletService        WalletService
 	commissionService    RiderCommissionService
@@ -99,6 +112,7 @@ func NewRiderService(
 	jobRepo repository.DeliveryJobRepository,
 	offerRepo repository.RiderJobOfferRepository,
 	prRepo repository.PaymentRequestRepository,
+	userRepo repository.UserRepository,
 	escrowService EscrowService,
 	walletService WalletService,
 	commissionService RiderCommissionService,
@@ -115,6 +129,7 @@ func NewRiderService(
 		jobRepo:              jobRepo,
 		offerRepo:            offerRepo,
 		prRepo:               prRepo,
+		userRepo:             userRepo,
 		escrowService:        escrowService,
 		walletService:        walletService,
 		commissionService:    commissionService,
@@ -446,33 +461,58 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 
 	return job, nil
 }
-func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error) {
+func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (*ActiveJobDetails, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	job, err := s.jobRepo.GetActiveByRiderID(ctx, profile.ID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if job == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 
-	// Get payment request for package details
-	var pr *domain.PaymentRequest
+	details := &ActiveJobDetails{
+		Job: job,
+	}
+
+	// Get payment request for package details and user IDs
 	if job.PaymentRequestID != uuid.Nil {
-		pr, err = s.prRepo.GetByID(ctx, job.PaymentRequestID)
+		pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if err != nil {
 			s.logger.Warn("failed to get payment request for active job",
 				zap.String("job_id", job.ID.String()),
 				zap.Error(err),
 			)
+		} else {
+			details.PaymentRequest = pr
+
+			// Get seller info
+			seller, err := s.userRepo.GetByID(ctx, pr.SellerID)
+			if err == nil && seller != nil {
+				details.Seller = &ContactInfo{
+					Name:  seller.FullName(),
+					Phone: seller.PhoneNumber,
+				}
+			}
+
+			// Get buyer info
+			if pr.BuyerID != nil {
+				buyer, err := s.userRepo.GetByID(ctx, *pr.BuyerID)
+				if err == nil && buyer != nil {
+					details.Buyer = &ContactInfo{
+						Name:  buyer.FullName(),
+						Phone: buyer.PhoneNumber,
+					}
+				}
+			}
 		}
 	}
 
-	return job, pr, nil
+	return details, nil
 }
 func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
