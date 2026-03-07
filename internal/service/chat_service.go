@@ -13,10 +13,16 @@ import (
 
 type ChatService interface {
 	SendMessage(ctx context.Context, senderID, jobID uuid.UUID, content string, mediaURL *string, mediaType string) (*domain.ChatMessage, error)
-	GetHistory(ctx context.Context, jobID uuid.UUID, limit int, beforeID *uuid.UUID) ([]*domain.ChatMessage, error)
+	GetHistory(ctx context.Context, jobID uuid.UUID, limit int, beforeID *uuid.UUID) ([]*ChatMessageResponse, error)
 	MarkAsRead(ctx context.Context, jobID, userID uuid.UUID) error
 	ValidateParticipant(ctx context.Context, userID, jobID uuid.UUID) (receiverID uuid.UUID, err error)
 	GetUnreadCount(ctx context.Context, jobID, userID uuid.UUID) (int, error)
+}
+
+type ChatMessageResponse struct {
+	*domain.ChatMessage
+	SenderType string `json:"sender_type"`
+	SenderName string `json:"sender_name"`
 }
 
 type ChatServiceImpl struct {
@@ -24,6 +30,7 @@ type ChatServiceImpl struct {
 	deliveryJobRepo repository.DeliveryJobRepository
 	prRepo          repository.PaymentRequestRepository
 	riderRepo       repository.RiderProfileRepository
+	userRepo        repository.UserRepository
 	notificationSvc NotificationService
 	logger          *zap.Logger
 }
@@ -33,6 +40,7 @@ func NewChatService(
 	deliveryJobRepo repository.DeliveryJobRepository,
 	prRepo repository.PaymentRequestRepository,
 	riderRepo repository.RiderProfileRepository,
+	userRepo repository.UserRepository,
 	notificationSvc NotificationService,
 	logger *zap.Logger,
 ) ChatService {
@@ -41,6 +49,7 @@ func NewChatService(
 		deliveryJobRepo: deliveryJobRepo,
 		prRepo:          prRepo,
 		riderRepo:       riderRepo,
+		userRepo:        userRepo,
 		notificationSvc: notificationSvc,
 		logger:          logger,
 	}
@@ -172,11 +181,77 @@ func (s *ChatServiceImpl) sendPushNotification(ctx context.Context, msg *domain.
 	}
 }
 
-func (s *ChatServiceImpl) GetHistory(ctx context.Context, jobID uuid.UUID, limit int, beforeID *uuid.UUID) ([]*domain.ChatMessage, error) {
+func (s *ChatServiceImpl) GetHistory(ctx context.Context, jobID uuid.UUID, limit int, beforeID *uuid.UUID) ([]*ChatMessageResponse, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	return s.chatRepo.GetByJobID(ctx, jobID, limit, beforeID)
+
+	messages, err := s.chatRepo.GetByJobID(ctx, jobID, limit, beforeID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get job and payment request to determine sender types
+	job, err := s.deliveryJobRepo.GetByID(ctx, jobID)
+	if err != nil {
+		return nil, err
+	}
+
+	var buyerID, sellerID, riderUserID uuid.UUID
+
+	if job.PaymentRequestID != uuid.Nil {
+		pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
+		if err == nil && pr != nil {
+			sellerID = pr.SellerID
+			if pr.BuyerID != nil {
+				buyerID = *pr.BuyerID
+			}
+		}
+	}
+
+	if job.RiderID != nil {
+		profile, err := s.riderRepo.GetByID(ctx, *job.RiderID)
+		if err == nil && profile != nil {
+			riderUserID = profile.UserID
+		}
+	}
+
+	// Cache user names to avoid repeated lookups
+	userNames := make(map[uuid.UUID]string)
+
+	result := make([]*ChatMessageResponse, len(messages))
+	for i, msg := range messages {
+		senderType := "unknown"
+		senderName := ""
+
+		// Determine sender type
+		if msg.SenderID == riderUserID {
+			senderType = "rider"
+		} else if msg.SenderID == buyerID {
+			senderType = "buyer"
+		} else if msg.SenderID == sellerID {
+			senderType = "seller"
+		}
+
+		// Get sender name (with caching)
+		if name, ok := userNames[msg.SenderID]; ok {
+			senderName = name
+		} else {
+			user, err := s.userRepo.GetByID(ctx, msg.SenderID)
+			if err == nil && user != nil {
+				senderName = user.FullName()
+				userNames[msg.SenderID] = senderName
+			}
+		}
+
+		result[i] = &ChatMessageResponse{
+			ChatMessage: msg,
+			SenderType:  senderType,
+			SenderName:  senderName,
+		}
+	}
+
+	return result, nil
 }
 
 func (s *ChatServiceImpl) MarkAsRead(ctx context.Context, jobID, userID uuid.UUID) error {

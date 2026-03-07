@@ -330,6 +330,7 @@ func main() {
 		deliveryJobRepo,
 		prRepo,
 		riderProfileRepo,
+		userRepo,
 		notificationService,
 		logger,
 	)
