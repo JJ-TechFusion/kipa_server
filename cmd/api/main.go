@@ -331,6 +331,7 @@ func main() {
 		prRepo,
 		riderProfileRepo,
 		userRepo,
+		errandRepo,
 		notificationService,
 		logger,
 	)

@@ -31,6 +31,7 @@ type ChatServiceImpl struct {
 	prRepo          repository.PaymentRequestRepository
 	riderRepo       repository.RiderProfileRepository
 	userRepo        repository.UserRepository
+	errandRepo      repository.ErrandRepository
 	notificationSvc NotificationService
 	logger          *zap.Logger
 }
@@ -41,6 +42,7 @@ func NewChatService(
 	prRepo repository.PaymentRequestRepository,
 	riderRepo repository.RiderProfileRepository,
 	userRepo repository.UserRepository,
+	errandRepo repository.ErrandRepository,
 	notificationSvc NotificationService,
 	logger *zap.Logger,
 ) ChatService {
@@ -50,6 +52,7 @@ func NewChatService(
 		prRepo:          prRepo,
 		riderRepo:       riderRepo,
 		userRepo:        userRepo,
+		errandRepo:      errandRepo,
 		notificationSvc: notificationSvc,
 		logger:          logger,
 	}
@@ -64,13 +67,7 @@ func (s *ChatServiceImpl) ValidateParticipant(ctx context.Context, userID, jobID
 		return uuid.Nil, fmt.Errorf("delivery job not found")
 	}
 
-	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to get payment request: %w", err)
-	}
-
 	var receiverID uuid.UUID
-
 
 	resolveRiderUserID := func(riderProfileID uuid.UUID) (uuid.UUID, error) {
 		profile, err := s.riderRepo.GetByID(ctx, riderProfileID)
@@ -83,11 +80,51 @@ func (s *ChatServiceImpl) ValidateParticipant(ctx context.Context, userID, jobID
 		return profile.UserID, nil
 	}
 
+	// Handle errand jobs
+	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
+		errand, err := s.errandRepo.GetByID(ctx, *job.ErrandID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("failed to get errand: %w", err)
+		}
+		if errand == nil {
+			return uuid.Nil, fmt.Errorf("errand not found")
+		}
 
+		// Check if user is the rider
+		if job.RiderID != nil {
+			riderUserID, err := resolveRiderUserID(*job.RiderID)
+			if err == nil && riderUserID == userID {
+				// User is rider, receiver is errand creator
+				return errand.UserID, nil
+			}
+		}
+
+		// Check if user is the errand creator
+		if errand.UserID == userID {
+			if job.RiderID == nil {
+				return uuid.Nil, fmt.Errorf("no rider assigned to job yet")
+			}
+			riderUserID, err := resolveRiderUserID(*job.RiderID)
+			if err != nil {
+				return uuid.Nil, fmt.Errorf("failed to resolve rider user id: %w", err)
+			}
+			return riderUserID, nil
+		}
+
+		return uuid.Nil, fmt.Errorf("user is not a participant in this errand")
+	}
+
+	// Handle intra-state delivery jobs (with PaymentRequest)
+	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to get payment request: %w", err)
+	}
+
+	// Check if user is the rider
 	if job.RiderID != nil {
 		riderUserID, err := resolveRiderUserID(*job.RiderID)
 		if err == nil && riderUserID == userID {
-		
+			// User is rider, receiver is buyer or seller
 			if pr.BuyerID != nil {
 				receiverID = *pr.BuyerID
 			} else {
@@ -96,6 +133,8 @@ func (s *ChatServiceImpl) ValidateParticipant(ctx context.Context, userID, jobID
 			return receiverID, nil
 		}
 	}
+
+	// Check if user is buyer or seller
 	if (pr.BuyerID != nil && *pr.BuyerID == userID) || pr.SellerID == userID {
 		if job.RiderID == nil {
 			return uuid.Nil, fmt.Errorf("no rider assigned to job yet")
@@ -191,15 +230,23 @@ func (s *ChatServiceImpl) GetHistory(ctx context.Context, jobID uuid.UUID, limit
 		return nil, err
 	}
 
-	// Get job and payment request to determine sender types
+	// Get job to determine sender types
 	job, err := s.deliveryJobRepo.GetByID(ctx, jobID)
 	if err != nil {
 		return nil, err
 	}
 
-	var buyerID, sellerID, riderUserID uuid.UUID
+	var buyerID, sellerID, customerID, riderUserID uuid.UUID
+	isErrand := job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand
 
-	if job.PaymentRequestID != uuid.Nil {
+	if isErrand && job.ErrandID != nil {
+		// For errands, get the errand creator
+		errand, err := s.errandRepo.GetByID(ctx, *job.ErrandID)
+		if err == nil && errand != nil {
+			customerID = errand.UserID
+		}
+	} else if job.PaymentRequestID != uuid.Nil {
+		// For intra-state, get buyer and seller
 		pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if err == nil && pr != nil {
 			sellerID = pr.SellerID
@@ -227,6 +274,8 @@ func (s *ChatServiceImpl) GetHistory(ctx context.Context, jobID uuid.UUID, limit
 		// Determine sender type
 		if msg.SenderID == riderUserID {
 			senderType = "rider"
+		} else if isErrand && msg.SenderID == customerID {
+			senderType = "customer"
 		} else if msg.SenderID == buyerID {
 			senderType = "buyer"
 		} else if msg.SenderID == sellerID {
