@@ -167,15 +167,18 @@ func (h *RiderHandler) GetAvailableJobs(c *gin.Context) {
 		return
 	}
 
-	jobs, err := h.riderService.GetAvailableJobs(c.Request.Context(), userID)
+	availableJobs, err := h.riderService.GetAvailableJobs(c.Request.Context(), userID)
 	if err != nil {
 		h.handleError(c, err)
 		return
 	}
 
-	responses := make([]DeliveryJobResponse, len(jobs))
-	for i, job := range jobs {
-		responses[i] = deliveryJobToResponse(job)
+	responses := make([]DeliveryJobResponse, len(availableJobs))
+	for i, aj := range availableJobs {
+		responses[i] = deliveryJobToResponse(aj.Job)
+		if aj.Errand != nil {
+			responses[i].ErrandDetails = errandToDetailsResponse(aj.Errand)
+		}
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
@@ -250,6 +253,10 @@ func (h *RiderHandler) GetActiveJob(c *gin.Context) {
 			IsPaid:          pr.Status.IsPaid(),
 			OrderStatus:     string(pr.Status),
 		}
+	}
+
+	if details.Errand != nil {
+		resp.ErrandDetails = errandToDetailsResponse(details.Errand)
 	}
 
 	if details.Buyer != nil {
@@ -526,22 +533,23 @@ type JobOfferResponse struct {
 
 
 type DeliveryJobResponse struct {
-	ID                  uuid.UUID             `json:"id"`
-	Status              string                `json:"status"`
-	PickupAddress       string                `json:"pickup_address"`
-	DropoffAddress      string                `json:"dropoff_address"`
-	DistanceKM          *float64              `json:"distance_km,omitempty"`
-	EstimatedMinutes    *int                  `json:"estimated_minutes,omitempty"`
-	DeliveryFee         float64               `json:"delivery_fee"`
-	RequiredVehicleType string                `json:"required_vehicle_type"`
-	RiderPayout         *float64              `json:"rider_payout,omitempty"`
-	FeeBreakdown        *FeeBreakdownResponse `json:"fee_breakdown,omitempty"`
-	PickupCode          *string               `json:"pickup_code,omitempty"`
-	DropoffCode         *string               `json:"dropoff_code,omitempty"`
-	AcceptedAt          *string               `json:"accepted_at,omitempty"`
-	PickedUpAt          *string               `json:"picked_up_at,omitempty"`
-	DeliveredAt         *string               `json:"delivered_at,omitempty"`
-	CreatedAt           string                `json:"created_at"`
+	ID                  uuid.UUID              `json:"id"`
+	Status              string                 `json:"status"`
+	PickupAddress       string                 `json:"pickup_address"`
+	DropoffAddress      string                 `json:"dropoff_address"`
+	DistanceKM          *float64               `json:"distance_km,omitempty"`
+	EstimatedMinutes    *int                   `json:"estimated_minutes,omitempty"`
+	DeliveryFee         float64                `json:"delivery_fee"`
+	RequiredVehicleType string                 `json:"required_vehicle_type"`
+	RiderPayout         *float64               `json:"rider_payout,omitempty"`
+	FeeBreakdown        *FeeBreakdownResponse  `json:"fee_breakdown,omitempty"`
+	PickupCode          *string                `json:"pickup_code,omitempty"`
+	DropoffCode         *string                `json:"dropoff_code,omitempty"`
+	AcceptedAt          *string                `json:"accepted_at,omitempty"`
+	PickedUpAt          *string                `json:"picked_up_at,omitempty"`
+	DeliveredAt         *string                `json:"delivered_at,omitempty"`
+	CreatedAt           string                 `json:"created_at"`
+	ErrandDetails       *ErrandDetailsResponse `json:"errand_details,omitempty"`
 }
 type FeeBreakdownResponse struct {
 	DeliveryFee        float64 `json:"delivery_fee"`        // Full fee buyer pays: ₦2,500
@@ -617,6 +625,15 @@ type PackageDetailsResponse struct {
 	OrderStatus     string   `json:"order_status"`
 }
 
+type ErrandDetailsResponse struct {
+	PickupInstructions  *string `json:"pickup_instructions,omitempty"`
+	PackageDescription  *string `json:"package_description,omitempty"`
+	PickupContactName   *string `json:"pickup_contact_name,omitempty"`
+	PickupContactPhone  *string `json:"pickup_contact_phone,omitempty"`
+	DropoffContactName  *string `json:"dropoff_contact_name,omitempty"`
+	DropoffContactPhone *string `json:"dropoff_contact_phone,omitempty"`
+}
+
 func (h *RiderHandler) GetAvailableJobByID(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -630,7 +647,7 @@ func (h *RiderHandler) GetAvailableJobByID(c *gin.Context) {
 		return
 	}
 
-	job, pr, err := h.riderService.GetAvailableJobByID(c.Request.Context(), userID, jobID)
+	job, pr, errand, err := h.riderService.GetAvailableJobByID(c.Request.Context(), userID, jobID)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -659,6 +676,21 @@ func (h *RiderHandler) GetAvailableJobByID(c *gin.Context) {
 		}
 	}
 
+	if errand != nil {
+		resp.ErrandDetails = errandToDetailsResponse(errand)
+	}
+
 	util.Success(c, http.StatusOK, resp)
+}
+
+func errandToDetailsResponse(e *domain.Errand) *ErrandDetailsResponse {
+	return &ErrandDetailsResponse{
+		PickupInstructions:  e.PickupInstructions,
+		PackageDescription:  e.PackageDescription,
+		PickupContactName:   e.PickupContactName,
+		PickupContactPhone:  e.PickupContactPhone,
+		DropoffContactName:  e.DropoffContactName,
+		DropoffContactPhone: e.DropoffContactPhone,
+	}
 }
 

@@ -19,8 +19,8 @@ type RiderService interface {
 	GoOnline(ctx context.Context, userID uuid.UUID) error
 	GoOffline(ctx context.Context, userID uuid.UUID) error
 	UpdateLocation(ctx context.Context, userID uuid.UUID, lat, lng, heading, speed float64) error
-	GetAvailableJobs(ctx context.Context, userID uuid.UUID) ([]*domain.DeliveryJob, error)
-	GetAvailableJobByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error)
+	GetAvailableJobs(ctx context.Context, userID uuid.UUID) ([]*AvailableJob, error)
+	GetAvailableJobByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, *domain.Errand, error)
 	AcceptJob(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, error)
 	GetActiveJob(ctx context.Context, userID uuid.UUID) (*ActiveJobDetails, error)
 	ConfirmPickup(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
@@ -76,8 +76,14 @@ type ContactInfo struct {
 type ActiveJobDetails struct {
 	Job            *domain.DeliveryJob
 	PaymentRequest *domain.PaymentRequest
+	Errand         *domain.Errand
 	Buyer          *ContactInfo
 	Seller         *ContactInfo
+}
+
+type AvailableJob struct {
+	Job    *domain.DeliveryJob
+	Errand *domain.Errand
 }
 
 type JobStatusBroadcaster interface {
@@ -297,7 +303,7 @@ func (s *RiderServiceImpl) GoOffline(ctx context.Context, userID uuid.UUID) erro
 
 	return nil
 }
-func (s *RiderServiceImpl) GetAvailableJobs(ctx context.Context, userID uuid.UUID) ([]*domain.DeliveryJob, error) {
+func (s *RiderServiceImpl) GetAvailableJobs(ctx context.Context, userID uuid.UUID) ([]*AvailableJob, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -306,40 +312,68 @@ func (s *RiderServiceImpl) GetAvailableJobs(ctx context.Context, userID uuid.UUI
 	if !profile.IsOnline {
 		return nil, domain.ErrRiderNotOnline
 	}
+
+	var jobs []*domain.DeliveryJob
 	if profile.VehicleType != nil && *profile.VehicleType != "" {
 		vehicleType := domain.VehicleType(*profile.VehicleType)
-		return s.jobRepo.GetSearchingJobsByVehicleType(ctx, vehicleType, 50)
+		jobs, err = s.jobRepo.GetSearchingJobsByVehicleType(ctx, vehicleType, 50)
+	} else {
+		jobs, err = s.jobRepo.GetSearchingJobs(ctx, 50)
 	}
-	return s.jobRepo.GetSearchingJobs(ctx, 50)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*AvailableJob, len(jobs))
+	for i, job := range jobs {
+		availableJob := &AvailableJob{Job: job}
+
+		// If this is an errand job, fetch errand details
+		if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
+			errand, err := s.errandService.GetByErrandID(ctx, *job.ErrandID)
+			if err != nil {
+				s.logger.Warn("failed to get errand for available job",
+					zap.String("job_id", job.ID.String()),
+					zap.Error(err),
+				)
+			} else {
+				availableJob.Errand = errand
+			}
+		}
+
+		result[i] = availableJob
+	}
+
+	return result, nil
 }
 
-func (s *RiderServiceImpl) GetAvailableJobByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, error) {
+func (s *RiderServiceImpl) GetAvailableJobByID(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, *domain.PaymentRequest, *domain.Errand, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if !profile.IsOnline {
-		return nil, nil, domain.ErrRiderNotOnline
+		return nil, nil, nil, domain.ErrRiderNotOnline
 	}
 
 	job, err := s.jobRepo.GetByID(ctx, jobID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Verify job is still available (searching status)
 	if job.Status != domain.DJStatusSearching {
-		return nil, nil, domain.ErrJobAlreadyAccepted
+		return nil, nil, nil, domain.ErrJobAlreadyAccepted
 	}
 
 	// Verify vehicle type matches if required
 	if job.RequiredVehicleType != "" {
 		if profile.VehicleType == nil || *profile.VehicleType == "" {
-			return nil, nil, domain.ErrVehicleTypeMismatch
+			return nil, nil, nil, domain.ErrVehicleTypeMismatch
 		}
 		if domain.VehicleType(*profile.VehicleType) != job.RequiredVehicleType {
-			return nil, nil, domain.ErrVehicleTypeMismatch
+			return nil, nil, nil, domain.ErrVehicleTypeMismatch
 		}
 	}
 
@@ -355,7 +389,19 @@ func (s *RiderServiceImpl) GetAvailableJobByID(ctx context.Context, userID uuid.
 		}
 	}
 
-	return job, pr, nil
+	// Get errand details if this is an errand job
+	var errand *domain.Errand
+	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
+		errand, err = s.errandService.GetByErrandID(ctx, *job.ErrandID)
+		if err != nil {
+			s.logger.Warn("failed to get errand for job",
+				zap.String("job_id", jobID.String()),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return job, pr, errand, nil
 }
 func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*domain.DeliveryJob, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
@@ -477,6 +523,19 @@ func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (
 
 	details := &ActiveJobDetails{
 		Job: job,
+	}
+
+	// If this is an errand job, fetch errand details
+	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
+		errand, err := s.errandService.GetByErrandID(ctx, *job.ErrandID)
+		if err != nil {
+			s.logger.Warn("failed to get errand for active job",
+				zap.String("job_id", job.ID.String()),
+				zap.Error(err),
+			)
+		} else {
+			details.Errand = errand
+		}
 	}
 
 	// Get payment request for package details and user IDs

@@ -32,6 +32,9 @@ type ErrandService interface {
 
 
 	CompleteErrand(ctx context.Context, userID uuid.UUID, errandID uuid.UUID, code string) (*domain.Errand, error)
+
+	// GetByErrandID returns errand by ID (for internal use by rider service)
+	GetByErrandID(ctx context.Context, errandID uuid.UUID) (*domain.Errand, error)
 }
 
 // ErrandWithDelivery contains errand with delivery job and rider details
@@ -536,6 +539,10 @@ func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID
 func generateDropoffCode() string {
 	n, _ := rand.Int(rand.Reader, big.NewInt(900000))
 	return fmt.Sprintf("%06d", n.Int64()+100000)
+}
+
+func (s *ErrandServiceImpl) GetByErrandID(ctx context.Context, errandID uuid.UUID) (*domain.Errand, error) {
+	return s.errandRepo.GetByID(ctx, errandID)
 }
 
 
