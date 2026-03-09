@@ -284,6 +284,164 @@ func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPReque
 	}, nil
 }
 
+func (s *AuthServiceImpl) VerifyAdminOTP(ctx context.Context, req *dto.AdminVerifyOTPRequest, ipAddress, userAgent string) (*dto.VerifyOTPResponse, error) {
+	// Check if admin signup is configured
+	if s.config.Server.AdminSignupSecret == "" {
+		return nil, domain.ErrAdminSignupNotAllowed
+	}
+
+	// Validate admin secret
+	if req.AdminSecret != s.config.Server.AdminSignupSecret {
+		return nil, domain.ErrInvalidAdminSecret
+	}
+
+	req.PhoneNumber = util.NormalizePhoneNumber(req.PhoneNumber)
+
+	// Check idempotency
+	exists, err := s.idempotencyRepo.Exists(ctx, req.IdempotencyKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check idempotency: %w", err)
+	}
+	if exists {
+		s.logger.Warn("duplicate admin OTP verification request",
+			zap.String("idempotency_key", req.IdempotencyKey),
+		)
+		return nil, domain.ErrIdempotencyKeyExists
+	}
+
+	// Verify OTP with provider
+	result, err := s.verifyProvider.CheckVerification(ctx, req.PhoneNumber, req.OTPCode)
+	if err != nil {
+		s.logger.Error("admin verification check failed",
+			zap.String("phone", req.PhoneNumber),
+			zap.Error(err),
+		)
+		return nil, domain.ErrInvalidOTP
+	}
+
+	if !result.Success {
+		s.logger.Warn("invalid admin OTP attempt",
+			zap.String("phone", req.PhoneNumber),
+			zap.String("status", result.Status),
+		)
+		return nil, domain.ErrInvalidOTP
+	}
+
+	// Get or create user and set as admin
+	user, isNewUser, err := s.getOrCreateAdminUser(ctx, req.PhoneNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get or create admin user: %w", err)
+	}
+
+	if user.IsSuspended {
+		return nil, domain.ErrUserSuspended
+	}
+
+	// Store idempotency key
+	idempotencyKey := &domain.IdempotencyKey{
+		Key:         req.IdempotencyKey,
+		Operation:   "verify_admin_otp",
+		RequestHash: generateRequestHash(req.PhoneNumber, req.VerificationID, req.OTPCode),
+	}
+	if err := s.idempotencyRepo.Create(ctx, idempotencyKey); err != nil {
+		if !errors.Is(err, domain.ErrIdempotencyKeyExists) {
+			s.logger.Error("failed to create idempotency key", zap.Error(err))
+		}
+	}
+
+	// Revoke existing session for this device
+	if err := s.sessionRepo.Delete(ctx, user.ID, req.DeviceID); err != nil {
+		if !errors.Is(err, domain.ErrSessionNotFound) {
+			s.logger.Error("failed to revoke existing session", zap.Error(err))
+		}
+	}
+
+	// Generate tokens
+	accessToken, accessExpiresAt, err := s.jwtManager.GenerateAccessToken(user.ID, req.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
+
+	refreshToken, refreshExpiresAt, err := s.jwtManager.GenerateRefreshToken(user.ID, req.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	// Store session
+	session := &domain.Session{
+		UserID:       user.ID,
+		DeviceID:     req.DeviceID,
+		RefreshToken: refreshToken,
+		UserAgent:    userAgent,
+		IPAddress:    ipAddress,
+		CreatedAt:    time.Now(),
+		ExpiresAt:    refreshExpiresAt,
+	}
+	if err := s.sessionRepo.Store(ctx, session); err != nil {
+		return nil, fmt.Errorf("failed to store session: %w", err)
+	}
+
+	// Update last login
+	if err := s.userRepo.UpdateLastLogin(ctx, user.ID); err != nil {
+		s.logger.Error("failed to update last login", zap.Error(err))
+	}
+
+	// Mark phone as verified for new users
+	if isNewUser {
+		if err := s.userRepo.SetPhoneVerified(ctx, user.ID); err != nil {
+			s.logger.Error("failed to set phone verified", zap.Error(err))
+		}
+	}
+
+	s.logger.Info("admin OTP verified successfully",
+		zap.String("user_id", user.ID.String()),
+		zap.Bool("is_new_user", isNewUser),
+	)
+
+	return &dto.VerifyOTPResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    int(time.Until(accessExpiresAt).Seconds()),
+		TokenType:    "Bearer",
+		User:         userToResponse(user),
+		IsNewUser:    isNewUser,
+	}, nil
+}
+
+func (s *AuthServiceImpl) getOrCreateAdminUser(ctx context.Context, phoneNumber string) (*domain.User, bool, error) {
+	user, err := s.userRepo.GetByPhoneNumber(ctx, phoneNumber)
+	if err == nil {
+		// User exists - set as admin if not already
+		if !user.IsAdmin {
+			user.IsAdmin = true
+			if err := s.userRepo.Update(ctx, user); err != nil {
+				return nil, false, fmt.Errorf("failed to update user as admin: %w", err)
+			}
+		}
+		return user, false, nil
+	}
+
+	if !errors.Is(err, domain.ErrUserNotFound) {
+		return nil, false, err
+	}
+
+	// Create new admin user
+	newUser := &domain.User{
+		PhoneNumber:   phoneNumber,
+		PhoneVerified: true,
+		IsSeller:      false,
+		IsBuyer:       false,
+		IsRider:       false,
+		IsAdmin:       true,
+	}
+
+	if err := s.userRepo.Create(ctx, newUser); err != nil {
+		return nil, false, fmt.Errorf("failed to create admin user: %w", err)
+	}
+
+	return newUser, true, nil
+}
+
 func (s *AuthServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.RefreshTokenResponse, error) {
 
 	claims, err := s.jwtManager.ValidateRefreshToken(req.RefreshToken)
@@ -450,6 +608,7 @@ func userToResponse(user *domain.User) dto.UserResponse {
 		IsSeller:        user.IsSeller,
 		IsBuyer:         user.IsBuyer,
 		IsRider:         user.IsRider,
+		IsAdmin:         user.IsAdmin,
 		SellerVerified:  user.SellerVerified,
 		ProfilePhotoURL: user.ProfilePhotoURL,
 		CreatedAt:       user.CreatedAt,

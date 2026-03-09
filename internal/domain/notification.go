@@ -48,8 +48,9 @@ const (
 	NotificationRiderVerified   NotificationType = "rider_verified"
 	NotificationRiderSuspended  NotificationType = "rider_suspended"
 	NotificationUserSuspended   NotificationType = "user_suspended"
-	NotificationChatMessage NotificationType = "chat_message"
-	NotificationBroadcast NotificationType = "broadcast"
+	NotificationChatMessage    NotificationType = "chat_message"
+	NotificationSupportMessage NotificationType = "support_message"
+	NotificationBroadcast      NotificationType = "broadcast"
 )
 
 type NotificationLog struct {

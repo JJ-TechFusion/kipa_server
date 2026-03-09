@@ -46,10 +46,11 @@ type WorkerConfig struct {
 }
 
 type ServerConfig struct {
-	Port         string
-	Environment  string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	Port              string
+	Environment       string
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	AdminSignupSecret string
 }
 
 type DatabaseConfig struct {
@@ -140,10 +141,11 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		Server: ServerConfig{
-			Port:         viper.GetString("server.port"),
-			Environment:  viper.GetString("server.environment"),
-			ReadTimeout:  viper.GetDuration("server.read_timeout"),
-			WriteTimeout: viper.GetDuration("server.write_timeout"),
+			Port:              viper.GetString("server.port"),
+			Environment:       viper.GetString("server.environment"),
+			ReadTimeout:       viper.GetDuration("server.read_timeout"),
+			WriteTimeout:      viper.GetDuration("server.write_timeout"),
+			AdminSignupSecret: viper.GetString("server.admin_signup_secret"),
 		},
 		Database: DatabaseConfig{
 			Host:            viper.GetString("database.host"),
@@ -236,6 +238,7 @@ func setDefaults() {
 	viper.SetDefault("server.environment", "development")
 	viper.SetDefault("server.read_timeout", "30s")
 	viper.SetDefault("server.write_timeout", "30s")
+	viper.SetDefault("server.admin_signup_secret", "")
 	viper.SetDefault("database.host", "localhost")
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")

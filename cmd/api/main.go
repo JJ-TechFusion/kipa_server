@@ -310,6 +310,18 @@ func main() {
 		prRepo,
 		logger,
 	)
+	supportConversationRepo := postgres.NewSupportConversationRepo(pgClient.DB)
+	supportMessageRepo := postgres.NewSupportMessageRepo(pgClient.DB)
+	supportChatService := service.NewSupportChatService(
+		supportConversationRepo,
+		supportMessageRepo,
+		disputeRepo,
+		escrowRepo,
+		prRepo,
+		userRepo,
+		notificationService,
+		logger,
+	)
 	authHandler := handler.NewAuthHandler(authService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	adminMiddleware := middleware.NewAdminMiddleware(userRepo)
@@ -336,6 +348,7 @@ func main() {
 	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo, prService)
 	notificationHandler := handler.NewNotificationHandler(notificationService, logger)
 	chatHandler := handler.NewChatHandler(chatService, logger)
+	supportChatHandler := handler.NewSupportChatHandler(supportChatService, logger)
 	logisticsHandler := handler.NewLogisticsHandler(logisticsService)
 	driverHandler := handler.NewDriverHandler(driverService)
 	if cfg.Server.Environment == "production" {
@@ -364,6 +377,7 @@ func main() {
 	uploadHandler.RegisterRoutes(v1, authMiddleware)
 	adminHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 	chatHandler.RegisterRoutes(v1, authMiddleware)
+	supportChatHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 	logisticsHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 	driverHandler.RegisterRoutes(v1, authMiddleware)
 	usersRoutes := v1.Group("/users")

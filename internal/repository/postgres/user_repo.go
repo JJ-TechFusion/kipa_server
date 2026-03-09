@@ -22,8 +22,8 @@ func NewUserRepo(db *sqlx.DB) repository.UserRepository {
 
 func (r *UserRepo) Create(ctx context.Context, user *domain.User) error {
 	query := `
-		INSERT INTO users (id, phone_number, phone_verified, email, first_name, last_name, profile_photo_url, is_seller, is_buyer, is_rider)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO users (id, phone_number, phone_verified, email, first_name, last_name, profile_photo_url, is_seller, is_buyer, is_rider, is_admin)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING created_at, updated_at`
 
 	if user.ID == uuid.Nil {
@@ -41,6 +41,7 @@ func (r *UserRepo) Create(ctx context.Context, user *domain.User) error {
 		user.IsSeller,
 		user.IsBuyer,
 		user.IsRider,
+		user.IsAdmin,
 	).Scan(&user.CreatedAt, &user.UpdatedAt)
 }
 
@@ -78,7 +79,7 @@ func (r *UserRepo) Update(ctx context.Context, user *domain.User) error {
 	query := `
 		UPDATE users
 		SET first_name = $2, last_name = $3, email = $4, profile_photo_url = $5,
-		    is_seller = $6, is_buyer = $7, is_rider = $8, updated_at = NOW()
+		    is_seller = $6, is_buyer = $7, is_rider = $8, is_admin = $9, updated_at = NOW()
 		WHERE id = $1`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -90,6 +91,7 @@ func (r *UserRepo) Update(ctx context.Context, user *domain.User) error {
 		user.IsSeller,
 		user.IsBuyer,
 		user.IsRider,
+		user.IsAdmin,
 	)
 	return err
 }

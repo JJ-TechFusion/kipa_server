@@ -1,0 +1,293 @@
+package handler
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+
+	"kipa/internal/domain"
+	"kipa/internal/dto"
+	"kipa/internal/handler/middleware"
+	"kipa/internal/service"
+)
+
+type SupportChatHandler struct {
+	supportChatService service.SupportChatService
+	logger             *zap.Logger
+}
+
+func NewSupportChatHandler(supportChatService service.SupportChatService, logger *zap.Logger) *SupportChatHandler {
+	return &SupportChatHandler{
+		supportChatService: supportChatService,
+		logger:             logger,
+	}
+}
+
+
+func (h *SupportChatHandler) GetOrCreateConversation(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	context, err := h.supportChatService.GetOrCreateConversation(c.Request.Context(), userID)
+	if err != nil {
+		h.logger.Error("failed to get or create support conversation", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get support conversation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, context)
+}
+
+func (h *SupportChatHandler) SendMessage(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var req dto.SendSupportMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	message, err := h.supportChatService.SendMessage(c.Request.Context(), userID, &req)
+	if err != nil {
+		h.logger.Error("failed to send support message", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send message"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, message)
+}
+
+func (h *SupportChatHandler) GetHistory(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	limit := 50
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	var beforeID *uuid.UUID
+	if beforeIDStr := c.Query("before_id"); beforeIDStr != "" {
+		if id, err := uuid.Parse(beforeIDStr); err == nil {
+			beforeID = &id
+		}
+	}
+
+	messages, err := h.supportChatService.GetHistory(c.Request.Context(), userID, limit, beforeID)
+	if err != nil {
+		h.logger.Error("failed to get support chat history", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve chat history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"messages": messages})
+}
+
+func (h *SupportChatHandler) MarkAsRead(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	if err := h.supportChatService.MarkAsRead(c.Request.Context(), userID); err != nil {
+		h.logger.Error("failed to mark support messages as read", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to mark messages as read"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+
+func (h *SupportChatHandler) ListConversations(c *gin.Context) {
+	limit := 50
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	offset := 0
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if parsedOffset, err := strconv.Atoi(offsetStr); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+
+	var status *domain.SupportConversationStatus
+	if statusStr := c.Query("status"); statusStr != "" {
+		s := domain.SupportConversationStatus(statusStr)
+		status = &s
+	}
+
+	conversations, total, err := h.supportChatService.ListConversations(c.Request.Context(), status, limit, offset)
+	if err != nil {
+		h.logger.Error("failed to list support conversations", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list conversations"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"conversations": conversations,
+		"total":         total,
+	})
+}
+
+func (h *SupportChatHandler) GetConversationDetails(c *gin.Context) {
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	details, err := h.supportChatService.GetConversationDetails(c.Request.Context(), conversationID)
+	if err != nil {
+		h.logger.Error("failed to get support conversation details", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get conversation details"})
+		return
+	}
+
+	c.JSON(http.StatusOK, details)
+}
+
+func (h *SupportChatHandler) AdminSendMessage(c *gin.Context) {
+	adminID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	var req dto.SendSupportMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	message, err := h.supportChatService.AdminSendMessage(c.Request.Context(), adminID, conversationID, &req)
+	if err != nil {
+		h.logger.Error("failed to send admin support message", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send message"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, message)
+}
+
+func (h *SupportChatHandler) AdminGetHistory(c *gin.Context) {
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	limit := 50
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	var beforeID *uuid.UUID
+	if beforeIDStr := c.Query("before_id"); beforeIDStr != "" {
+		if id, err := uuid.Parse(beforeIDStr); err == nil {
+			beforeID = &id
+		}
+	}
+
+	messages, err := h.supportChatService.AdminGetHistory(c.Request.Context(), conversationID, limit, beforeID)
+	if err != nil {
+		h.logger.Error("failed to get admin support chat history", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve chat history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"messages": messages})
+}
+
+func (h *SupportChatHandler) AdminMarkAsRead(c *gin.Context) {
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	if err := h.supportChatService.AdminMarkAsRead(c.Request.Context(), conversationID); err != nil {
+		h.logger.Error("failed to mark admin support messages as read", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to mark messages as read"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (h *SupportChatHandler) ResolveConversation(c *gin.Context) {
+	adminID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	if err := h.supportChatService.ResolveConversation(c.Request.Context(), adminID, conversationID); err != nil {
+		h.logger.Error("failed to resolve support conversation", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve conversation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "conversation resolved successfully"})
+}
+
+func (h *SupportChatHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
+	support := r.Group("/support")
+	support.Use(authMiddleware.RequireAuth())
+	{
+		support.GET("", h.GetOrCreateConversation)
+		support.POST("/messages", h.SendMessage)
+		support.GET("/messages", h.GetHistory)
+		support.POST("/messages/read", h.MarkAsRead)
+	}
+
+	adminSupport := r.Group("/admin/support")
+	adminSupport.Use(authMiddleware.RequireAuth())
+	adminSupport.Use(adminMiddleware.RequireAdmin())
+	{
+		adminSupport.GET("/conversations", h.ListConversations)
+		adminSupport.GET("/conversations/:id", h.GetConversationDetails)
+		adminSupport.POST("/conversations/:id/messages", h.AdminSendMessage)
+		adminSupport.GET("/conversations/:id/messages", h.AdminGetHistory)
+		adminSupport.POST("/conversations/:id/read", h.AdminMarkAsRead)
+		adminSupport.POST("/conversations/:id/resolve", h.ResolveConversation)
+	}
+}

@@ -27,6 +27,7 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *mi
 		auth.POST("/otp/send", h.SendOTP)
 		auth.POST("/otp/resend", h.ResendOTP)
 		auth.POST("/otp/verify", h.VerifyOTP)
+		auth.POST("/admin/otp/verify", h.VerifyAdminOTP)
 		auth.POST("/token/refresh", h.RefreshToken)
 		auth.POST("/logout", authMiddleware.RequireAuth(), h.Logout)
 		auth.GET("/me", authMiddleware.RequireAuth(), h.Me)
@@ -76,6 +77,22 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	}
 
 	response, err := h.authService.VerifyOTP(c.Request.Context(), &req, getClientIP(c), getUserAgent(c))
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, response)
+}
+
+func (h *AuthHandler) VerifyAdminOTP(c *gin.Context) {
+	var req dto.AdminVerifyOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	response, err := h.authService.VerifyAdminOTP(c.Request.Context(), &req, getClientIP(c), getUserAgent(c))
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -200,6 +217,10 @@ func mapErrorToResponse(err error) (int, string, string) {
 		return http.StatusBadRequest, "ACTIVE_DELIVERIES_EXIST", "Cannot delete account with active deliveries. Please complete them first."
 	case errors.Is(err, domain.ErrWalletBalanceNotZero):
 		return http.StatusBadRequest, "WALLET_BALANCE_NOT_ZERO", "Cannot delete account with wallet balance. Please withdraw your funds first."
+	case errors.Is(err, domain.ErrInvalidAdminSecret):
+		return http.StatusUnauthorized, "INVALID_ADMIN_SECRET", "Invalid admin signup secret"
+	case errors.Is(err, domain.ErrAdminSignupNotAllowed):
+		return http.StatusForbidden, "ADMIN_SIGNUP_NOT_ALLOWED", "Admin signup is not configured"
 	default:
 		return http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred"
 	}

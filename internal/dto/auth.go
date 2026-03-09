@@ -74,6 +74,7 @@ type UserResponse struct {
 	IsSeller        bool      `json:"is_seller"`
 	IsBuyer         bool      `json:"is_buyer"`
 	IsRider         bool      `json:"is_rider"`
+	IsAdmin         bool      `json:"is_admin"`
 	SellerVerified  bool      `json:"seller_verified"`
 	ProfilePhotoURL *string   `json:"profile_photo_url,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -109,4 +110,13 @@ type DevTokenRequest struct {
 	Role        string `json:"role" binding:"required,oneof=buyer seller rider admin"`
 	FirstName   string `json:"first_name" binding:"required"`
 	LastName    string `json:"last_name" binding:"required"`
+}
+
+type AdminVerifyOTPRequest struct {
+	PhoneNumber    string `json:"phone_number" binding:"required,e164"`
+	VerificationID string `json:"verification_id" binding:"required"`
+	OTPCode        string `json:"otp_code" binding:"required,len=6,numeric"`
+	DeviceID       string `json:"device_id" binding:"required,min=8,max=128"`
+	IdempotencyKey string `json:"idempotency_key" binding:"required,min=32,max=64"`
+	AdminSecret    string `json:"admin_secret" binding:"required,min=16"`
 }
