@@ -531,6 +531,7 @@ type JobOfferResponse struct {
 
 type DeliveryJobResponse struct {
 	ID                  uuid.UUID              `json:"id"`
+	DeliveryType        string                 `json:"delivery_type"`
 	Status              string                 `json:"status"`
 	PickupAddress       string                 `json:"pickup_address"`
 	DropoffAddress      string                 `json:"dropoff_address"`
@@ -556,8 +557,14 @@ type FeeBreakdownResponse struct {
 }
 
 func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
+	deliveryType := "intrastate"
+	if j.SourceType != nil && *j.SourceType == domain.DeliverySourceErrand {
+		deliveryType = "errand"
+	}
+
 	resp := DeliveryJobResponse{
 		ID:                  j.ID,
+		DeliveryType:        deliveryType,
 		Status:              string(j.Status),
 		PickupAddress:       j.PickupAddress,
 		DropoffAddress:      j.DropoffAddress,
