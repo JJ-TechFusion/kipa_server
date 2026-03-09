@@ -513,7 +513,6 @@ POST   /purchases/:id/dispute             # Raise dispute
 ### Delivery Monitor Job
 
 ```go
-// Runs every 5 minutes
 func (j *DeliveryMonitorJob) Run(ctx context.Context) {
     j.checkStaleAwaitingDriver()  // No driver after 48h → expire
     j.checkStaleInTransit()       // No arrival after 72h → alert
@@ -525,7 +524,6 @@ func (j *DeliveryMonitorJob) Run(ctx context.Context) {
 ### Trip Monitor Job
 
 ```go
-// Runs every 15 minutes
 func (j *TripMonitorJob) Run(ctx context.Context) {
     j.checkStaleDepartures()      // Picked up but not departed after 24h
     j.checkAbandonedTrips()       // No update for 72h

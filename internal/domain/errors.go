@@ -90,8 +90,6 @@ var (
 	ErrMaxUsesExceeded        = errors.New("payment link max uses exceeded")
 	ErrLinkNotReusable        = errors.New("payment link is not reusable and has already been used")
 	ErrMissingInterStateFields = errors.New("pickup_state and dropoff_state are required for inter-state delivery")
-
-	// Logistics delivery errors
 	ErrLogisticsDeliveryNotFound     = errors.New("logistics delivery not found")
 	ErrInvalidCarrier                = errors.New("invalid logistics carrier")
 	ErrTrackingNumberRequired        = errors.New("tracking number is required")
@@ -108,8 +106,6 @@ var (
 	ErrDisputeNotFound               = errors.New("dispute not found")
 	ErrReturnTrackingRequired        = errors.New("return tracking number is required")
 	ErrHighValueRequiresAdminApproval = errors.New("high value orders require admin approval before release")
-
-	// Driver errors
 	ErrDriverNotFound            = errors.New("driver not found")
 	ErrDriverProfileNotFound     = errors.New("driver profile not found")
 	ErrDriverProfileExists       = errors.New("driver profile already exists")
@@ -133,8 +129,6 @@ var (
 	ErrDropoffCodeExpired        = errors.New("dropoff code has expired")
 	ErrDeliveryNotCancellable    = errors.New("delivery cannot be cancelled after pickup")
 	ErrRouteMismatch             = errors.New("delivery route does not match driver route")
-
-	// Driver offer errors
 	ErrOfferNotFound              = errors.New("driver offer not found")
 	ErrOfferExpired               = errors.New("driver offer has expired")
 	ErrDriverAlreadyOffered       = errors.New("driver has already made an offer for this delivery")
@@ -145,8 +139,6 @@ var (
 	ErrOfferCannotBeCountered     = errors.New("offer cannot be countered in current state")
 	ErrOfferCannotBeWithdrawn     = errors.New("offer cannot be withdrawn in current state")
 	ErrCounterOfferExpired        = errors.New("counter offer has expired")
-
-	// Wallet PIN errors
 	ErrPinAlreadySet    = errors.New("wallet PIN already set")
 	ErrPinNotSet        = errors.New("wallet PIN not set")
 	ErrInvalidPin       = errors.New("invalid PIN")
@@ -155,8 +147,6 @@ var (
 	ErrPinTooLong       = errors.New("PIN must be at most 6 digits")
 	ErrPinMustBeNumeric     = errors.New("PIN must contain only digits")
 	ErrPinResetNotRequested = errors.New("PIN reset not requested")
-
-	// Flutterwave errors
 	ErrFlutterwaveSubaccountNotFound = errors.New("flutterwave subaccount not found")
 	ErrFlutterwaveSubaccountExists   = errors.New("flutterwave subaccount already exists")
 	ErrFlutterwaveAPIError           = errors.New("flutterwave API error")

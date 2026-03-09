@@ -157,8 +157,6 @@ func (c *Client) GetSubaccountBalance(ctx context.Context, accountRef string) (*
 
 	return &result, nil
 }
-
-// FetchStaticAccount gets the virtual account details for funding a wallet via bank transfer
 func (c *Client) FetchStaticAccount(ctx context.Context, accountRef string) (*APIResponse[StaticAccountData], error) {
 	endpoint := fmt.Sprintf("/payout-subaccounts/%s/static-accounts", url.PathEscape(accountRef))
 	respBody, err := c.doRequest(ctx, http.MethodGet, endpoint, nil, nil)
@@ -177,8 +175,6 @@ func (c *Client) FetchStaticAccount(ctx context.Context, accountRef string) (*AP
 
 	return &result, nil
 }
-
-// FundWallet transfers funds to a wallet using barter_id (wallet-to-wallet transfer)
 func (c *Client) FundWallet(ctx context.Context, barterID string, amount float64, reference, narration string) (*APIResponse[TransferData], error) {
 	req := &WalletTransferRequest{
 		AccountBank:   "flutterwave",
@@ -243,8 +239,6 @@ func (c *Client) GetTransfer(ctx context.Context, transferID int64) (*APIRespons
 
 	return &result, nil
 }
-
-// GetWalletTransactions fetches transaction history for a wallet
 func (c *Client) GetWalletTransactions(ctx context.Context, accountRef, from, to string) (*APIResponse[WalletTransactionsData], error) {
 	endpoint := fmt.Sprintf("/payout-subaccounts/%s/transactions", url.PathEscape(accountRef))
 	params := map[string]string{}
@@ -267,8 +261,6 @@ func (c *Client) GetWalletTransactions(ctx context.Context, accountRef, from, to
 
 	return &result, nil
 }
-
-// UpdateWallet updates wallet details (name, email, mobilenumber, country)
 func (c *Client) UpdateWallet(ctx context.Context, accountRef string, req *UpdateWalletRequest) (*APIResponse[SubaccountData], error) {
 	endpoint := fmt.Sprintf("/payout-subaccounts/%s", url.PathEscape(accountRef))
 	respBody, err := c.doRequest(ctx, http.MethodPut, endpoint, req, nil)
@@ -287,8 +279,6 @@ func (c *Client) UpdateWallet(ctx context.Context, accountRef string, req *Updat
 
 	return &result, nil
 }
-
-// DeleteWallet deactivates/deletes a wallet (cannot be re-enabled)
 func (c *Client) DeleteWallet(ctx context.Context, accountRef string) (*APIResponse[any], error) {
 	endpoint := fmt.Sprintf("/payout-subaccounts/%s", url.PathEscape(accountRef))
 	respBody, err := c.doRequest(ctx, http.MethodDelete, endpoint, nil, nil)
@@ -307,8 +297,6 @@ func (c *Client) DeleteWallet(ctx context.Context, accountRef string) (*APIRespo
 
 	return &result, nil
 }
-
-// ListWallets fetches all wallets with pagination
 func (c *Client) ListWallets(ctx context.Context, limit int, nextCursor int) (*APIResponse[ListWalletsData], error) {
 	params := map[string]string{}
 	if limit > 0 {
@@ -353,8 +341,6 @@ func (c *Client) ResolveBankAccount(ctx context.Context, accountNumber, bankCode
 
 	return &result, nil
 }
-
-// CreateStaticVirtualAccount creates a permanent virtual account for receiving bank transfers
 func (c *Client) CreateStaticVirtualAccount(ctx context.Context, req *CreateVirtualAccountRequest) (*APIResponse[VirtualAccountData], error) {
 	req.IsPermanent = true // Ensure it's permanent
 
@@ -438,8 +424,6 @@ func (c *Client) GetPublicKey() string {
 func AmountToKobo(naira float64) int64 {
 	return int64(naira * 100)
 }
-
-// KoboToNaira converts kobo to naira
 func KoboToNaira(kobo int64) float64 {
 	return float64(kobo) / 100
 }

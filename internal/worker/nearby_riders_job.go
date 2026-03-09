@@ -62,8 +62,6 @@ func (p *JobProcessor) broadcastNearbyRidersToSearchingJobs(ctx context.Context)
 	if p.deliveryJobRepo == nil {
 		return
 	}
-
-	// Get all jobs in searching status
 	jobs, err := p.deliveryJobRepo.GetSearchingJobs(ctx, 100)
 	if err != nil {
 		p.logger.Error("nearby riders job: failed to get searching jobs", zap.Error(err))
@@ -80,19 +78,14 @@ func (p *JobProcessor) broadcastNearbyRidersToSearchingJobs(ctx context.Context)
 }
 
 func (p *JobProcessor) broadcastNearbyRidersForJob(ctx context.Context, job *domain.DeliveryJob) {
-	// Get job coordinates
 	coords, err := p.deliveryJobRepo.GetJobCoordinates(ctx, job.ID)
 	if err != nil || coords == nil {
 		return
 	}
-
-	// Search radius based on job's search radius or default
 	radiusKM := float64(job.SearchRadiusKM)
 	if radiusKM == 0 {
 		radiusKM = 5.0 // Default 5km
 	}
-
-	// Find nearby riders
 	riders, err := p.nearbyRidersFinder.GetNearbyRiders(ctx, coords.PickupLat, coords.PickupLng, radiusKM, 20)
 	if err != nil {
 		p.logger.Warn("nearby riders job: failed to find nearby riders",
@@ -101,8 +94,6 @@ func (p *JobProcessor) broadcastNearbyRidersForJob(ctx context.Context, job *dom
 		)
 		return
 	}
-
-	// Convert to WebSocket format
 	wsRiders := make([]websocket.NearbyRiderInfo, len(riders))
 	for i, r := range riders {
 		wsRiders[i] = websocket.NearbyRiderInfo{
@@ -114,7 +105,5 @@ func (p *JobProcessor) broadcastNearbyRidersForJob(ctx context.Context, job *dom
 			DistanceKM: r.DistanceKM,
 		}
 	}
-
-	// Broadcast to job room
 	p.nearbyRidersBroadcaster.BroadcastNearbyRiders(job.ID.String(), wsRiders)
 }

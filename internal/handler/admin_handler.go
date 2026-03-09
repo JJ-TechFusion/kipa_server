@@ -39,7 +39,6 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 	admin.Use(authMiddleware.RequireAuth())
 	admin.Use(adminMiddleware.RequireAdmin())
 	{
-		// Rider Management
 		riders := admin.Group("/riders")
 		{
 			riders.POST("/:id/verify", h.VerifyRider)
@@ -48,8 +47,6 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			riders.GET("/pending", h.GetPendingRiders)
 			riders.GET("/statistics", h.GetRiderStatistics)
 		}
-
-		// Driver Management (Inter-state)
 		drivers := admin.Group("/drivers")
 		{
 			drivers.POST("/:id/verify", h.VerifyDriver)
@@ -58,11 +55,7 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			drivers.GET("/pending", h.GetPendingDrivers)
 			drivers.GET("/statistics", h.GetDriverStatistics)
 		}
-
-		// Notification Management
 		admin.POST("/notifications/broadcast", h.BroadcastNotification)
-
-		// User Management
 		users := admin.Group("/users")
 		{
 			users.GET("", h.ListUsers)
@@ -71,8 +64,6 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			users.POST("/:id/verify-seller", h.VerifySeller)
 			users.GET("/statistics", h.GetUserStatistics)
 		}
-
-		// Platform Settings
 		settings := admin.Group("/settings")
 		{
 			settings.GET("/delivery-pricing", h.GetDeliveryPricing)
@@ -80,16 +71,12 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			settings.GET("/platform-fees", h.GetPlatformFees)
 			settings.PUT("/platform-fees", h.UpdatePlatformFees)
 		}
-
-		// Analytics
 		analytics := admin.Group("/analytics")
 		{
 			analytics.GET("/revenue", h.GetPlatformRevenue)
 			analytics.GET("/active-deliveries", h.GetActiveDeliveries)
 			analytics.GET("/rider-performance", h.GetRiderPerformance)
 		}
-
-		// Payment Request Management
 		paymentRequests := admin.Group("/payment-requests")
 		{
 			paymentRequests.GET("", h.ListPaymentRequests)
@@ -97,23 +84,17 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			paymentRequests.GET("/expired", h.GetExpiredPaymentRequests)
 			paymentRequests.POST("/:id/rebook", h.AdminRebookDelivery) // Rebook on buyer's behalf
 		}
-
-		// System Health
 		health := admin.Group("/health")
 		{
 			health.GET("/database", h.CheckDatabaseHealth)
 			health.GET("/redis", h.CheckRedisHealth)
 			health.GET("/external-services", h.CheckExternalServices)
 		}
-
-		// Audit Logging
 		auditLogs := admin.Group("/audit-logs")
 		{
 			auditLogs.GET("", h.ListAuditLogs)
 			auditLogs.GET("/user/:id", h.GetUserAuditTrail)
 		}
-
-		// Dispute Management
 		disputes := admin.Group("/disputes")
 		{
 			disputes.GET("", h.ListDisputes)
@@ -122,23 +103,17 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			disputes.POST("/:id/refund", h.ProcessRefund)
 			disputes.GET("/statistics", h.GetDisputeStatistics)
 		}
-
-		// Return Damage Claims (intra-state delivery)
 		returnClaims := admin.Group("/return-claims")
 		{
 			returnClaims.GET("", h.ListReturnDamageClaims)
 			returnClaims.GET("/:id", h.GetReturnDamageClaim)
 			returnClaims.POST("/:id/resolve", h.ResolveReturnDamageClaim)
 		}
-
-		// Commission Management
 		commission := admin.Group("/settings/commission")
 		{
 			commission.GET("", h.GetCommissionSettings)
 			commission.PUT("", h.UpdateCommissionSettings)
 		}
-
-		// Wallet Management
 		wallets := admin.Group("/wallets")
 		{
 			wallets.GET("/user/:id", h.GetUserWallet)
@@ -147,10 +122,6 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		}
 	}
 }
-
-
-
-// Rider Management Handlers
 
 type VerifyRiderRequest struct {
 	AdminID uuid.UUID `json:"admin_id" binding:"required"`
@@ -243,8 +214,6 @@ func (h *AdminHandler) GetRiderStatistics(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// Driver Management Handlers
-
 func (h *AdminHandler) VerifyDriver(c *gin.Context) {
 	driverID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -327,8 +296,6 @@ func (h *AdminHandler) GetDriverStatistics(c *gin.Context) {
 
 	c.JSON(http.StatusOK, stats)
 }
-
-// User Management Handlers
 
 func (h *AdminHandler) ListUsers(c *gin.Context) {
 	limit := 50
@@ -417,8 +384,6 @@ func (h *AdminHandler) GetUserStatistics(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// Platform Settings Handlers
-
 func (h *AdminHandler) GetDeliveryPricing(c *gin.Context) {
 	pricing, err := h.adminService.GetDeliveryPricing(c.Request.Context())
 	if err != nil {
@@ -497,8 +462,6 @@ func (h *AdminHandler) UpdatePlatformFees(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "platform fees updated successfully"})
 }
 
-// Analytics Handlers
-
 func (h *AdminHandler) GetPlatformRevenue(c *gin.Context) {
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
@@ -520,16 +483,12 @@ func (h *AdminHandler) GetPlatformRevenue(c *gin.Context) {
 	c.JSON(http.StatusOK, revenue)
 }
 
-// Error handling
-
 func (h *AdminHandler) handleError(c *gin.Context, err error) {
 	c.JSON(http.StatusInternalServerError, gin.H{
 		"error":   "internal_server_error",
 		"message": err.Error(),
 	})
 }
-
-// Additional Analytics Handlers
 
 func (h *AdminHandler) GetActiveDeliveries(c *gin.Context) {
 	stats, err := h.adminService.GetActiveDeliveries(c.Request.Context())
@@ -563,8 +522,6 @@ func (h *AdminHandler) GetRiderPerformance(c *gin.Context) {
 		"count":  len(performance),
 	})
 }
-
-// Payment Request Management Handlers
 
 func (h *AdminHandler) ListPaymentRequests(c *gin.Context) {
 	limit := 50
@@ -624,9 +581,6 @@ func (h *AdminHandler) GetExpiredPaymentRequests(c *gin.Context) {
 		"count":            len(requests),
 	})
 }
-
-// AdminRebookDelivery allows admin to rebook delivery on buyer's behalf after buyer unavailability
-// No request body needed - rider resumes delivery to same address
 func (h *AdminHandler) AdminRebookDelivery(c *gin.Context) {
 	prID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -648,8 +602,6 @@ func (h *AdminHandler) AdminRebookDelivery(c *gin.Context) {
 		"status":  string(job.Status),
 	})
 }
-
-// System Health Handlers
 
 func (h *AdminHandler) CheckDatabaseHealth(c *gin.Context) {
 	health, err := h.adminService.CheckDatabaseHealth(c.Request.Context())
@@ -680,8 +632,6 @@ func (h *AdminHandler) CheckExternalServices(c *gin.Context) {
 
 	c.JSON(http.StatusOK, health)
 }
-
-// Audit Log Handlers
 
 func (h *AdminHandler) ListAuditLogs(c *gin.Context) {
 	limit := 50
@@ -720,8 +670,6 @@ func (h *AdminHandler) GetUserAuditTrail(c *gin.Context) {
 		"count": len(logs),
 	})
 }
-
-// Dispute Management Handlers
 
 func (h *AdminHandler) ListDisputes(c *gin.Context) {
 	limit := 50
@@ -774,9 +722,6 @@ func (h *AdminHandler) ResolveDispute(c *gin.Context) {
 	}
 
 	adminID := c.MustGet("user_id").(uuid.UUID)
-
-	// Use disputeResolutionService which handles all the business logic
-	// (updating PR status, creating return jobs, escrow updates, etc.)
 	serviceReq := &service.ResolveDisputeRequest{
 		Outcome:         req.Outcome,
 		ResolutionNotes: req.Notes,
@@ -829,8 +774,6 @@ func (h *AdminHandler) GetDisputeStatistics(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// Commission Management Handlers
-
 func (h *AdminHandler) GetCommissionSettings(c *gin.Context) {
 	settings, err := h.adminService.GetCommissionSettings(c.Request.Context())
 	if err != nil {
@@ -867,8 +810,6 @@ func (h *AdminHandler) UpdateCommissionSettings(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "commission settings updated successfully"})
 }
-
-// Wallet Management Handlers
 
 func (h *AdminHandler) GetUserWallet(c *gin.Context) {
 	userID, err := uuid.Parse(c.Param("id"))
@@ -964,8 +905,6 @@ func (h *AdminHandler) BroadcastNotification(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Broadcast sent successfully"})
 }
 
-// Return Damage Claim Handlers (intra-state delivery)
-
 func (h *AdminHandler) ListReturnDamageClaims(c *gin.Context) {
 	limit := 50
 	if l := c.Query("limit"); l != "" {
@@ -1004,8 +943,6 @@ func (h *AdminHandler) GetReturnDamageClaim(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid claim ID"})
 		return
 	}
-
-	// Get the return job
 	returnJob, err := h.deliveryJobRepo.GetByID(c.Request.Context(), claimID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "claim not found"})

@@ -12,10 +12,7 @@ import (
 )
 
 type DisputeService interface {
-	// ListForUser returns disputes where user is buyer or seller
 	ListForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*DisputeWithDetails, error)
-
-	// GetByIDForUser returns a dispute by ID if user is buyer or seller
 	GetByIDForUser(ctx context.Context, userID uuid.UUID, disputeID uuid.UUID) (*DisputeWithDetails, error)
 }
 
@@ -65,7 +62,6 @@ func (s *DisputeServiceImpl) ListForUser(ctx context.Context, userID uuid.UUID, 
 				zap.String("dispute_id", dispute.ID.String()),
 				zap.Error(err),
 			)
-			// Still include dispute with basic info
 			details = &DisputeWithDetails{Dispute: dispute}
 		}
 		result = append(result, details)
@@ -82,8 +78,6 @@ func (s *DisputeServiceImpl) GetByIDForUser(ctx context.Context, userID uuid.UUI
 	if dispute == nil {
 		return nil, domain.ErrDisputeNotFound
 	}
-
-	// Verify user is buyer or seller on the escrow
 	escrow, err := s.escrowRepo.GetByID(ctx, dispute.EscrowID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get escrow: %w", err)
@@ -112,8 +106,6 @@ func (s *DisputeServiceImpl) enrichDispute(ctx context.Context, dispute *domain.
 		Dispute: dispute,
 		Escrow:  escrow,
 	}
-
-	// Determine role and counter party
 	if escrow.BuyerID == userID {
 		details.Role = "buyer"
 		if seller, err := s.userRepo.GetByID(ctx, escrow.SellerID); err == nil && seller != nil {
@@ -127,8 +119,6 @@ func (s *DisputeServiceImpl) enrichDispute(ctx context.Context, dispute *domain.
 			details.CounterPartyName = &name
 		}
 	}
-
-	// Get payment request
 	if pr, err := s.prRepo.GetByID(ctx, escrow.PaymentRequestID); err == nil && pr != nil {
 		details.PaymentRequest = pr
 	}

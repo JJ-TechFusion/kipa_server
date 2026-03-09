@@ -9,7 +9,6 @@ import (
 type NotificationType string
 
 const (
-	// Order lifecycle
 	NotificationOrderPaid           NotificationType = "order_paid"
 	NotificationOrderReadyForPickup NotificationType = "order_ready_pickup"
 	NotificationRiderAssigned       NotificationType = "rider_assigned"
@@ -17,8 +16,6 @@ const (
 	NotificationOrderDelivered      NotificationType = "order_delivered"
 	NotificationEscrowReleased      NotificationType = "escrow_released"
 	NotificationOrderCancelled      NotificationType = "order_cancelled"
-
-	// Unavailability handling
 	NotificationDeliveryFailed    NotificationType = "delivery_failed"
 	NotificationBuyerUnavailable  NotificationType = "buyer_unavailable"
 	NotificationItemReturning     NotificationType = "item_returning"
@@ -26,14 +23,10 @@ const (
 	NotificationRebookReminder    NotificationType = "rebook_reminder"
 	NotificationRebookExpired     NotificationType = "rebook_expired"
 	NotificationDeliveryResumed   NotificationType = "delivery_resumed"
-
-	// Errand lifecycle
 	NotificationErrandAccepted  NotificationType = "errand_accepted"
 	NotificationErrandPickedUp  NotificationType = "errand_picked_up"
 	NotificationErrandDelivered NotificationType = "errand_delivered"
 	NotificationErrandCompleted NotificationType = "errand_completed"
-
-	// Logistics delivery lifecycle
 	NotificationLogisticsShipped          NotificationType = "logistics_shipped"
 	NotificationLogisticsDeliveryClaimed  NotificationType = "logistics_delivery_claimed"
 	NotificationLogisticsConfirmReminder  NotificationType = "logistics_confirm_reminder"
@@ -43,27 +36,19 @@ const (
 	NotificationLogisticsReturnRequired   NotificationType = "logistics_return_required"
 	NotificationLogisticsReturnShipped    NotificationType = "logistics_return_shipped"
 	NotificationLogisticsReleased         NotificationType = "logistics_released"
-
-	// Wallet events
 	NotificationTopUpSuccess        NotificationType = "topup_success"
 	NotificationDVATransfer         NotificationType = "dva_transfer"
 	NotificationWithdrawalInitiated NotificationType = "withdrawal_initiated"
 	NotificationWithdrawalSuccess   NotificationType = "withdrawal_success"
 	NotificationWithdrawalFailed    NotificationType = "withdrawal_failed"
 	NotificationPinReset            NotificationType = "pin_reset"
-
-	// Dispute & Admin
 	NotificationDisputeOpened   NotificationType = "dispute_opened"
 	NotificationDisputeResolved NotificationType = "dispute_resolved"
 	NotificationRefundProcessed NotificationType = "refund_processed"
 	NotificationRiderVerified   NotificationType = "rider_verified"
 	NotificationRiderSuspended  NotificationType = "rider_suspended"
 	NotificationUserSuspended   NotificationType = "user_suspended"
-
-	// Chat
 	NotificationChatMessage NotificationType = "chat_message"
-
-	// General
 	NotificationBroadcast NotificationType = "broadcast"
 )
 

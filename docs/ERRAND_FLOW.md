@@ -350,7 +350,6 @@ Cancels the errand. Only allowed in certain statuses.
 
 ### Option 1: Polling (Simple)
 ```javascript
-// Poll every 10 seconds
 const pollErrandStatus = async (errandId) => {
   const response = await fetch(`/errands/${errandId}`);
   const data = await response.json();
@@ -365,7 +364,6 @@ setInterval(() => pollErrandStatus(errandId), 10000);
 
 ### Option 2: WebSocket (Recommended)
 ```javascript
-// Connect to WebSocket for real-time updates
 const ws = new WebSocket('wss://api.kipa.com/ws/errands');
 
 ws.onmessage = (event) => {

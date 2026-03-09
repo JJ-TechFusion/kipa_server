@@ -27,7 +27,6 @@ func NewClient(credentialsPath string, logger *zap.Logger) (*Client, error) {
 		opt := option.WithCredentialsFile(credentialsPath)
 		app, err = firebase.NewApp(ctx, nil, opt)
 	} else {
-		// Uses GOOGLE_APPLICATION_CREDENTIALS environment variable
 		app, err = firebase.NewApp(ctx, nil)
 	}
 
@@ -46,8 +45,6 @@ func NewClient(credentialsPath string, logger *zap.Logger) (*Client, error) {
 		logger:    logger,
 	}, nil
 }
-
-// SendToToken sends a notification to a specific device token
 func (c *Client) SendToToken(ctx context.Context, token, title, body string, data map[string]string) error {
 	message := &messaging.Message{
 		Token: token,
@@ -82,8 +79,6 @@ func (c *Client) SendToToken(ctx context.Context, token, title, body string, dat
 	)
 	return nil
 }
-
-// SendToTokens sends a notification to multiple device tokens
 func (c *Client) SendToTokens(ctx context.Context, tokens []string, title, body string, data map[string]string) (*messaging.BatchResponse, error) {
 	if len(tokens) == 0 {
 		return nil, nil
@@ -121,8 +116,6 @@ func (c *Client) SendToTokens(ctx context.Context, tokens []string, title, body 
 
 	return response, nil
 }
-
-// SendToTopic sends a notification to all devices subscribed to a topic
 func (c *Client) SendToTopic(ctx context.Context, topic, title, body string, data map[string]string) error {
 	message := &messaging.Message{
 		Topic: topic,

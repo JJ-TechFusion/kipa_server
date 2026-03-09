@@ -86,21 +86,15 @@ func (w *Wallet) DeductLocked(amount float64) error {
 func (w *Wallet) RecordWithdrawal(amount float64) {
 	w.TotalWithdrawn += amount
 }
-
-// HasPin returns true if the wallet has a PIN set
 func (w *Wallet) HasPin() bool {
 	return w.PinHash != nil && *w.PinHash != ""
 }
-
-// IsPinLocked returns true if the wallet is locked due to too many failed attempts
 func (w *Wallet) IsPinLocked() bool {
 	if w.PinLockedUntil == nil {
 		return false
 	}
 	return time.Now().Before(*w.PinLockedUntil)
 }
-
-// IncrementPinAttempts increments failed PIN attempts and locks if threshold reached
 func (w *Wallet) IncrementPinAttempts(maxAttempts int, lockDuration time.Duration) {
 	w.PinAttempts++
 	if w.PinAttempts >= maxAttempts {
@@ -108,8 +102,6 @@ func (w *Wallet) IncrementPinAttempts(maxAttempts int, lockDuration time.Duratio
 		w.PinLockedUntil = &lockUntil
 	}
 }
-
-// ResetPinAttempts resets the PIN attempt counter after successful verification
 func (w *Wallet) ResetPinAttempts() {
 	w.PinAttempts = 0
 	w.PinLockedUntil = nil

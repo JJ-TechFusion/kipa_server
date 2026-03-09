@@ -8,10 +8,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// ============================================
-// REQUEST DTOs
-// ============================================
-
 type MarkShippedRequest struct {
 	Carrier             string  `json:"carrier" binding:"required"`
 	CarrierOtherName    *string `json:"carrier_other_name" binding:"omitempty,max=255"`
@@ -52,7 +48,6 @@ type AdminResolveDisputeRequest struct {
 	Outcome         string   `json:"outcome" binding:"required,oneof=buyer_wins seller_wins partial_refund return_required"`
 	ResolutionNotes string   `json:"resolution_notes" binding:"required,min=10,max=2000"`
 	RefundAmount    *float64 `json:"refund_amount" binding:"omitempty,min=0"` // For partial refund
-	// For return_required
 	ReturnCostBuyerShare  *float64 `json:"return_cost_buyer_share" binding:"omitempty,min=0,max=100"`
 	ReturnCostSellerShare *float64 `json:"return_cost_seller_share" binding:"omitempty,min=0,max=100"`
 }
@@ -83,8 +78,6 @@ type AdminResolveDamageClaimRequest struct {
 type AdminApproveRefundRequest struct {
 	Notes *string `json:"notes" binding:"omitempty,max=1000"`
 }
-
-// CancelDeliveryRequest is used by buyer to cancel before shipment
 type CancelDeliveryRequest struct {
 	Reason string `json:"reason" binding:"required,min=5,max=500"`
 }
@@ -94,10 +87,6 @@ type ListLogisticsDeliveriesRequest struct {
 	Limit  int     `form:"limit" binding:"omitempty,min=1,max=100"`
 	Offset int     `form:"offset" binding:"omitempty,min=0"`
 }
-
-// ============================================
-// RESPONSE DTOs
-// ============================================
 
 type LogisticsDeliveryResponse struct {
 	ID               uuid.UUID `json:"id"`
@@ -211,12 +200,6 @@ type LogisticsDeliveryListResponse struct {
 	Limit      int                         `json:"limit"`
 	Offset     int                         `json:"offset"`
 }
-
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
-
-// GetStatusDisplay returns human-readable status
 func GetStatusDisplay(status domain.LogisticsDeliveryStatus) string {
 	displays := map[domain.LogisticsDeliveryStatus]string{
 		domain.LDStatusAwaitingShipment:      "Awaiting Shipment",
@@ -240,8 +223,6 @@ func GetStatusDisplay(status domain.LogisticsDeliveryStatus) string {
 	}
 	return string(status)
 }
-
-// GetAvailableActions returns actions available for a user role
 func GetAvailableActions(delivery *domain.LogisticsDelivery, userID uuid.UUID) []string {
 	var actions []string
 
@@ -263,7 +244,6 @@ func GetAvailableActions(delivery *domain.LogisticsDelivery, userID uuid.UUID) [
 			}
 			actions = append(actions, "update_tracking")
 		}
-		// Buyer cannot dispute yet - must wait for seller to claim delivery
 	case domain.LDStatusDeliveryClaimed:
 		if isBuyer {
 			actions = append(actions, "confirm_delivery", "open_dispute")
@@ -280,21 +260,14 @@ func GetAvailableActions(delivery *domain.LogisticsDelivery, userID uuid.UUID) [
 			actions = append(actions, "confirm_return_received")
 		}
 	case domain.LDStatusReturnConfirmed, domain.LDStatusPendingRefundApproval:
-		// Waiting for admin - no user actions
 	case domain.LDStatusReturnDamageDisputed:
-		// Waiting for admin to resolve damage claim
-		// Both parties can upload additional evidence
 	}
-
-	// Evidence upload available in most active states
 	if !delivery.Status.IsTerminal() {
 		actions = append(actions, "upload_evidence")
 	}
 
 	return actions
 }
-
-// ToLogisticsDeliveryResponse converts domain model to response DTO
 func ToLogisticsDeliveryResponse(
 	delivery *domain.LogisticsDelivery,
 	pr *domain.PaymentRequest,
@@ -393,12 +366,6 @@ func ToLogisticsDeliveryResponse(
 
 	return resp
 }
-
-// ============================================
-// TIMELINE DTOs
-// ============================================
-
-// TimelineStep represents a single step in the delivery timeline
 type TimelineStep struct {
 	Status      string     `json:"status"`
 	Title       string     `json:"title"`
@@ -410,8 +377,6 @@ type TimelineStep struct {
 	IsDispute   bool       `json:"is_dispute"` // True if this is a dispute-related step
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
-
-// DeliveryTimelineResponse contains the full timeline for a delivery
 type DeliveryTimelineResponse struct {
 	DeliveryID    uuid.UUID      `json:"delivery_id"`
 	CurrentStatus string         `json:"current_status"`
@@ -419,8 +384,6 @@ type DeliveryTimelineResponse struct {
 	HasDispute    bool           `json:"has_dispute"`
 	DisputeSteps  []TimelineStep `json:"dispute_steps,omitempty"` // Separate list for dispute flow
 }
-
-// BuildTimeline creates a timeline from delivery events
 func BuildTimeline(delivery *domain.LogisticsDelivery, events []*domain.LogisticsDeliveryEvent) *DeliveryTimelineResponse {
 	timeline := &DeliveryTimelineResponse{
 		DeliveryID:    delivery.ID,
@@ -428,8 +391,6 @@ func BuildTimeline(delivery *domain.LogisticsDelivery, events []*domain.Logistic
 		Steps:         make([]TimelineStep, 0),
 		HasDispute:    delivery.DisputeID != nil,
 	}
-
-	// Define the standard flow steps
 	standardSteps := []struct {
 		Status      domain.LogisticsDeliveryStatus
 		Title       string
@@ -441,21 +402,13 @@ func BuildTimeline(delivery *domain.LogisticsDelivery, events []*domain.Logistic
 		{domain.LDStatusConfirmed, "Delivery Confirmed", "Buyer confirmed receipt"},
 		{domain.LDStatusFundsReleased, "Payment Released", "Funds released to seller"},
 	}
-
-	// Build event lookup by status
 	eventByStatus := make(map[domain.LogisticsDeliveryStatus]*domain.LogisticsDeliveryEvent)
 	for _, e := range events {
 		eventByStatus[e.ToStatus] = e
 	}
-
-	// Build standard timeline - check if each step actually happened via events
 	for i, step := range standardSteps {
 		event, hasEvent := eventByStatus[step.Status]
-
-		// Determine if step is completed based on actual events, not status index
 		isCompleted := hasEvent
-
-		// For awaiting_shipment, it's always completed if we have any events (order was placed)
 		if step.Status == domain.LDStatusAwaitingShipment && len(events) > 0 {
 			isCompleted = true
 		}
@@ -473,34 +426,24 @@ func BuildTimeline(delivery *domain.LogisticsDelivery, events []*domain.Logistic
 			ts.Timestamp = &event.CreatedAt
 			ts.ActorType = event.ActorType
 		}
-
-		// Skip future steps (not completed and not current) if we're in dispute flow
 		if delivery.DisputeID != nil && i > 1 && !isCompleted && !ts.IsCurrent {
 			continue
 		}
 
 		timeline.Steps = append(timeline.Steps, ts)
 	}
-
-	// Add dispute steps if dispute exists
 	if delivery.DisputeID != nil {
 		timeline.DisputeSteps = buildDisputeTimeline(delivery, events)
 	}
 
 	return timeline
 }
-
-// buildDisputeTimeline builds the dispute-specific timeline
 func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.LogisticsDeliveryEvent) []TimelineStep {
 	steps := make([]TimelineStep, 0)
-
-	// Build event lookup
 	eventByStatus := make(map[domain.LogisticsDeliveryStatus]*domain.LogisticsDeliveryEvent)
 	for _, e := range events {
 		eventByStatus[e.ToStatus] = e
 	}
-
-	// Dispute opened
 	if event, ok := eventByStatus[domain.LDStatusDisputed]; ok {
 		reason := ""
 		if event.Reason != nil {
@@ -516,19 +459,12 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 			IsDispute:   true,
 		})
 	}
-
-	// Check if buyer won (handles both "buyer_favor" and legacy "buyer_wins" values)
-	// Also check if delivery is in return flow based on status
 	buyerWon := delivery.DisputeOutcome != nil &&
 		(*delivery.DisputeOutcome == "buyer_favor" || *delivery.DisputeOutcome == "buyer_wins")
 	isInReturnFlow := delivery.IsInReturnFlow()
-
-	// If dispute outcome is buyer wins OR delivery is in return flow, add return flow steps
 	if buyerWon || isInReturnFlow {
-		// Return required step
 		_, hasReturnShipped := eventByStatus[domain.LDStatusReturnShipped]
 		if event, ok := eventByStatus[domain.LDStatusReturnRequired]; ok {
-			// Completed if we've moved past this step
 			isCompleted := hasReturnShipped || delivery.Status != domain.LDStatusReturnRequired
 			steps = append(steps, TimelineStep{
 				Status:      "return_required",
@@ -541,8 +477,6 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 				IsDispute:   true,
 			})
 		}
-
-		// Return shipped step
 		_, hasReturnConfirmed := eventByStatus[domain.LDStatusReturnConfirmed]
 		if event, ok := eventByStatus[domain.LDStatusReturnShipped]; ok {
 			isCompleted := hasReturnConfirmed || delivery.Status == domain.LDStatusReturnDamageDisputed ||
@@ -562,8 +496,6 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 				},
 			})
 		}
-
-		// Return received or damage disputed
 		if delivery.Status == domain.LDStatusReturnDamageDisputed {
 			steps = append(steps, TimelineStep{
 				Status:      "return_damage_disputed",
@@ -589,8 +521,6 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 				IsDispute:   true,
 			})
 		}
-
-		// Refund approved/processed
 		if event, ok := eventByStatus[domain.LDStatusRefunded]; ok {
 			steps = append(steps, TimelineStep{
 				Status:      "refunded",
@@ -604,7 +534,6 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 		}
 	} else if delivery.DisputeOutcome != nil &&
 		(*delivery.DisputeOutcome == "seller_favor" || *delivery.DisputeOutcome == "seller_wins") {
-		// Seller wins - funds released
 		if event, ok := eventByStatus[domain.LDStatusReleasedByAdmin]; ok {
 			steps = append(steps, TimelineStep{
 				Status:      "released_by_admin",
@@ -617,8 +546,6 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 			})
 		}
 	}
-
-	// Mark current step
 	if len(steps) > 0 && !delivery.Status.IsTerminal() {
 		for i := range steps {
 			if !steps[i].IsCompleted {
@@ -630,8 +557,6 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 
 	return steps
 }
-
-// getStatusIndex returns the order index of a status
 func getStatusIndex(status domain.LogisticsDeliveryStatus) int {
 	order := map[domain.LogisticsDeliveryStatus]int{
 		domain.LDStatusAwaitingShipment:      0,

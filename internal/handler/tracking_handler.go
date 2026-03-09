@@ -70,8 +70,6 @@ func (h *TrackingHandler) GetJobDetails(c *gin.Context) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get job")
 		return
 	}
-
-	// Get coordinates from PostGIS
 	coords, _ := h.deliveryJobRepo.GetJobCoordinates(c.Request.Context(), jobID)
 
 	response := JobDetailsResponse{
@@ -95,8 +93,6 @@ func (h *TrackingHandler) GetJobDetails(c *gin.Context) {
 
 	if job.RiderID != nil {
 		response.RiderID = job.RiderID
-
-		// Get rider info
 		riderProfile, err := h.riderProfileRepo.GetByID(c.Request.Context(), *job.RiderID)
 		if err == nil {
 			user, err := h.userRepo.GetByID(c.Request.Context(), riderProfile.UserID)

@@ -40,8 +40,6 @@ func (h *RiderHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		rider.POST("/jobs/:id/deliver", h.ConfirmDelivery)
 		rider.GET("/jobs/history", h.GetJobHistory)
 		rider.GET("/earnings", h.GetEarnings)
-
-		// Unavailability handling
 		rider.POST("/jobs/:id/mark-seller-unavailable", h.MarkSellerUnavailable)
 		rider.POST("/jobs/:id/mark-buyer-unavailable", h.MarkBuyerUnavailable)
 		rider.POST("/jobs/:id/complete-forced-return", h.CompleteForcedReturn)
@@ -373,8 +371,6 @@ func (h *RiderHandler) GetEarnings(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, earnings)
 }
-
-// MarkSellerUnavailable handles rider marking seller as unavailable at pickup
 func (h *RiderHandler) MarkSellerUnavailable(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -395,8 +391,6 @@ func (h *RiderHandler) MarkSellerUnavailable(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, gin.H{"message": "Seller marked as unavailable. Job cancelled and buyer will be refunded."})
 }
-
-// MarkBuyerUnavailable handles rider marking buyer as unavailable at dropoff
 func (h *RiderHandler) MarkBuyerUnavailable(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -423,8 +417,6 @@ func (h *RiderHandler) MarkBuyerUnavailable(c *gin.Context) {
 		"rebook_deadline":      forcedReturnInfo.RebookDeadline,
 	})
 }
-
-// CompleteForcedReturn handles rider completing forced return to seller
 func (h *RiderHandler) CompleteForcedReturn(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -603,8 +595,6 @@ func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
 
 	return resp
 }
-
-// DeliveryJobDetailResponse includes full job details with coordinates and package info
 type DeliveryJobDetailResponse struct {
 	DeliveryJobResponse
 	PickupLat      float64                 `json:"pickup_lat"`

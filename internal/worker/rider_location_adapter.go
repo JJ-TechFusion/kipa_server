@@ -5,8 +5,6 @@ import (
 
 	redisrepo "kipa/internal/repository/redis"
 )
-
-// RiderLocationAdapter adapts RiderLocationRepo to NearbyRidersFinder interface
 type RiderLocationAdapter struct {
 	repo *redisrepo.RiderLocationRepo
 }

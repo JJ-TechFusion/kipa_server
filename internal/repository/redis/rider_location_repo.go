@@ -40,19 +40,13 @@ type RiderLocationRepo struct {
 func NewRiderLocationRepo(client *redis.Client) *RiderLocationRepo {
 	return &RiderLocationRepo{client: client}
 }
-
-// UpdateLocation stores rider location using Redis GEO
 func (r *RiderLocationRepo) UpdateLocation(ctx context.Context, riderID uuid.UUID, lat, lng, heading, speed float64) error {
 	pipe := r.client.Pipeline()
-
-	// Store in geo index for spatial queries
 	pipe.GeoAdd(ctx, riderLocationsKey, &redis.GeoLocation{
 		Name:      riderID.String(),
 		Longitude: lng,
 		Latitude:  lat,
 	})
-
-	// Store additional data (heading, speed, timestamp)
 	dataKey := riderLocationDataKey + riderID.String()
 	pipe.HSet(ctx, dataKey, map[string]interface{}{
 		"heading":    heading,
@@ -64,8 +58,6 @@ func (r *RiderLocationRepo) UpdateLocation(ctx context.Context, riderID uuid.UUI
 	_, err := pipe.Exec(ctx)
 	return err
 }
-
-// RemoveLocation removes rider from geo index (when going offline)
 func (r *RiderLocationRepo) RemoveLocation(ctx context.Context, riderID uuid.UUID) error {
 	pipe := r.client.Pipeline()
 	pipe.ZRem(ctx, riderLocationsKey, riderID.String())
@@ -73,10 +65,7 @@ func (r *RiderLocationRepo) RemoveLocation(ctx context.Context, riderID uuid.UUI
 	_, err := pipe.Exec(ctx)
 	return err
 }
-
-// GetNearbyRiders returns riders within radius (km) of a point
 func (r *RiderLocationRepo) GetNearbyRiders(ctx context.Context, lat, lng, radiusKM float64, limit int) ([]NearbyRider, error) {
-	// Query riders within radius
 	locations, err := r.client.GeoRadius(ctx, riderLocationsKey, lng, lat, &redis.GeoRadiusQuery{
 		Radius:    radiusKM,
 		Unit:      "km",
@@ -103,8 +92,6 @@ func (r *RiderLocationRepo) GetNearbyRiders(ctx context.Context, lat, lng, radiu
 			Lng:        loc.Longitude,
 			DistanceKM: loc.Dist,
 		}
-
-		// Get additional data
 		dataKey := riderLocationDataKey + riderID.String()
 		data, err := r.client.HGetAll(ctx, dataKey).Result()
 		if err == nil && len(data) > 0 {
@@ -121,8 +108,6 @@ func (r *RiderLocationRepo) GetNearbyRiders(ctx context.Context, lat, lng, radiu
 
 	return riders, nil
 }
-
-// GetRiderLocation returns a specific rider's location
 func (r *RiderLocationRepo) GetRiderLocation(ctx context.Context, riderID uuid.UUID) (*RiderLocation, error) {
 	positions, err := r.client.GeoPos(ctx, riderLocationsKey, riderID.String()).Result()
 	if err != nil {
@@ -138,8 +123,6 @@ func (r *RiderLocationRepo) GetRiderLocation(ctx context.Context, riderID uuid.U
 		Lat:     positions[0].Latitude,
 		Lng:     positions[0].Longitude,
 	}
-
-	// Get additional data
 	dataKey := riderLocationDataKey + riderID.String()
 	data, err := r.client.HGetAll(ctx, dataKey).Result()
 	if err == nil && len(data) > 0 {

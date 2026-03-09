@@ -64,17 +64,11 @@ func (h *BuyerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		purchases.GET("/:id/timeline", h.GetPurchaseTimeline)
 		purchases.POST("/:id/confirm", h.ConfirmDelivery)
 		purchases.POST("/:id/dispute", h.DisputePurchase)
-
-		// Return flow endpoints
 		purchases.GET("/:id/return", h.GetReturnStatus)
 		purchases.POST("/:id/initiate-return", h.InitiateReturn)
 		purchases.POST("/:id/ready-for-return", h.ReadyForReturn)
-
-		// Rebook endpoints (after buyer unavailability)
 		purchases.GET("/:id/rebook-status", h.GetRebookStatus)
 		purchases.POST("/:id/rebook", h.RebookDelivery)
-
-		// Driver delivery endpoints (inter-state)
 		purchases.GET("/driver-deliveries", h.ListBuyerDriverDeliveries)
 		purchases.GET("/driver-deliveries/:delivery_id", h.GetBuyerDriverDelivery)
 		purchases.GET("/driver-deliveries/:delivery_id/timeline", h.GetDriverDeliveryTimeline)
@@ -113,8 +107,6 @@ func (h *BuyerHandler) GetPaymentPage(c *gin.Context) {
 		util.Error(c, http.StatusGone, "CANCELLED", "This payment request has been cancelled")
 		return
 	}
-
-	// Get seller information
 	seller, err := h.userRepo.GetByID(c.Request.Context(), pr.SellerID)
 	if err != nil {
 		util.Error(c, http.StatusInternalServerError, "SELLER_NOT_FOUND", "Failed to retrieve seller information")
@@ -182,8 +174,6 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 			h.handleError(c, err)
 			return
 		}
-
-		// Get payment request details for delivery info
 		pr, _ := h.prService.GetByID(c.Request.Context(), resp.PaymentRequestID)
 
 		response := gin.H{
@@ -199,14 +189,9 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 			response["delivery_type"] = string(pr.DeliveryType)
 			response["pickup_address"] = pr.PickupAddress
 			response["dropoff_address"] = pr.DropoffAddress
-
-			// For inter-state, include logistics_delivery_id
 			if resp.LogisticsDeliveryID != nil {
 				response["logistics_delivery_id"] = resp.LogisticsDeliveryID
 			}
-
-			// For intra-state, delivery_job_id is created when seller marks ready
-			// So we just include the payment_request_id which is used to initiate rider search
 			if pr.DeliveryJobID != nil {
 				response["delivery_job_id"] = pr.DeliveryJobID
 			}
@@ -230,8 +215,6 @@ func (h *BuyerHandler) VerifyPayment(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Get payment request details for delivery info
 	pr, _ := h.prService.GetByID(c.Request.Context(), resp.PaymentRequestID)
 
 	response := gin.H{
@@ -247,13 +230,9 @@ func (h *BuyerHandler) VerifyPayment(c *gin.Context) {
 		response["delivery_type"] = string(pr.DeliveryType)
 		response["pickup_address"] = pr.PickupAddress
 		response["dropoff_address"] = pr.DropoffAddress
-
-		// For inter-state, include logistics_delivery_id
 		if resp.LogisticsDeliveryID != nil {
 			response["logistics_delivery_id"] = resp.LogisticsDeliveryID
 		}
-
-		// For intra-state, delivery_job_id is created when seller marks ready
 		if pr.DeliveryJobID != nil {
 			response["delivery_job_id"] = pr.DeliveryJobID
 		}
@@ -267,8 +246,6 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
 		return
 	}
-
-	// Get status filter from query param
 	statusFilter := c.Query("status")
 
 	limit := 50
@@ -279,8 +256,6 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Count orders by status for tabs
 	statusCounts := map[string]int{
 		"all":         0,
 		"processing":  0,
@@ -299,8 +274,6 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		if err != nil {
 			continue
 		}
-
-		// Count by status
 		statusCounts["all"]++
 		switch order.Status {
 		case domain.OrderStatusPaid, domain.OrderStatusProcessing, domain.OrderStatusReady:
@@ -312,8 +285,6 @@ func (h *BuyerHandler) ListPurchases(c *gin.Context) {
 		case domain.OrderStatusDisputed:
 			statusCounts["disputed"]++
 		}
-
-		// Apply status filter
 		if statusFilter != "" && statusFilter != "all" {
 			switch statusFilter {
 			case "processing":
@@ -384,18 +355,15 @@ func (h *BuyerHandler) GetPurchase(c *gin.Context) {
 		if pr.DeliveryJobID != nil {
 			job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 		}
-		// Fetch return job if exists (dispute return)
 		if pr.ReturnDeliveryJobID != nil {
 			returnJob, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ReturnDeliveryJobID)
 		}
-		// Fetch forced return job if exists (buyer unavailable)
 		if pr.ForcedReturnJobID != nil {
 			forcedReturnJob, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ForcedReturnJobID)
 		}
 	}
 
 	resp := orderToPurchaseResponseWithReturn(order, pr, job, returnJob)
-	// Use forced return job for timeline if in rebook flow
 	timelineReturnJob := returnJob
 	if forcedReturnJob != nil && returnJob == nil {
 		timelineReturnJob = forcedReturnJob
@@ -482,12 +450,8 @@ func (h *BuyerHandler) DisputePurchase(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Create dispute record for admin tracking
 	dispute := domain.NewDispute(*order.EscrowID, userID, req.Reason, req.Evidence)
 	if err := h.disputeRepo.Create(c.Request.Context(), dispute); err != nil {
-		// Log error but don't fail - escrow is already disputed
-		// The dispute record is for admin tracking
 		_ = err
 	}
 
@@ -681,8 +645,6 @@ type PurchaseDeliveryInfo struct {
 	RiderAssigned bool       `json:"rider_assigned"`
 	PickedUpAt    *string    `json:"picked_up_at,omitempty"`
 	DeliveredAt   *string    `json:"delivered_at,omitempty"`
-
-	// Return-specific fields
 	ReturnStatus      *string `json:"return_status,omitempty"`
 	ReturnRiderAssigned bool  `json:"return_rider_assigned,omitempty"`
 	ReturnPickedUpAt  *string `json:"return_picked_up_at,omitempty"`
@@ -721,8 +683,6 @@ func orderToPurchaseResponseWithReturn(order *domain.Order, pr *domain.PaymentRe
 		paidAt := order.PaidAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.PaidAt = &paidAt
 	}
-
-	// Determine if we're in return phase
 	isReturnPhase := pr.Status.IsReturnFlow()
 
 	if job != nil {
@@ -732,8 +692,6 @@ func orderToPurchaseResponseWithReturn(order *domain.Order, pr *domain.PaymentRe
 			RiderAssigned: job.RiderID != nil,
 			Phase:         "delivery",
 		}
-
-		// In normal delivery phase, buyer sees dropoff code
 		if job.RiderID != nil && job.DropoffCode != nil {
 			deliveryInfo.DropoffCode = job.DropoffCode
 		}
@@ -746,16 +704,12 @@ func orderToPurchaseResponseWithReturn(order *domain.Order, pr *domain.PaymentRe
 			t := job.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
 			deliveryInfo.DeliveredAt = &t
 		}
-
-		// If in return phase, include return job info
 		if isReturnPhase && returnJob != nil {
 			deliveryInfo.Phase = "return"
 			deliveryInfo.ReturnJobID = &returnJob.ID
 			returnStatus := string(returnJob.Status)
 			deliveryInfo.ReturnStatus = &returnStatus
 			deliveryInfo.ReturnRiderAssigned = returnJob.RiderID != nil
-
-			// In return phase, BUYER is at pickup location, so buyer sees PICKUP code
 			if returnJob.RiderID != nil && returnJob.PickupCode != nil {
 				deliveryInfo.PickupCode = returnJob.PickupCode
 			}
@@ -769,7 +723,6 @@ func orderToPurchaseResponseWithReturn(order *domain.Order, pr *domain.PaymentRe
 				deliveryInfo.ReturnDeliveredAt = &t
 			}
 		} else if isReturnPhase && returnJob == nil {
-			// Return is required but job not yet created
 			deliveryInfo.Phase = "return"
 		}
 
@@ -854,8 +807,6 @@ func (h *BuyerHandler) GetPurchaseTimeline(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, timeline)
 }
-
-// GetReturnStatus returns the return job status for a purchase
 func (h *BuyerHandler) GetReturnStatus(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -885,14 +836,10 @@ func (h *BuyerHandler) GetReturnStatus(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Check if return is required or in progress
 	if !pr.Status.IsReturnFlow() && pr.Status != domain.PRStatusReturnRequired {
 		util.Error(c, http.StatusNotFound, "NO_RETURN", "No return required for this purchase")
 		return
 	}
-
-	// CanConfirmReady: buyer can confirm when status is return_required (job created but not searching)
 	canConfirmReady := pr.Status == domain.PRStatusReturnRequired
 
 	response := BuyerReturnStatusResponse{
@@ -902,8 +849,6 @@ func (h *BuyerHandler) GetReturnStatus(c *gin.Context) {
 		CanInitiate:      pr.Status == domain.PRStatusReturnRequired && pr.ReturnDeliveryJobID == nil,
 		CanConfirmReady:  canConfirmReady,
 	}
-
-	// If there's an active return job, include its details
 	if pr.ReturnDeliveryJobID != nil {
 		returnJob, err := h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ReturnDeliveryJobID)
 		if err == nil {
@@ -933,8 +878,6 @@ func (h *BuyerHandler) GetReturnStatus(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, response)
 }
-
-// InitiateReturn starts the return process by creating a return delivery job
 func (h *BuyerHandler) InitiateReturn(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -964,20 +907,14 @@ func (h *BuyerHandler) InitiateReturn(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Verify this purchase requires a return
 	if pr.Status != domain.PRStatusReturnRequired {
 		util.Error(c, http.StatusBadRequest, "INVALID_STATUS", "Return is not required for this purchase")
 		return
 	}
-
-	// Check if return already initiated
 	if pr.ReturnDeliveryJobID != nil {
 		util.Error(c, http.StatusBadRequest, "ALREADY_INITIATED", "Return has already been initiated")
 		return
 	}
-
-	// Create return delivery job
 	returnJob, err := h.disputeResolutionService.CreateReturnDeliveryJob(c.Request.Context(), pr.ID)
 	if err != nil {
 		util.Error(c, http.StatusInternalServerError, "RETURN_FAILED", err.Error())
@@ -992,8 +929,6 @@ func (h *BuyerHandler) InitiateReturn(c *gin.Context) {
 		"dropoff_address": returnJob.DropoffAddress,
 	})
 }
-
-// ReadyForReturn confirms buyer is ready and starts rider search for return pickup
 func (h *BuyerHandler) ReadyForReturn(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -1023,14 +958,10 @@ func (h *BuyerHandler) ReadyForReturn(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Verify purchase is in return_required status
 	if pr.Status != domain.PRStatusReturnRequired {
 		util.Error(c, http.StatusBadRequest, "INVALID_STATUS", "Purchase is not awaiting return confirmation")
 		return
 	}
-
-	// Confirm ready and start rider search
 	returnJob, err := h.disputeResolutionService.ConfirmReadyForReturn(c.Request.Context(), pr.ID, userID)
 	if err != nil {
 		util.Error(c, http.StatusBadRequest, "RETURN_FAILED", err.Error())
@@ -1051,8 +982,6 @@ func (h *BuyerHandler) ReadyForReturn(c *gin.Context) {
 		"pickup_code":     returnJob.PickupCode, // Note: Generated when rider accepts
 	})
 }
-
-// Return flow DTOs for buyer
 type BuyerReturnStatusResponse struct {
 	PaymentRequestID uuid.UUID           `json:"payment_request_id"`
 	Status           string              `json:"status"`
@@ -1074,8 +1003,6 @@ type BuyerReturnJobInfo struct {
 	PickedUpAt     *string   `json:"picked_up_at,omitempty"`
 	DeliveredAt    *string   `json:"delivered_at,omitempty"`
 }
-
-// GetRebookStatus returns the rebook status for a purchase after buyer unavailability
 func (h *BuyerHandler) GetRebookStatus(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -1108,9 +1035,6 @@ func (h *BuyerHandler) GetRebookStatus(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, status)
 }
-
-// RebookDelivery handles buyer rebooking delivery after being unavailable
-// No request body needed - rider resumes delivery to same address
 func (h *BuyerHandler) RebookDelivery(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -1148,10 +1072,6 @@ func (h *BuyerHandler) RebookDelivery(c *gin.Context) {
 		"dropoff_address": job.DropoffAddress,
 	})
 }
-
-// ============================================
-// Driver Delivery Endpoints (Inter-state)
-// ============================================
 
 func (h *BuyerHandler) ListBuyerDriverDeliveries(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -1202,8 +1122,6 @@ func (h *BuyerHandler) GetBuyerDriverDelivery(c *gin.Context) {
 		util.Error(c, http.StatusNotFound, "NOT_FOUND", "Delivery not found")
 		return
 	}
-
-	// Get payment request for timeline
 	pr, _ := h.prService.GetByID(c.Request.Context(), delivery.PaymentRequestID)
 
 	resp := driverDeliveryToResponse(delivery)

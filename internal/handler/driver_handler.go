@@ -26,48 +26,31 @@ func (h *DriverHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 	driver := router.Group("/driver")
 	driver.Use(authMiddleware.RequireAuth())
 	{
-		// Profile management
 		driver.GET("/profile", h.GetProfile)
 		driver.POST("/profile", h.CreateProfile)
 		driver.PATCH("/profile", h.UpdateProfile)
-
-		// Online/Offline
 		driver.POST("/go-online", h.GoOnline)
 		driver.POST("/go-offline", h.GoOffline)
-
-		// Available deliveries (for direct accept mode)
 		driver.GET("/available-deliveries", h.GetAvailableDeliveries)
 		driver.POST("/deliveries/:id/accept", h.AcceptDelivery)
-
-		// Offer/Bid system
 		driver.POST("/deliveries/:id/offer", h.MakeOffer)
 		driver.GET("/offers", h.GetMyOffers)
 		driver.DELETE("/offers/:id", h.WithdrawOffer)
 		driver.POST("/offers/:id/accept-counter", h.AcceptCounterOffer)
 		driver.POST("/offers/:id/reject-counter", h.RejectCounterOffer)
-
-		// Current trip
 		driver.GET("/trip", h.GetCurrentTrip)
 		driver.GET("/trip/deliveries", h.GetTripDeliveries)
-
-		// Manual status updates (no GPS tracking)
 		driver.POST("/deliveries/:id/at-pickup", h.MarkAtPickup)
 		driver.POST("/deliveries/:id/pickup", h.VerifyPickupCode)
 		driver.POST("/trip/depart", h.MarkDeparted)
 		driver.POST("/trip/arrive", h.MarkArrived)
 		driver.POST("/deliveries/:id/dropoff", h.VerifyDropoffCode)
 		driver.POST("/deliveries/:id/buyer-unreachable", h.MarkBuyerUnreachable)
-
-		// History
 		driver.GET("/history", h.GetTripHistory)
 		driver.GET("/deliveries/history", h.GetDeliveryHistory)
 		driver.GET("/earnings", h.GetEarnings)
 	}
 }
-
-// ============================================
-// PROFILE MANAGEMENT
-// ============================================
 
 func (h *DriverHandler) GetProfile(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -129,10 +112,6 @@ func (h *DriverHandler) UpdateProfile(c *gin.Context) {
 	util.Success(c, http.StatusOK, driverProfileToResponse(profile))
 }
 
-// ============================================
-// ONLINE/OFFLINE
-// ============================================
-
 type GoOnlineRequest struct {
 	OriginCity      string `json:"origin_city" binding:"required"`
 	DestinationCity string `json:"destination_city" binding:"required"`
@@ -174,10 +153,6 @@ func (h *DriverHandler) GoOffline(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, gin.H{"message": "You are now offline"})
 }
-
-// ============================================
-// AVAILABLE DELIVERIES
-// ============================================
 
 func (h *DriverHandler) GetAvailableDeliveries(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -222,10 +197,6 @@ func (h *DriverHandler) AcceptDelivery(c *gin.Context) {
 	util.Success(c, http.StatusOK, driverDeliveryToResponse(delivery))
 }
 
-// ============================================
-// TRIP MANAGEMENT
-// ============================================
-
 func (h *DriverHandler) GetCurrentTrip(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -262,10 +233,6 @@ func (h *DriverHandler) GetTripDeliveries(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, responses)
 }
-
-// ============================================
-// MANUAL STATUS UPDATES
-// ============================================
 
 func (h *DriverHandler) MarkAtPickup(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -397,10 +364,6 @@ func (h *DriverHandler) MarkBuyerUnreachable(c *gin.Context) {
 	util.Success(c, http.StatusOK, gin.H{"message": "Buyer marked as unreachable. They have 24 hours to respond."})
 }
 
-// ============================================
-// HISTORY
-// ============================================
-
 func (h *DriverHandler) GetTripHistory(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -465,10 +428,6 @@ func (h *DriverHandler) GetEarnings(c *gin.Context) {
 	util.Success(c, http.StatusOK, earnings)
 }
 
-// ============================================
-// ERROR HANDLING
-// ============================================
-
 func (h *DriverHandler) handleError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, domain.ErrDriverProfileNotFound):
@@ -509,10 +468,6 @@ func (h *DriverHandler) handleError(c *gin.Context, err error) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "An error occurred")
 	}
 }
-
-// ============================================
-// RESPONSE TYPES
-// ============================================
 
 type DriverProfileResponse struct {
 	ID                  string  `json:"id"`
@@ -705,10 +660,6 @@ func driverParseIntParam(c *gin.Context, key string, defaultValue int) int {
 	return defaultValue
 }
 
-// ============================================
-// OFFER/BID SYSTEM
-// ============================================
-
 type MakeOfferRequest struct {
 	Amount float64 `json:"amount" binding:"required,gt=0"`
 	Note   string  `json:"note"`
@@ -878,10 +829,6 @@ func (h *DriverHandler) handleOfferError(c *gin.Context, err error) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "An error occurred")
 	}
 }
-
-// ============================================
-// OFFER RESPONSE TYPES
-// ============================================
 
 type DriverOfferResponse struct {
 	ID               string   `json:"id"`

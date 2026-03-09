@@ -6,7 +6,6 @@ const (
 	EventChargeCompleted   = "charge.completed"
 	EventTransferCompleted = "transfer.completed"
 	EventTransferFailed    = "transfer.failed"
-	// Payout Subaccount events
 	EventPayoutCredit              = "payout.credit"               // Bank transfer into PSA virtual account
 	EventVirtualAccountCredit      = "virtualaccount.credit"       // Alternative event name
 	EventPayoutSubaccountCredit    = "payout-subaccount.credit"    // Yet another variation
@@ -62,9 +61,6 @@ type TransferWebhookData struct {
 	Narration       string      `json:"narration"`
 	CompleteMessage string      `json:"complete_message"`
 }
-
-// PayoutCreditWebhookData represents the data for payout subaccount credit events
-// This is sent when bank transfer is made to a PSA virtual account (nuban)
 type PayoutCreditWebhookData struct {
 	ID               int64   `json:"id"`
 	AccountReference string  `json:"account_reference"` // PSA account reference
@@ -77,7 +73,6 @@ type PayoutCreditWebhookData struct {
 	SenderName       string  `json:"sender_name"`
 	SenderAccount    string  `json:"sender_account"`
 	CreatedAt        string  `json:"created_at"`
-	// Fields that might be present
 	AccountNumber string `json:"account_number"` // The nuban that received the transfer
 	BarterID      string `json:"barter_id"`
 }
@@ -98,8 +93,6 @@ func IsTransferEvent(eventType string) bool {
 func IsTransferSuccess(eventType string) bool {
 	return eventType == EventTransferCompleted
 }
-
-// IsPayoutCreditEvent checks if the event is a payout subaccount credit (bank transfer to virtual account)
 func IsPayoutCreditEvent(eventType string) bool {
 	switch eventType {
 	case EventPayoutCredit, EventVirtualAccountCredit, EventPayoutSubaccountCredit:

@@ -47,8 +47,6 @@ type AuditLog struct {
 	UserAgent  string          `json:"user_agent,omitempty"`
 	CreatedAt  time.Time       `json:"created_at"`
 }
-
-// NewAuditLog creates a new audit log entry
 func NewAuditLog(adminID uuid.UUID, action AuditAction, targetType AuditTargetType, targetID *uuid.UUID) *AuditLog {
 	return &AuditLog{
 		ID:         uuid.New(),
@@ -59,14 +57,10 @@ func NewAuditLog(adminID uuid.UUID, action AuditAction, targetType AuditTargetTy
 		CreatedAt:  time.Now(),
 	}
 }
-
-// WithDetails adds details to the audit log
 func (a *AuditLog) WithDetails(details map[string]any) *AuditLog {
 	a.Details = details
 	return a
 }
-
-// WithRequest adds IP address and user agent from the request
 func (a *AuditLog) WithRequest(ipAddress, userAgent string) *AuditLog {
 	a.IPAddress = ipAddress
 	a.UserAgent = userAgent

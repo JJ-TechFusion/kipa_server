@@ -34,8 +34,6 @@ func (h *WalletHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 		wallet.GET("/transactions", h.GetTransactions)
 		wallet.GET("/pending", h.GetPendingFunds)
 		wallet.POST("/withdraw", h.RequestWithdrawal)
-
-		// PIN management
 		wallet.GET("/pin/status", h.GetPinStatus)
 		wallet.POST("/pin", h.CreatePin)
 		wallet.POST("/pin/verify", h.VerifyPin)
@@ -56,15 +54,11 @@ func (h *WalletHandler) GetWallet(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Get pending escrow amounts
 	pendingEscrows, err := h.escrowService.GetPendingForUser(c.Request.Context(), userID, 1000, 0)
 	if err != nil {
 		h.handleError(c, err)
 		return
 	}
-
-	// Calculate pending amounts based on role
 	var pendingAsBuyer float64  // Money buyer paid, held in escrow (potential refund)
 	var pendingAsSeller float64 // Money seller will receive when escrow releases
 
@@ -75,8 +69,6 @@ func (h *WalletHandler) GetWallet(c *gin.Context) {
 			pendingAsSeller += escrow.ItemAmount
 		}
 	}
-
-	// Check if PIN is set
 	hasPin, _ := h.walletService.HasPin(c.Request.Context(), userID)
 
 	util.Success(c, http.StatusOK, WalletBalanceResponse{
@@ -308,10 +300,6 @@ func pendingEscrowToResponse(e *repository.PendingEscrowDetails) PendingFundResp
 
 	return resp
 }
-
-// ============================================
-// PIN Management Endpoints
-// ============================================
 
 type CreatePinRequest struct {
 	Pin string `json:"pin" binding:"required"`

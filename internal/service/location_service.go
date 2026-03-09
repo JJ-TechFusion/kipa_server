@@ -71,9 +71,6 @@ func NewLocationService(
 		logger:              logger,
 	}
 }
-
-// HandleLocationUpdate handles location updates from external sources (e.g. HTTP)
-// It checks rate limits, calculates ETA, saves to DB, AND broadcasts to WebSocket
 func (s *LocationServiceImpl) HandleLocationUpdate(ctx context.Context, riderID uuid.UUID, jobID string, lat, lng, heading, speed float64) {
 	etaResult := s.RecordLocation(ctx, riderID, jobID, lat, lng, heading, speed)
 
@@ -95,9 +92,6 @@ func (s *LocationServiceImpl) HandleLocationUpdate(ctx context.Context, riderID 
 		s.broadcaster.BroadcastToJob(jobID, location)
 	}
 }
-
-// RecordLocation handles location logic: rate limiting, ETA calculation, and DB storage
-// This is called by HandleLocationUpdate (HTTP) and directly by the WebSocket Hub (to avoid loops)
 func (s *LocationServiceImpl) RecordLocation(ctx context.Context, riderID uuid.UUID, jobID string, lat, lng, heading, speed float64) *LocationETAResult {
 	clientKey := riderID.String()
 	s.rateMu.Lock()
@@ -112,8 +106,6 @@ func (s *LocationServiceImpl) RecordLocation(ctx context.Context, riderID uuid.U
 	if err != nil {
 		return nil
 	}
-
-	// Auto-update job status based on movement
 	s.autoUpdateJobStatus(ctx, jobUUID, jobID, speed)
 
 	var etaMinutes *int
@@ -129,14 +121,11 @@ func (s *LocationServiceImpl) RecordLocation(ctx context.Context, riderID uuid.U
 		s.etaMu.Unlock()
 
 		if shouldCalc {
-			// Get job to determine which destination to use for ETA
 			job, err := s.deliveryJobRepo.GetByID(ctx, jobUUID)
 			if err == nil && job != nil {
 				coords, err := s.deliveryJobRepo.GetJobCoordinates(ctx, jobUUID)
 				if err == nil && coords != nil {
 					var destLat, destLng float64
-					// Before pickup: ETA to pickup location
-					// After pickup: ETA to dropoff location
 					if job.Status == domain.DJStatusAccepted || job.Status == domain.DJStatusEnRoutePickup {
 						destLat, destLng = coords.PickupLat, coords.PickupLng
 					} else {
@@ -171,14 +160,9 @@ func (s *LocationServiceImpl) CleanupOldLocations(ctx context.Context, olderThan
 	before := time.Now().AddDate(0, 0, -olderThanDays)
 	return s.locationHistoryRepo.DeleteOlderThan(ctx, before)
 }
-
-// autoUpdateJobStatus automatically transitions job status based on rider movement
-// - accepted → en_route_pickup when rider starts moving (speed > 5 km/h)
-// - picked_up → in_transit when rider starts moving after pickup
 const minMovingSpeedKmh = 5.0
 
 func (s *LocationServiceImpl) autoUpdateJobStatus(ctx context.Context, jobUUID uuid.UUID, jobID string, speed float64) {
-	// Only trigger status change if rider is actually moving
 	if speed < minMovingSpeedKmh {
 		return
 	}
@@ -198,8 +182,6 @@ func (s *LocationServiceImpl) autoUpdateJobStatus(ctx context.Context, jobUUID u
 	default:
 		return // No auto-transition needed
 	}
-
-	// Update the job status
 	if err := s.deliveryJobRepo.UpdateStatus(ctx, jobUUID, newStatus); err != nil {
 		s.logger.Warn("failed to auto-update job status",
 			zap.String("job_id", jobID),
@@ -215,8 +197,6 @@ func (s *LocationServiceImpl) autoUpdateJobStatus(ctx context.Context, jobUUID u
 		zap.String("new_status", string(newStatus)),
 		zap.Float64("speed_kmh", speed),
 	)
-
-	// Broadcast the status change
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastJobStatus(jobID, string(newStatus))
 	}

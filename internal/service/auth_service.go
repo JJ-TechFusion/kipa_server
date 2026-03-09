@@ -105,11 +105,7 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 		zap.String("phone", req.PhoneNumber),
 		zap.String("status", result.Status),
 	)
-
-	// Generate idempotency key for the client to use during verification
 	idempotencyKey := uuid.New().String() + uuid.New().String()[:8]
-
-	// Use phone number as verification ID since Twilio manages the verification
 	return &dto.SendOTPResponse{
 		VerificationID: req.PhoneNumber,
 		IdempotencyKey: idempotencyKey,
@@ -119,10 +115,7 @@ func (s *AuthServiceImpl) SendOTP(ctx context.Context, req *dto.SendOTPRequest, 
 }
 
 func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPRequest, ipAddress, userAgent string) (*dto.SendOTPResponse, error) {
-	// Normalize phone number to handle variations like +23408... → +2348...
 	req.PhoneNumber = util.NormalizePhoneNumber(req.PhoneNumber)
-
-	// Check resend cooldown
 	lastSent, err := s.sessionRepo.GetLastOTPSentTime(ctx, req.PhoneNumber)
 	if err != nil {
 		s.logger.Error("failed to check last OTP sent time", zap.Error(err))
@@ -140,8 +133,6 @@ func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPReque
 			return nil, domain.ErrOTPResendCooldown
 		}
 	}
-
-	// Check overall rate limit
 	count, err := s.sessionRepo.GetRateLimitCount(ctx, req.PhoneNumber)
 	if err != nil {
 		s.logger.Error("failed to check rate limit", zap.Error(err))
@@ -155,8 +146,6 @@ func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPReque
 		)
 		return nil, domain.ErrOTPRateLimitExceeded
 	}
-
-	// Send verification via Twilio Verify
 	result, err := s.verifyProvider.SendVerification(ctx, req.PhoneNumber, "sms")
 	if err != nil || !result.Success {
 		s.logger.Error("failed to resend verification",
@@ -165,13 +154,9 @@ func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPReque
 		)
 		return nil, domain.ErrSMSDeliveryFailed
 	}
-
-	// Increment rate limit
 	if err := s.sessionRepo.IncrementRateLimitCount(ctx, req.PhoneNumber, s.config.OTP.RateLimitWindow); err != nil {
 		s.logger.Error("failed to increment rate limit", zap.Error(err))
 	}
-
-	// Update last OTP sent time
 	if err := s.sessionRepo.SetLastOTPSentTime(ctx, req.PhoneNumber, s.config.OTP.ResendCooldown); err != nil {
 		s.logger.Error("failed to set last OTP sent time", zap.Error(err))
 	}
@@ -180,8 +165,6 @@ func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPReque
 		zap.String("phone", req.PhoneNumber),
 		zap.String("status", result.Status),
 	)
-
-	// Generate new idempotency key for the resend
 	idempotencyKey := uuid.New().String() + uuid.New().String()[:8]
 
 	return &dto.SendOTPResponse{
@@ -193,10 +176,7 @@ func (s *AuthServiceImpl) ResendOTP(ctx context.Context, req *dto.ResendOTPReque
 }
 
 func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPRequest, ipAddress, userAgent string) (*dto.VerifyOTPResponse, error) {
-	// Normalize phone number to handle variations like +23408... → +2348...
 	req.PhoneNumber = util.NormalizePhoneNumber(req.PhoneNumber)
-
-	// Check idempotency
 	exists, err := s.idempotencyRepo.Exists(ctx, req.IdempotencyKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check idempotency: %w", err)
@@ -207,8 +187,6 @@ func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPReque
 		)
 		return nil, domain.ErrIdempotencyKeyExists
 	}
-
-	// Verify code with Twilio Verify
 	result, err := s.verifyProvider.CheckVerification(ctx, req.PhoneNumber, req.OTPCode)
 	if err != nil {
 		s.logger.Error("verification check failed",
@@ -479,12 +457,9 @@ func userToResponse(user *domain.User) dto.UserResponse {
 }
 
 func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevTokenRequest) (*dto.VerifyOTPResponse, error) {
-	// Only allow in development environment
 	if s.config.Server.Environment != "development" {
 		return nil, domain.ErrUnauthorized
 	}
-
-	// Check if user exists
 	existingUser, err := s.userRepo.GetByPhoneNumber(ctx, req.PhoneNumber)
 	if err != nil && !errors.Is(err, domain.ErrUserNotFound) {
 		return nil, err
@@ -492,7 +467,6 @@ func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevToke
 
 	var user *domain.User
 	if existingUser != nil {
-		// User exists, update their role if needed
 		user = existingUser
 		switch req.Role {
 		case "buyer":
@@ -504,8 +478,6 @@ func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevToke
 		case "admin":
 			user.IsAdmin = true
 		}
-		
-		// Update first and last name
 		user.FirstName = &req.FirstName
 		user.LastName = &req.LastName
 		
@@ -513,7 +485,6 @@ func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevToke
 			return nil, err
 		}
 	} else {
-		// Create new user
 		user = &domain.User{
 			ID:            uuid.New(),
 			PhoneNumber:   req.PhoneNumber,
@@ -523,8 +494,6 @@ func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevToke
 			CreatedAt:     time.Now(),
 			UpdatedAt:     time.Now(),
 		}
-
-		// Set role
 		switch req.Role {
 		case "buyer":
 			user.IsBuyer = true
@@ -540,8 +509,6 @@ func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevToke
 			return nil, err
 		}
 	}
-
-	// Generate tokens
 	accessToken, accessExpiresAt, err := s.jwtManager.GenerateAccessToken(user.ID, user.PhoneNumber)
 	if err != nil {
 		return nil, err
@@ -551,8 +518,6 @@ func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevToke
 	if err != nil {
 		return nil, err
 	}
-
-	// Store refresh token
 	session := &domain.Session{
 		UserID:       user.ID,
 		DeviceID:     "dev-session", // Default device ID for dev
@@ -584,7 +549,6 @@ func generateRequestHash(phoneNumber, verificationID, otpCode string) string {
 }
 
 func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
-	// Check for active escrows
 	hasActiveEscrows, err := s.escrowRepo.HasActiveByUserID(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to check active escrows", zap.Error(err))
@@ -593,8 +557,6 @@ func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID) e
 	if hasActiveEscrows {
 		return domain.ErrActiveEscrowsExist
 	}
-
-	// Check for active delivery jobs (as rider)
 	hasActiveDeliveries, err := s.deliveryJobRepo.HasActiveByRiderUserID(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to check active deliveries", zap.Error(err))
@@ -603,8 +565,6 @@ func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID) e
 	if hasActiveDeliveries {
 		return domain.ErrActiveDeliveriesExist
 	}
-
-	// Check wallet balance
 	wallet, err := s.walletRepo.GetByUserID(ctx, userID)
 	if err != nil && !errors.Is(err, domain.ErrWalletNotFound) {
 		s.logger.Error("failed to get wallet", zap.Error(err))
@@ -613,17 +573,12 @@ func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID) e
 	if wallet != nil && (wallet.AvailableBalance > 0 || wallet.LockedBalance > 0) {
 		return domain.ErrWalletBalanceNotZero
 	}
-
-	// Soft delete user (anonymize PII, suspend account)
 	if err := s.userRepo.SoftDelete(ctx, userID); err != nil {
 		s.logger.Error("failed to soft delete user", zap.Error(err))
 		return fmt.Errorf("failed to delete account: %w", err)
 	}
-
-	// Invalidate all sessions
 	if err := s.sessionRepo.DeleteAllForUser(ctx, userID); err != nil {
 		s.logger.Error("failed to delete sessions", zap.Error(err))
-		// Don't fail the deletion for this
 	}
 
 	s.logger.Info("user account deleted",

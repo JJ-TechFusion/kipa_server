@@ -52,20 +52,13 @@ type PaymentRequestService interface {
 	MarkDelivered(ctx context.Context, prID uuid.UUID) error
 
 	MarkCompleted(ctx context.Context, prID uuid.UUID) error
-
-	// Rebook delivery after buyer unavailability
 	RebookDelivery(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error)
 	GetRebookStatus(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID) (*RebookStatusResponse, error)
-
-	// Admin rebook on buyer's behalf
 	AdminRebookDelivery(ctx context.Context, prID uuid.UUID, adminID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error)
-
-	// DuplicateAsDraft creates a new draft from a reusable payment request (for next buyer)
 	DuplicateAsDraft(ctx context.Context, prID uuid.UUID) (*domain.PaymentRequest, error)
 }
 
 type RebookDeliveryRequest struct {
-	// No fields required - rider resumes delivery to same address
 }
 
 type RebookStatusResponse struct {
@@ -148,7 +141,6 @@ func (s *PaymentRequestServiceImpl) CreateDraft(ctx context.Context, sellerID uu
 			return nil, fmt.Errorf("failed to marshal item images: %w", err)
 		}
 	} else {
-		// Default to empty array for JSONB column
 		itemImagesJSON = []byte("[]")
 	}
 	var itemDescription *string
@@ -236,8 +228,6 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 		pr.DropoffLat = *req.DropoffLat
 		pr.DropoffLng = *req.DropoffLng
 	}
-
-	// Validate state fields for inter-state delivery
 	if req.DeliveryType == domain.DeliveryTypeInterState {
 		if req.PickupState == "" || req.DropoffState == "" {
 			return nil, domain.ErrMissingInterStateFields
@@ -277,7 +267,6 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 			pr.EstimatedDeliveryFee = &estimate.TotalFee
 		}
 	} else if req.DeliveryType == domain.DeliveryTypeInterState {
-		// Inter-state: Fee determined by driver bidding, no estimate provided
 		s.logger.Info("inter-state delivery: fee to be determined by driver bidding")
 		pr.EstimatedDeliveryFee = nil
 	} else {
@@ -327,8 +316,6 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 		zap.String("pr_id", pr.ID.String()),
 		zap.String("payment_code", paymentCode),
 	)
-
-	// For reusable requests, duplicate as draft for next buyer
 	if pr.IsReusable {
 		duplicate, err := s.DuplicateAsDraft(ctx, pr.ID)
 		if err != nil {
@@ -434,8 +421,6 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 		if pr.EstimatedDeliveryFee != nil {
 			deliveryFee = *pr.EstimatedDeliveryFee
 		}
-
-		// Calculate distance and duration for the job
 		var distanceKM *float64
 		var estimatedMinutes *int
 		if pr.PickupLat != 0 && pr.DropoffLat != 0 {
@@ -445,8 +430,6 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 				estimatedMinutes = &estimate.DurationMinutes
 			}
 		}
-
-		// Set search timeout (default 3 minutes)
 		searchTimeoutMins := 3
 		if s.config != nil && s.config.Worker.RiderSearchTimeoutMins > 0 {
 			searchTimeoutMins = s.config.Worker.RiderSearchTimeoutMins
@@ -517,13 +500,9 @@ func (s *PaymentRequestServiceImpl) CancelRiderSearch(ctx context.Context, prID 
 	if pr.SellerID != sellerID {
 		return nil, domain.ErrUnauthorized
 	}
-
-	// Only allow cancellation when searching for rider
 	if pr.Status != domain.PRStatusSearchingRider {
 		return nil, fmt.Errorf("%w: can only cancel search when status is searching_rider", domain.ErrInvalidStatusTransition)
 	}
-
-	// Cancel the delivery job
 	if pr.DeliveryJobID != nil {
 		job, err := s.deliveryJobRepo.GetByID(ctx, *pr.DeliveryJobID)
 		if err != nil {
@@ -545,8 +524,6 @@ func (s *PaymentRequestServiceImpl) CancelRiderSearch(ctx context.Context, prID 
 			)
 		}
 	}
-
-	// Revert payment request status back to paid_awaiting_fulfillment
 	oldStatus := pr.Status
 	pr.Status = domain.PRStatusPaidAwaitingFulfillment
 	pr.ReadyForPickupAt = nil
@@ -704,9 +681,6 @@ func (s *PaymentRequestServiceImpl) recordEvent(ctx context.Context, prID uuid.U
 		)
 	}
 }
-
-// RebookDelivery handles buyer/admin rebooking delivery after unavailability
-// This resumes the SAME delivery job (rider still has item) rather than creating a new one
 func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error) {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -724,13 +698,9 @@ func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uui
 	if pr.RebookDeadline != nil && time.Now().After(*pr.RebookDeadline) {
 		return nil, fmt.Errorf("rebook deadline has passed")
 	}
-
-	// Check max rebook attempts (limit to 1 rebook)
 	if pr.RebookAttempts >= 1 {
 		return nil, fmt.Errorf("maximum rebook attempts reached")
 	}
-
-	// Get current delivery job (rider still has item)
 	if pr.DeliveryJobID == nil {
 		return nil, fmt.Errorf("no active delivery job found")
 	}
@@ -739,13 +709,9 @@ func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uui
 	if err != nil {
 		return nil, fmt.Errorf("failed to get delivery job: %w", err)
 	}
-
-	// Verify job is in buyer_unavailable status
 	if job.Status != domain.DJStatusBuyerUnavailable {
 		return nil, fmt.Errorf("delivery job is not in buyer_unavailable status, current: %s", job.Status)
 	}
-
-	// Resume delivery - set back to in_transit (same address, rider continues)
 	job.Status = domain.DJStatusInTransit
 
 	if err := s.deliveryJobRepo.UpdateStatus(ctx, job.ID, domain.DJStatusInTransit); err != nil {
@@ -755,8 +721,6 @@ func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uui
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusInTransit))
 	}
-
-	// Update payment request
 	oldStatus := pr.Status
 	pr.Status = domain.PRStatusInDelivery
 	pr.RebookAttempts++
@@ -779,8 +743,6 @@ func (s *PaymentRequestServiceImpl) RebookDelivery(ctx context.Context, prID uui
 
 	return job, nil
 }
-
-// GetRebookStatus returns the rebook status for a payment request
 func (s *PaymentRequestServiceImpl) GetRebookStatus(ctx context.Context, prID uuid.UUID, buyerID uuid.UUID) (*RebookStatusResponse, error) {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -810,9 +772,6 @@ func (s *PaymentRequestServiceImpl) GetRebookStatus(ctx context.Context, prID uu
 
 	return resp, nil
 }
-
-// AdminRebookDelivery handles admin rebooking delivery on buyer's behalf
-// This resumes the SAME delivery job (rider still has item) rather than creating a new one
 func (s *PaymentRequestServiceImpl) AdminRebookDelivery(ctx context.Context, prID uuid.UUID, adminID uuid.UUID, req *RebookDeliveryRequest) (*domain.DeliveryJob, error) {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -822,14 +781,9 @@ func (s *PaymentRequestServiceImpl) AdminRebookDelivery(ctx context.Context, prI
 	if pr.Status != domain.PRStatusPendingRebook {
 		return nil, fmt.Errorf("payment request is not in pending_rebook status")
 	}
-
-	// Admin can rebook even after deadline passed (within reason)
-	// Check max rebook attempts (limit to 1 rebook)
 	if pr.RebookAttempts >= 1 {
 		return nil, fmt.Errorf("maximum rebook attempts reached")
 	}
-
-	// Get current delivery job (rider still has item)
 	if pr.DeliveryJobID == nil {
 		return nil, fmt.Errorf("no active delivery job found")
 	}
@@ -838,13 +792,9 @@ func (s *PaymentRequestServiceImpl) AdminRebookDelivery(ctx context.Context, prI
 	if err != nil {
 		return nil, fmt.Errorf("failed to get delivery job: %w", err)
 	}
-
-	// Verify job is in buyer_unavailable status
 	if job.Status != domain.DJStatusBuyerUnavailable {
 		return nil, fmt.Errorf("delivery job is not in buyer_unavailable status, current: %s", job.Status)
 	}
-
-	// Resume delivery - set back to in_transit (same address, rider continues)
 	if err := s.deliveryJobRepo.UpdateStatus(ctx, job.ID, domain.DJStatusInTransit); err != nil {
 		return nil, fmt.Errorf("failed to update delivery job: %w", err)
 	}
@@ -852,8 +802,6 @@ func (s *PaymentRequestServiceImpl) AdminRebookDelivery(ctx context.Context, prI
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusInTransit))
 	}
-
-	// Update payment request
 	oldStatus := pr.Status
 	pr.Status = domain.PRStatusInDelivery
 	pr.RebookAttempts++
@@ -875,14 +823,9 @@ func (s *PaymentRequestServiceImpl) AdminRebookDelivery(ctx context.Context, prI
 		zap.String("admin_id", adminID.String()),
 		zap.Int("rebook_attempt", pr.RebookAttempts),
 	)
-
-	// Refresh job to return updated status
 	job.Status = domain.DJStatusInTransit
 	return job, nil
 }
-
-// DuplicateAsDraft creates a new draft from a reusable payment request
-// This is called after successful fulfillment configuration so seller can use it for another buyer
 func (s *PaymentRequestServiceImpl) DuplicateAsDraft(ctx context.Context, prID uuid.UUID) (*domain.PaymentRequest, error) {
 	original, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
@@ -892,8 +835,6 @@ func (s *PaymentRequestServiceImpl) DuplicateAsDraft(ctx context.Context, prID u
 	if !original.IsReusable {
 		return nil, fmt.Errorf("cannot duplicate non-reusable payment request")
 	}
-
-	// Create new draft with only item details (no buyer-specific or fulfillment data)
 	duplicate := &domain.PaymentRequest{
 		SellerID:            original.SellerID,
 		ItemName:            original.ItemName,

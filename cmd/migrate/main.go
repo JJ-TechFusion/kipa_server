@@ -40,8 +40,6 @@ func main() {
 		databaseURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
 			user, password, host, port, dbname, sslmode)
 	}
-
-	// Create migrate instance
 	m, err := migrate.New(
 		fmt.Sprintf("file://%s", migrationsPath),
 		databaseURL,
@@ -50,8 +48,6 @@ func main() {
 		log.Fatalf("Failed to create migrate instance: %v", err)
 	}
 	defer m.Close()
-
-	// Execute commands
 	switch command {
 	case "up":
 		if steps > 0 {

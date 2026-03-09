@@ -33,13 +33,10 @@ import (
 )
 
 func main() {
-	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
-
-	// Initialize logger
 	var logger *zap.Logger
 	if cfg.Server.Environment == "production" {
 		logger, err = zap.NewProduction()
@@ -50,8 +47,6 @@ func main() {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.Sync()
-
-	// Initialize database clients
 	pgClient, err := database.NewPostgresClient(&cfg.Database)
 	if err != nil {
 		logger.Fatal("Failed to connect to PostgreSQL", zap.Error(err))
@@ -63,15 +58,11 @@ func main() {
 		logger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 	defer redisClient.Close()
-
-	// Initialize repositories
 	userRepo := postgres.NewUserRepo(pgClient.DB)
 	otpRepo := postgres.NewOTPRepo(pgClient.DB)
 	idempotencyRepo := postgres.NewIdempotencyRepo(pgClient.DB)
 	sessionRepo := redisrepo.NewSessionRepo(redisClient.Client, cfg.JWT.RefreshTokenExpiry)
 	riderLocationRepo := redisrepo.NewRiderLocationRepo(redisClient.Client)
-
-	// New repositories for platform features
 	walletRepo := postgres.NewWalletRepo(pgClient.DB)
 	walletTxRepo := postgres.NewWalletTransactionRepo(pgClient.DB)
 	prRepo := postgres.NewPaymentRequestRepo(pgClient.DB)
@@ -82,57 +73,33 @@ func main() {
 	riderJobOfferRepo := postgres.NewRiderJobOfferRepo(pgClient.DB)
 	deliveryZoneRepo := postgres.NewDeliveryZoneRepo(pgClient.DB)
 	platformSettingsRepo := postgres.NewPlatformSettingsRepo(pgClient.DB)
-
-	// Bank/wallet funding repositories
 	bankAccountRepo := postgres.NewBankAccountRepo(pgClient.DB)
 	virtualAccountRepo := postgres.NewVirtualAccountRepo(pgClient.DB)
 	withdrawalRepo := postgres.NewWithdrawalRepo(pgClient.DB)
 	topUpRepo := postgres.NewTopUpRepo(pgClient.DB)
 	flwVirtualAccountRepo := postgres.NewFlutterwaveVirtualAccountRepo(pgClient.DB)
-
-	// Order repository
 	orderRepo := postgres.NewOrderRepo(pgClient.DB)
-
-	// Commission repositories
 	riderCommissionRepo := postgres.NewRiderCommissionRepo(pgClient.DB)
 	commissionPaymentRepo := postgres.NewCommissionPaymentRepo(pgClient.DB)
-
-	// Errand repository
 	errandRepo := postgres.NewErrandRepo(pgClient.DB)
-
-	// Driver repositories (inter-state delivery)
 	driverProfileRepo := postgres.NewDriverProfileRepo(pgClient.DB)
 	driverTripRepo := postgres.NewDriverTripRepo(pgClient.DB)
 	driverDeliveryRepo := postgres.NewDriverDeliveryRepo(pgClient.DB)
 	driverDeliveryEventRepo := postgres.NewDriverDeliveryEventRepo(pgClient.DB)
 	driverOfferRepo := postgres.NewDriverOfferRepo(pgClient.DB)
-
-	// Notification repositories
 	deviceTokenRepo := postgres.NewDeviceTokenRepo(pgClient.DB)
 	notificationLogRepo := postgres.NewNotificationLogRepo(pgClient.DB)
 	chatRepo := postgres.NewChatMessageRepo(pgClient.DB)
-
-	// Initialize utilities
 	hasher := util.NewBcryptHasher(cfg.OTP.BcryptCost)
 	otpGenerator := util.NewSecureOTPGenerator()
 	jwtManager := util.NewJWTManager(&cfg.JWT)
-
-	// Initialize Twilio Verify provider
 	verifyProvider := sms.NewTwilioVerifyClient(&cfg.Twilio, logger)
-
-	// Initialize Paystack client
 	paystackClient := paystack.NewClient(&cfg.Paystack, logger)
-
-	// Initialize Flutterwave client
 	flutterwaveClient := flutterwave.NewClient(&cfg.Flutterwave, logger)
-
-	// Initialize S3 storage client
 	s3Client, err := storage.NewS3Client(&cfg.S3)
 	if err != nil {
 		logger.Warn("Failed to initialize S3 client, uploads will be disabled", zap.Error(err))
 	}
-
-	// Initialize FCM client (optional - if credentials not available, notifications will be logged only)
 	var fcmClient *fcm.Client
 	if cfg.Firebase.CredentialsPath != "" {
 		fcmClient, err = fcm.NewClient(cfg.Firebase.CredentialsPath, logger)
@@ -142,8 +109,6 @@ func main() {
 	} else {
 		logger.Info("FCM credentials not configured, push notifications disabled")
 	}
-
-	// Initialize services
 	authService := service.NewAuthService(
 		userRepo,
 		otpRepo,
@@ -159,31 +124,21 @@ func main() {
 		cfg,
 		logger,
 	)
-
-	// Initialize Google Maps client for fee calculation and ETA
 	var mapsClient maps.MapsClient
 	if cfg.GoogleMaps.APIKey != "" {
 		mapsClient = maps.NewGoogleMapsClient(&maps.Config{
 			APIKey: cfg.GoogleMaps.APIKey,
 		}, logger)
 	}
-
-	// Fee calculator service (uses Google Maps for road distance + DB settings)
 	feeCalculator := service.NewFeeCalculatorService(deliveryZoneRepo, platformSettingsRepo, mapsClient, cfg, logger)
-
-	// WebSocket hub (created early as many services need it for broadcasting)
 	wsHub := websocket.NewHub(logger)
 	go wsHub.Run()
-
-	// Notification service (created early as many services need it)
 	notificationService := service.NewNotificationService(
 		fcmClient,
 		deviceTokenRepo,
 		notificationLogRepo,
 		logger,
 	)
-
-	// Wallet funding service
 	walletFundingConfig := service.WalletFundingConfig{
 		MinTopUpAmount:      100,  // ₦100 minimum
 		MinWithdrawalAmount: 1000, // ₦1000 minimum
@@ -205,11 +160,7 @@ func main() {
 		walletFundingConfig,
 		logger,
 	)
-
-	// Payment request service
 	prService := service.NewPaymentRequestService(prRepo, prEventRepo, userRepo, deliveryJobRepo, feeCalculator, wsHub, cfg, logger)
-
-	// Wallet service
 	walletService := service.NewWalletService(
 		walletRepo,
 		walletTxRepo,
@@ -220,19 +171,11 @@ func main() {
 		cfg,
 		logger,
 	)
-
-	// Escrow service
 	escrowService := service.NewEscrowService(escrowRepo, walletService, feeCalculator, cfg, logger)
-
-	// Logistics delivery repositories (needed for order service)
 	logisticsDeliveryRepo := postgres.NewLogisticsDeliveryRepo(pgClient.DB)
 	logisticsEventRepo := postgres.NewLogisticsDeliveryEventRepo(pgClient.DB)
 	logisticsEvidenceRepo := postgres.NewLogisticsEvidenceRepo(pgClient.DB)
-
-	// Dispute repository (needed for logistics service)
 	disputeRepo := postgres.NewDisputeRepo(pgClient.DB)
-
-	// Logistics delivery service (must be created before order service)
 	logisticsService := service.NewLogisticsDeliveryService(
 		logisticsDeliveryRepo,
 		logisticsEventRepo,
@@ -246,8 +189,6 @@ func main() {
 		cfg,
 		logger,
 	)
-
-	// Order service (for payment processing)
 	orderService := service.NewOrderService(
 		orderRepo,
 		prRepo,
@@ -261,8 +202,6 @@ func main() {
 		cfg,
 		logger,
 	)
-
-	// Commission service
 	commissionService := service.NewRiderCommissionService(
 		riderCommissionRepo,
 		commissionPaymentRepo,
@@ -270,8 +209,6 @@ func main() {
 		walletService,
 		logger,
 	)
-
-	// Errand service
 	errandService := service.NewErrandService(
 		errandRepo,
 		deliveryJobRepo,
@@ -282,8 +219,6 @@ func main() {
 		notificationService,
 		logger,
 	)
-
-	// Location service handles location updates, ETA, and storage
 	locationHistoryRepo := postgres.NewLocationHistoryRepo(pgClient.DB)
 	djRepo := deliveryJobRepo.(*postgres.DeliveryJobRepo)
 
@@ -298,14 +233,7 @@ func main() {
 		},
 		logger,
 	)
-
-	// Upload service
 	uploadService := service.NewUploadService(s3Client, logger)
-
-	// Notification service
-
-
-	// Rider service (needs notification service and broadcaster)
 	riderService := service.NewRiderService(
 		riderProfileRepo,
 		deliveryJobRepo,
@@ -323,8 +251,6 @@ func main() {
 		logger,
 		cfg,
 	)
-
-	// Chat service
 	chatService := service.NewChatService(
 		chatRepo,
 		deliveryJobRepo,
@@ -335,8 +261,6 @@ func main() {
 		notificationService,
 		logger,
 	)
-
-	// Driver service (inter-state delivery)
 	driverService := service.NewDriverService(
 		driverProfileRepo,
 		driverTripRepo,
@@ -350,11 +274,7 @@ func main() {
 		cfg,
 		logger,
 	)
-
-	// Audit log repository
 	auditLogRepo := postgres.NewAuditLogRepo(pgClient.DB)
-
-	// Admin service
 	adminService := service.NewAdminService(
 		userRepo,
 		riderProfileRepo,
@@ -370,8 +290,6 @@ func main() {
 		notificationService,
 		logger,
 	)
-
-	// Dispute resolution service (for both intra-state and inter-state returns)
 	disputeResolutionService := service.NewDisputeResolutionService(
 		disputeRepo,
 		escrowRepo,
@@ -385,8 +303,6 @@ func main() {
 		cfg,
 		logger,
 	)
-
-	// Dispute service (for buyer/seller dispute listing)
 	disputeService := service.NewDisputeService(
 		disputeRepo,
 		escrowRepo,
@@ -394,13 +310,9 @@ func main() {
 		prRepo,
 		logger,
 	)
-
-	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	adminMiddleware := middleware.NewAdminMiddleware(userRepo)
-
-	// New handlers for platform features
 	prHandler := handler.NewPaymentRequestHandler(prService)
 	transactionHandler := handler.NewTransactionHandler(prService, orderService, userRepo, deliveryJobRepo)
 	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeRepo, disputeResolutionService, driverService)
@@ -426,8 +338,6 @@ func main() {
 	chatHandler := handler.NewChatHandler(chatService, logger)
 	logisticsHandler := handler.NewLogisticsHandler(logisticsService)
 	driverHandler := handler.NewDriverHandler(driverService)
-
-	// Setup Gin router
 	if cfg.Server.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -435,16 +345,10 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(gin.Logger())
-
-	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-
-	// API v1 routes
 	v1 := router.Group("/api/v1")
-
-	// Register all handlers
 	authHandler.RegisterRoutes(v1, authMiddleware)
 	prHandler.RegisterRoutes(v1, authMiddleware)
 	transactionHandler.RegisterRoutes(v1, authMiddleware)
@@ -462,17 +366,9 @@ func main() {
 	chatHandler.RegisterRoutes(v1, authMiddleware)
 	logisticsHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 	driverHandler.RegisterRoutes(v1, authMiddleware)
-
-	// Notification routes (authenticated users)
 	usersRoutes := v1.Group("/users")
 	usersRoutes.Use(authMiddleware.RequireAuth())
 	notificationHandler.RegisterRoutes(usersRoutes)
-
-
-
-
-
-	// Set up WebSocket location handler
 	wsHub.SetLocationHandler(func(riderID uuid.UUID, jobID string, lat, lng, heading, speed float64) {
 		locationService.HandleLocationUpdate(context.Background(), riderID, jobID, lat, lng, heading, speed)
 	})
@@ -498,12 +394,8 @@ func main() {
 
 	wsHandler := websocket.NewHandler(wsHub, authService, logger)
 	wsHandler.RegisterRoutes(v1)
-
-	// Tracking handler for REST-based location queries
 	trackingHandler := handler.NewTrackingHandler(deliveryJobRepo, locationHistoryRepo, errandRepo, riderProfileRepo, userRepo)
 	trackingHandler.RegisterRoutes(v1, authMiddleware)
-
-	// Start API background jobs (jobs that need WebSocket access)
 	riderLocationAdapter := worker.NewRiderLocationAdapter(riderLocationRepo)
 	apiJobRunner := worker.NewAPIJobRunner(
 		deliveryJobRepo,
@@ -513,16 +405,12 @@ func main() {
 	)
 	apiJobCtx, apiJobCancel := context.WithCancel(context.Background())
 	apiJobRunner.Start(apiJobCtx)
-
-	// Create HTTP server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
-
-	// Start server in goroutine
 	go func() {
 		logger.Info("Starting server",
 			zap.String("port", cfg.Server.Port),
@@ -532,19 +420,13 @@ func main() {
 			logger.Fatal("Failed to start server", zap.Error(err))
 		}
 	}()
-
-	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.Info("Shutting down server...")
-
-	// Stop API background jobs
 	apiJobCancel()
 	apiJobRunner.Stop()
-
-	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

@@ -36,8 +36,6 @@
 DJStatusBuyerUnavailable    = "buyer_unavailable"
 DJStatusForcedReturn        = "forced_return"
 DJStatusForcedReturnDone    = "forced_return_done"
-
-// New fields
 IsForcedReturn      bool       `db:"is_forced_return"`
 UnavailableMarkedAt *time.Time `db:"unavailable_marked_at"`
 ```
@@ -46,8 +44,6 @@ UnavailableMarkedAt *time.Time `db:"unavailable_marked_at"`
 ```go
 PRStatusPendingRebook       = "pending_rebook"
 PRStatusRebookExpired       = "rebook_expired"
-
-// New fields
 RebookDeadline      *time.Time `db:"rebook_deadline"`
 RebookAttempts      int        `db:"rebook_attempts"`
 UnavailabilityFee   *float64   `db:"unavailability_fee"` // 5% penalty

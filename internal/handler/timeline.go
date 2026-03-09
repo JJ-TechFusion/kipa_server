@@ -85,8 +85,6 @@ func BuildTimelineWithReturn(
 	} else {
 		steps, currentStep = appendSimpleSteps(steps, currentStep, viewType, order)
 	}
-
-	// Determine phase
 	phase := "delivery"
 	if pr.Status.IsReturnFlow() || (pr.Status == domain.PRStatusRefunded && returnJob != nil) {
 		phase = "return"
@@ -100,18 +98,13 @@ func BuildTimelineWithReturn(
 		DeliveryType: string(pr.DeliveryType),
 		Phase:        phase,
 	}
-
-	// Set codes based on phase
 	if phase == "return" && returnJob != nil && returnJob.RiderID != nil {
-		// In return phase: roles are reversed
-		// Buyer is at pickup (gets pickup code), Seller is at dropoff (gets dropoff code)
 		if viewType == TimelineViewBuyer {
 			resp.PickupCode = returnJob.PickupCode
 		} else {
 			resp.DropoffCode = returnJob.DropoffCode
 		}
 	} else if job != nil && job.RiderID != nil {
-		// Normal delivery phase
 		if viewType == TimelineViewSeller {
 			resp.PickupCode = job.PickupCode
 		} else {
@@ -131,29 +124,19 @@ func appendDeliveryStepsWithReturn(
 	job *domain.DeliveryJob,
 	returnJob *domain.DeliveryJob,
 ) ([]TimelineStep, string) {
-	// Check if we're in rebook flow (buyer unavailable)
 	isRebookFlow := pr.Status == domain.PRStatusPendingRebook || pr.Status == domain.PRStatusRebookExpired ||
 		(job != nil && (job.Status == domain.DJStatusBuyerUnavailable || job.Status == domain.DJStatusForcedReturn || job.Status == domain.DJStatusForcedReturnDone))
-
-	// Check if we're in dispute/return flow
-	// Also show return steps if refunded with a return job (completed return flow)
 	wasReturnCompleted := pr.Status == domain.PRStatusRefunded && returnJob != nil && !returnJob.IsForcedReturn
-
-	// If in rebook flow, use specialized delivery steps (no "delivered" step)
 	if isRebookFlow {
 		steps, currentStep = appendDeliveryStepsForUnavailability(steps, currentStep, viewType, order, job)
 		steps, currentStep = appendRebookFlowSteps(steps, currentStep, viewType, pr, job)
 		return steps, currentStep
 	}
-
-	// Normal flow - add regular delivery steps
 	steps, currentStep = appendDeliverySteps(steps, currentStep, viewType, order, job)
 
 	if !pr.Status.IsReturnFlow() && pr.Status != domain.PRStatusDisputed && !wasReturnCompleted {
 		return steps, currentStep
 	}
-
-	// Add dispute step if disputed
 	if order.Status == domain.OrderStatusDisputed || pr.Status.IsReturnFlow() || wasReturnCompleted {
 		disputeDesc := "You opened a dispute"
 		if viewType == TimelineViewSeller {
@@ -167,10 +150,7 @@ func appendDeliveryStepsWithReturn(
 		}
 		steps = append(steps, disputeStep)
 	}
-
-	// Add return flow steps if return is required or was completed
 	if pr.Status.IsReturnFlow() || pr.Status == domain.PRStatusReturnRequired || wasReturnCompleted {
-		// Return awaiting confirmation step (buyer must confirm they're ready)
 		awaitingConfirmDesc := "Confirm you're ready for return pickup"
 		if viewType == TimelineViewSeller {
 			awaitingConfirmDesc = "Waiting for buyer to confirm they're ready for pickup"
@@ -181,8 +161,6 @@ func appendDeliveryStepsWithReturn(
 			Description: awaitingConfirmDesc,
 			Status:      "pending",
 		}
-
-		// Return searching step
 		returnSearchDesc := "Searching for rider to return item"
 		if viewType == TimelineViewSeller {
 			returnSearchDesc = "Searching for rider to return item to you"
@@ -193,8 +171,6 @@ func appendDeliveryStepsWithReturn(
 			Description: returnSearchDesc,
 			Status:      "pending",
 		}
-
-		// Return rider assigned step
 		returnRiderDesc := "Rider is on the way to pick up item for return"
 		if viewType == TimelineViewSeller {
 			returnRiderDesc = "Rider is picking up item from buyer"
@@ -205,8 +181,6 @@ func appendDeliveryStepsWithReturn(
 			Description: returnRiderDesc,
 			Status:      "pending",
 		}
-
-		// Return picked up step
 		returnPickedUpDesc := "Item picked up from you for return"
 		if viewType == TimelineViewSeller {
 			returnPickedUpDesc = "Item picked up from buyer"
@@ -217,16 +191,12 @@ func appendDeliveryStepsWithReturn(
 			Description: returnPickedUpDesc,
 			Status:      "pending",
 		}
-
-		// Return in transit step
 		returnTransitStep := TimelineStep{
 			Step:        "return_in_transit",
 			Title:       "Return In Transit",
 			Description: "Item is being returned",
 			Status:      "pending",
 		}
-
-		// Return delivered step
 		returnDeliveredDesc := "Item returned to seller"
 		if viewType == TimelineViewSeller {
 			returnDeliveredDesc = "Item returned to you. Please confirm condition."
@@ -237,8 +207,6 @@ func appendDeliveryStepsWithReturn(
 			Description: returnDeliveredDesc,
 			Status:      "pending",
 		}
-
-		// Return confirmed / refund step
 		returnConfirmedDesc := "Return confirmed. Refund processed."
 		if viewType == TimelineViewSeller {
 			returnConfirmedDesc = "Return confirmed. Buyer refunded."
@@ -249,12 +217,9 @@ func appendDeliveryStepsWithReturn(
 			Description: returnConfirmedDesc,
 			Status:      "pending",
 		}
-
-		// Update return steps based on return job status
 		if returnJob != nil {
 			switch returnJob.Status {
 			case domain.DJStatusCreated:
-				// Job created but buyer hasn't confirmed ready yet
 				awaitingConfirmStep.Status = "current"
 				currentStep = "return_awaiting_confirmation"
 				if !returnJob.CreatedAt.IsZero() {
@@ -328,14 +293,12 @@ func appendDeliveryStepsWithReturn(
 				returnPickedUpStep.Status = "completed"
 				returnTransitStep.Status = "completed"
 				returnDeliveredStep.Status = "completed"
-				// Override confirmed step for damage dispute
 				returnConfirmedStep.Title = "Damage Claim"
 				returnConfirmedStep.Description = "Seller reported damage. Admin reviewing."
 				returnConfirmedStep.Status = "current"
 				currentStep = "return_confirmed"
 			}
 		} else {
-			// Return required but job not created yet - buyer needs to confirm ready
 			awaitingConfirmStep.Status = "current"
 			currentStep = "return_awaiting_confirmation"
 		}
@@ -346,9 +309,6 @@ func appendDeliveryStepsWithReturn(
 
 	return steps, currentStep
 }
-
-// appendDeliveryStepsForUnavailability adds delivery steps up to in_transit (no delivered step)
-// Used when buyer is unavailable - delivery hasn't completed
 func appendDeliveryStepsForUnavailability(
 	steps []TimelineStep,
 	currentStep string,
@@ -388,8 +348,6 @@ func appendDeliveryStepsForUnavailability(
 		pickedUpStep.Description = "Rider collected the item"
 		inTransitStep.Description = "Item was on the way to buyer"
 	}
-
-	// Add timestamps if available
 	if job != nil {
 		if job.AcceptedAt != nil {
 			riderStep.Timestamp = job.AcceptedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -402,8 +360,6 @@ func appendDeliveryStepsForUnavailability(
 	steps = append(steps, awaitingStep, riderStep, pickedUpStep, inTransitStep)
 	return steps, currentStep
 }
-
-// appendRebookFlowSteps adds buyer unavailable -> rebook/return flow steps
 func appendRebookFlowSteps(
 	steps []TimelineStep,
 	currentStep string,
@@ -411,7 +367,6 @@ func appendRebookFlowSteps(
 	pr *domain.PaymentRequest,
 	job *domain.DeliveryJob,
 ) ([]TimelineStep, string) {
-	// Buyer unavailable step
 	unavailableDesc := "You were unavailable at the delivery location"
 	if viewType == TimelineViewSeller {
 		unavailableDesc = "Buyer was unavailable at delivery location"
@@ -422,8 +377,6 @@ func appendRebookFlowSteps(
 		Description: unavailableDesc,
 		Status:      "pending",
 	}
-
-	// Pending rebook step (45-min window)
 	rebookDesc := "Rebook delivery within 45 minutes to continue"
 	if viewType == TimelineViewSeller {
 		rebookDesc = "Waiting for buyer to rebook or admin contact"
@@ -434,8 +387,6 @@ func appendRebookFlowSteps(
 		Description: rebookDesc,
 		Status:      "pending",
 	}
-
-	// Forced return step (if rebook window expired)
 	forcedReturnDesc := "Item is being returned to seller"
 	if viewType == TimelineViewSeller {
 		forcedReturnDesc = "Item is being returned to you"
@@ -446,8 +397,6 @@ func appendRebookFlowSteps(
 		Description: forcedReturnDesc,
 		Status:      "pending",
 	}
-
-	// Refund step (final)
 	refundDesc := "Partial refund processed (minus 5% unavailability fee)"
 	if viewType == TimelineViewSeller {
 		refundDesc = "Buyer received partial refund"
@@ -458,12 +407,9 @@ func appendRebookFlowSteps(
 		Description: refundDesc,
 		Status:      "pending",
 	}
-
-	// Determine current status based on job and PR status
 	if job != nil {
 		switch job.Status {
 		case domain.DJStatusBuyerUnavailable:
-			// Rider still has item, 45-min window active
 			unavailableStep.Status = "completed"
 			if job.UnavailableMarkedAt != nil {
 				unavailableStep.Timestamp = job.UnavailableMarkedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -472,7 +418,6 @@ func appendRebookFlowSteps(
 			currentStep = "pending_rebook"
 
 		case domain.DJStatusForcedReturn:
-			// 45-min expired, rider returning to seller
 			unavailableStep.Status = "completed"
 			rebookStep.Status = "completed"
 			rebookStep.Title = "Rebook Expired"
@@ -481,7 +426,6 @@ func appendRebookFlowSteps(
 			currentStep = "forced_return"
 
 		case domain.DJStatusForcedReturnDone:
-			// Rider returned item to seller
 			unavailableStep.Status = "completed"
 			rebookStep.Status = "completed"
 			rebookStep.Title = "Rebook Expired"
@@ -495,8 +439,6 @@ func appendRebookFlowSteps(
 			currentStep = "partial_refund"
 		}
 	}
-
-	// Override based on PR status for final states
 	if pr.Status == domain.PRStatusRebookExpired {
 		unavailableStep.Status = "completed"
 		rebookStep.Status = "completed"
@@ -642,8 +584,6 @@ func appendDeliverySteps(
 			if releasedStep != nil {
 				currentStep = "payment_released"
 			}
-		// Note: DJStatusBuyerUnavailable, DJStatusForcedReturn, DJStatusForcedReturnDone
-		// are handled separately in appendDeliveryStepsForUnavailability + appendRebookFlowSteps
 		}
 	} else if order.PaymentStatus == domain.OrderPaymentVerified {
 		if viewType == TimelineViewSeller {
@@ -713,10 +653,6 @@ func appendSimpleSteps(
 	return steps, currentStep
 }
 
-// ============================================
-// ERRAND TIMELINE
-// ============================================
-
 type ErrandTimelineResponse struct {
 	Steps       []TimelineStep `json:"steps"`
 	CurrentStep string         `json:"current_step"`
@@ -728,8 +664,6 @@ type ErrandTimelineResponse struct {
 func BuildErrandTimeline(errand *domain.Errand) ErrandTimelineResponse {
 	steps := []TimelineStep{}
 	currentStep := ""
-
-	// Step 1: Created
 	steps = append(steps, TimelineStep{
 		Step:        "created",
 		Title:       "Errand Created",
@@ -737,56 +671,42 @@ func BuildErrandTimeline(errand *domain.Errand) ErrandTimelineResponse {
 		Status:      "completed",
 		Timestamp:   errand.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
-
-	// Step 2: Confirmed (Searching)
 	confirmedStep := TimelineStep{
 		Step:        "confirmed",
 		Title:       "Searching for Rider",
 		Description: "Looking for an available rider nearby",
 		Status:      "pending",
 	}
-
-	// Step 3: Rider Accepted
 	acceptedStep := TimelineStep{
 		Step:        "accepted",
 		Title:       "Rider Assigned",
 		Description: "A rider has accepted your errand",
 		Status:      "pending",
 	}
-
-	// Step 4: Picked Up
 	pickedUpStep := TimelineStep{
 		Step:        "picked_up",
 		Title:       "Package Picked Up",
 		Description: "Rider has collected the package",
 		Status:      "pending",
 	}
-
-	// Step 5: In Transit
 	inTransitStep := TimelineStep{
 		Step:        "in_transit",
 		Title:       "In Transit",
 		Description: "Your package is on the way",
 		Status:      "pending",
 	}
-
-	// Step 6: Delivered
 	deliveredStep := TimelineStep{
 		Step:        "delivered",
 		Title:       "Delivered",
 		Description: "Package has arrived. Confirm with your code.",
 		Status:      "pending",
 	}
-
-	// Step 7: Completed
 	completedStep := TimelineStep{
 		Step:        "completed",
 		Title:       "Completed",
 		Description: "Errand completed successfully",
 		Status:      "pending",
 	}
-
-	// Cancelled step (only shown when cancelled)
 	var cancelledStep *TimelineStep
 
 	switch errand.Status {
@@ -861,8 +781,6 @@ func BuildErrandTimeline(errand *domain.Errand) ErrandTimelineResponse {
 		}
 		currentStep = "cancelled"
 	}
-
-	// Build final steps
 	steps = append(steps, confirmedStep, acceptedStep, pickedUpStep, inTransitStep, deliveredStep)
 
 	if cancelledStep != nil {
@@ -879,10 +797,6 @@ func BuildErrandTimeline(errand *domain.Errand) ErrandTimelineResponse {
 		DropoffCode: errand.DropoffCode,
 	}
 }
-
-// ============================================
-// DRIVER DELIVERY TIMELINE (Inter-state)
-// ============================================
 
 type DriverDeliveryTimelineResponse struct {
 	Steps       []TimelineStep `json:"steps"`
@@ -902,8 +816,6 @@ func BuildDriverDeliveryTimeline(
 ) DriverDeliveryTimelineResponse {
 	steps := []TimelineStep{}
 	currentStep := ""
-
-	// Step 1: Order Created
 	orderDesc := "Order placed for inter-state delivery"
 	if viewType == TimelineViewSeller {
 		orderDesc = "You received an inter-state delivery order"
@@ -915,24 +827,18 @@ func BuildDriverDeliveryTimeline(
 		Status:      "completed",
 		Timestamp:   delivery.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
-
-	// Step 2: Awaiting Driver
 	awaitingDriverStep := TimelineStep{
 		Step:        "awaiting_driver",
 		Title:       "Awaiting Driver",
 		Description: "Searching for a driver traveling this route",
 		Status:      "pending",
 	}
-
-	// Step 3: Driver Assigned
 	driverAssignedStep := TimelineStep{
 		Step:        "driver_assigned",
 		Title:       "Driver Assigned",
 		Description: "A driver has accepted your delivery",
 		Status:      "pending",
 	}
-
-	// Step 4: Awaiting Pickup (seller brings to driver)
 	awaitingPickupDesc := "Bring the item to the driver at the departure point"
 	if viewType == TimelineViewBuyer {
 		awaitingPickupDesc = "Seller is handing over item to driver"
@@ -943,40 +849,30 @@ func BuildDriverDeliveryTimeline(
 		Description: awaitingPickupDesc,
 		Status:      "pending",
 	}
-
-	// Step 5: Picked Up
 	pickedUpStep := TimelineStep{
 		Step:        "picked_up",
 		Title:       "Item Collected",
 		Description: "Driver has collected the item",
 		Status:      "pending",
 	}
-
-	// Step 6: In Transit (Trip Departed)
 	inTransitStep := TimelineStep{
 		Step:        "in_transit",
 		Title:       "In Transit",
 		Description: "Item is on the way to destination city",
 		Status:      "pending",
 	}
-
-	// Step 7: Arrived at Destination
 	arrivedStep := TimelineStep{
 		Step:        "arrived",
 		Title:       "Arrived at Destination",
 		Description: "Driver has arrived in destination city",
 		Status:      "pending",
 	}
-
-	// Step 8: Delivered / Confirmation Window
 	deliveredStep := TimelineStep{
 		Step:        "delivered",
 		Title:       "Delivered",
 		Description: "Item delivered to buyer",
 		Status:      "pending",
 	}
-
-	// Step 9: Completed (Payment Released)
 	completedDesc := "Delivery completed successfully"
 	if viewType == TimelineViewSeller {
 		completedDesc = "Payment released to your wallet"
@@ -987,13 +883,9 @@ func BuildDriverDeliveryTimeline(
 		Description: completedDesc,
 		Status:      "pending",
 	}
-
-	// Edge case steps (only shown when applicable)
 	var buyerUnreachableStep *TimelineStep
 	var disputeStep *TimelineStep
 	var returnStep *TimelineStep
-
-	// Determine status based on delivery status
 	switch delivery.Status {
 	case domain.DDStatusAwaitingDriver:
 		awaitingDriverStep.Status = "current"
@@ -1084,7 +976,6 @@ func BuildDriverDeliveryTimeline(
 		pickedUpStep.Status = "completed"
 		inTransitStep.Status = "completed"
 		arrivedStep.Status = "completed"
-		// Add buyer unreachable step
 		unreachableDesc := "Driver couldn't reach you. Please respond to avoid item return."
 		if viewType == TimelineViewSeller {
 			unreachableDesc = "Buyer was unreachable. Awaiting their response."
@@ -1199,12 +1090,8 @@ func BuildDriverDeliveryTimeline(
 		}
 		currentStep = "expired"
 	}
-
-	// Build final steps array
 	steps = append(steps, awaitingDriverStep, driverAssignedStep, awaitingPickupStep,
 		pickedUpStep, inTransitStep, arrivedStep)
-
-	// Add edge case steps if applicable
 	if buyerUnreachableStep != nil {
 		steps = append(steps, *buyerUnreachableStep)
 	}
@@ -1214,8 +1101,6 @@ func BuildDriverDeliveryTimeline(
 	if disputeStep != nil {
 		steps = append(steps, *disputeStep)
 	}
-
-	// Add final step (delivered/completed or terminal state)
 	if delivery.Status != domain.DDStatusBuyerUnreachable &&
 		delivery.Status != domain.DDStatusReturnToSeller &&
 		delivery.Status != domain.DDStatusReturnedToSeller &&
@@ -1231,8 +1116,6 @@ func BuildDriverDeliveryTimeline(
 		OriginCity:  delivery.OriginCity,
 		DestCity:    delivery.DestinationCity,
 	}
-
-	// Add codes based on view type
 	if viewType == TimelineViewSeller && delivery.PickupCode != nil {
 		resp.PickupCode = delivery.PickupCode
 	}

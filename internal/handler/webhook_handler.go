@@ -346,10 +346,6 @@ func (h *WebhookHandler) handleDVAAssigned(c *gin.Context, _ *paystack.WebhookEv
 	})
 }
 
-// ============================================
-// FLUTTERWAVE WEBHOOK HANDLERS
-// ============================================
-
 func (h *WebhookHandler) HandleFlutterwaveWebhook(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -357,8 +353,6 @@ func (h *WebhookHandler) HandleFlutterwaveWebhook(c *gin.Context) {
 		util.Error(c, http.StatusBadRequest, "INVALID_BODY", "Failed to read request body")
 		return
 	}
-
-	// Log raw webhook body for debugging (truncate if too long)
 	rawBody := string(body)
 	if len(rawBody) > 2000 {
 		rawBody = rawBody[:2000] + "...(truncated)"
@@ -366,8 +360,6 @@ func (h *WebhookHandler) HandleFlutterwaveWebhook(c *gin.Context) {
 	h.logger.Debug("Flutterwave raw webhook body",
 		zap.String("body", rawBody),
 	)
-
-	// Verify webhook signature using verif-hash header
 	verifHash := c.GetHeader("verif-hash")
 	if !h.flutterwaveClient.VerifyWebhookSignature(verifHash) {
 		h.logger.Warn("invalid Flutterwave webhook signature",
@@ -418,10 +410,7 @@ func (h *WebhookHandler) handleFlutterwaveChargeCompleted(c *gin.Context, event 
 		zap.String("status", chargeData.Status),
 		zap.String("payment_type", chargeData.PaymentType),
 	)
-
-	// Check if this is a virtual account bank transfer (tx_ref starts with "va-")
 	if len(chargeData.TxRef) >= 3 && chargeData.TxRef[:3] == "va-" {
-		// Generate a unique reference for idempotency (use FlwRef if available)
 		reference := chargeData.FlwRef
 		if reference == "" {
 			reference = fmt.Sprintf("%d", chargeData.ID)
@@ -445,8 +434,6 @@ func (h *WebhookHandler) handleFlutterwaveChargeCompleted(c *gin.Context, event 
 		})
 		return
 	}
-
-	// Check if this is a top-up (tx_ref starts with "fw_topup_")
 	if len(chargeData.TxRef) >= 9 && chargeData.TxRef[:9] == "fw_topup_" {
 		if err := h.fundingService.ProcessFlutterwaveTopUp(c.Request.Context(), chargeData.TxRef); err != nil {
 			h.logger.Error("failed to process Flutterwave top-up from webhook",
@@ -459,8 +446,6 @@ func (h *WebhookHandler) handleFlutterwaveChargeCompleted(c *gin.Context, event 
 			)
 		}
 	}
-
-	// Check if this is an order payment (tx_ref starts with "kipa_ord_")
 	if len(chargeData.TxRef) >= 9 && chargeData.TxRef[:9] == "kipa_ord_" {
 		if _, err := h.orderService.VerifyPayment(c.Request.Context(), chargeData.TxRef); err != nil {
 			h.logger.Error("failed to process Flutterwave order payment from webhook",
@@ -498,11 +483,6 @@ func (h *WebhookHandler) handleFlutterwaveTransferCompleted(c *gin.Context, even
 		zap.String("account_number", transferData.AccountNumber),
 		zap.String("bank_name", transferData.BankName),
 	)
-
-	// Note: Incoming bank transfers to PSA virtual accounts are handled by payout.credit event
-	// This handler is for outgoing transfers (withdrawals)
-
-	// Process withdrawal webhook
 	if err := h.fundingService.ProcessFlutterwaveWithdrawalWebhook(
 		c.Request.Context(),
 		transferData.Reference,
@@ -534,8 +514,6 @@ func (h *WebhookHandler) handleFlutterwaveTransferFailed(c *gin.Context, event *
 		zap.Float64("amount", transferData.Amount),
 		zap.String("complete_message", transferData.CompleteMessage),
 	)
-
-	// Process withdrawal webhook with failure
 	if err := h.fundingService.ProcessFlutterwaveWithdrawalWebhook(
 		c.Request.Context(),
 		transferData.Reference,

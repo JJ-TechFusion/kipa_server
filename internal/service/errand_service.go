@@ -32,18 +32,12 @@ type ErrandService interface {
 
 
 	CompleteErrand(ctx context.Context, userID uuid.UUID, errandID uuid.UUID, code string) (*domain.Errand, error)
-
-	// GetByErrandID returns errand by ID (for internal use by rider service)
 	GetByErrandID(ctx context.Context, errandID uuid.UUID) (*domain.Errand, error)
 }
-
-// ErrandWithDelivery contains errand with delivery job and rider details
 type ErrandWithDelivery struct {
 	Errand      *domain.Errand      `json:"errand"`
 	DeliveryJob *ErrandDeliveryInfo `json:"delivery_job,omitempty"`
 }
-
-// ErrandDeliveryInfo contains delivery job info for errands
 type ErrandDeliveryInfo struct {
 	ID          uuid.UUID `json:"id"`
 	Status      string    `json:"status"`
@@ -51,8 +45,6 @@ type ErrandDeliveryInfo struct {
 	DropoffCode *string   `json:"dropoff_code,omitempty"`
 	Rider       *ErrandRiderInfo `json:"rider,omitempty"`
 }
-
-// ErrandRiderInfo contains rider info for errand tracking
 type ErrandRiderInfo struct {
 	ID          uuid.UUID `json:"id"`
 	FirstName   string    `json:"first_name"`
@@ -274,8 +266,6 @@ func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errand
 			s.broadcaster.BroadcastJobStatus(errand.DeliveryJobID.String(), string(domain.DJStatusCancelled))
 		}
 	}
-
-	// Notify rider if one was assigned
 	if s.notificationSvc != nil && errand.RiderID != nil {
 		riderProfile, _ := s.riderRepo.GetByID(ctx, *errand.RiderID)
 		if riderProfile != nil {
@@ -322,8 +312,6 @@ func (s *ErrandServiceImpl) GetWithDeliveryDetails(ctx context.Context, userID u
 	result := &ErrandWithDelivery{
 		Errand: errand,
 	}
-
-	// If there's a delivery job, fetch its details
 	if errand.DeliveryJobID != nil {
 		job, err := s.jobRepo.GetByID(ctx, *errand.DeliveryJobID)
 		if err != nil {
@@ -338,9 +326,6 @@ func (s *ErrandServiceImpl) GetWithDeliveryDetails(ctx context.Context, userID u
 				PickupCode:  job.PickupCode,
 				DropoffCode: job.DropoffCode,
 			}
-
-			// If rider is assigned, fetch rider details
-			// Note: job.RiderID is the rider_profile.id, not the user_id
 			if job.RiderID != nil {
 				riderProfile, err := s.riderRepo.GetByID(ctx, *job.RiderID)
 				if err != nil {
@@ -349,7 +334,6 @@ func (s *ErrandServiceImpl) GetWithDeliveryDetails(ctx context.Context, userID u
 						zap.Error(err),
 					)
 				} else {
-					// Also fetch user info for name and phone (use riderProfile.UserID, not job.RiderID)
 					user, err := s.userRepo.GetByID(ctx, riderProfile.UserID)
 					if err != nil {
 						s.logger.Warn("failed to fetch rider user for errand",
@@ -409,8 +393,6 @@ func (s *ErrandServiceImpl) OnJobAccepted(ctx context.Context, errandID uuid.UUI
 	if err := s.errandRepo.Update(ctx, errand); err != nil {
 		return err
 	}
-
-	// Notify errand owner that rider accepted
 	if s.notificationSvc != nil {
 		riderProfile, _ := s.riderRepo.GetByID(ctx, riderID)
 		riderName := "A rider"
@@ -444,8 +426,6 @@ func (s *ErrandServiceImpl) OnJobPickedUp(ctx context.Context, errandID uuid.UUI
 	if err := s.errandRepo.Update(ctx, errand); err != nil {
 		return err
 	}
-
-	// Notify errand owner
 	if s.notificationSvc != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -472,8 +452,6 @@ func (s *ErrandServiceImpl) OnJobDelivered(ctx context.Context, errandID uuid.UU
 	if err := s.errandRepo.Update(ctx, errand); err != nil {
 		return err
 	}
-
-	// Notify errand owner
 	if s.notificationSvc != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -517,8 +495,6 @@ func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID
 		zap.String("errand_id", errandID.String()),
 		zap.String("user_id", userID.String()),
 	)
-
-	// Notify rider that errand is completed
 	if s.notificationSvc != nil && errand.RiderID != nil {
 		riderProfile, _ := s.riderRepo.GetByID(ctx, *errand.RiderID)
 		if riderProfile != nil {

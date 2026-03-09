@@ -118,15 +118,11 @@ func (r *LogisticsDeliveryRepo) GetBySellerID(ctx context.Context, sellerID uuid
 		args = append(args, *status)
 		argIndex++
 	}
-
-	// Count query
 	countQuery := `SELECT COUNT(*) ` + baseQuery
 	err := r.db.GetContext(ctx, &total, countQuery, args...)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	// Data query
 	dataQuery := `SELECT * ` + baseQuery + ` ORDER BY created_at DESC LIMIT $` + string(rune('0'+argIndex)) + ` OFFSET $` + string(rune('0'+argIndex+1))
 	args = append(args, limit, offset)
 
@@ -151,15 +147,11 @@ func (r *LogisticsDeliveryRepo) GetByBuyerID(ctx context.Context, buyerID uuid.U
 		args = append(args, *status)
 		argIndex++
 	}
-
-	// Count query
 	countQuery := `SELECT COUNT(*) ` + baseQuery
 	err := r.db.GetContext(ctx, &total, countQuery, args...)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	// Data query
 	dataQuery := `SELECT * ` + baseQuery + ` ORDER BY created_at DESC LIMIT $` + string(rune('0'+argIndex)) + ` OFFSET $` + string(rune('0'+argIndex+1))
 	args = append(args, limit, offset)
 
@@ -526,10 +518,6 @@ func (r *LogisticsDeliveryRepo) UpdateReminderSent(ctx context.Context, id uuid.
 
 var _ repository.LogisticsDeliveryRepository = (*LogisticsDeliveryRepo)(nil)
 
-// ============================================
-// LOGISTICS DELIVERY EVENT REPOSITORY
-// ============================================
-
 type LogisticsDeliveryEventRepo struct {
 	db *sqlx.DB
 }
@@ -578,10 +566,6 @@ func (r *LogisticsDeliveryEventRepo) GetByDeliveryID(ctx context.Context, delive
 }
 
 var _ repository.LogisticsDeliveryEventRepository = (*LogisticsDeliveryEventRepo)(nil)
-
-// ============================================
-// LOGISTICS EVIDENCE REPOSITORY
-// ============================================
 
 type LogisticsEvidenceRepo struct {
 	db *sqlx.DB

@@ -27,8 +27,6 @@ type RiderService interface {
 	ConfirmDelivery(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
 	GetJobHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DeliveryJob, error)
 	GetEarnings(ctx context.Context, userID uuid.UUID) (*RiderEarnings, error)
-
-	// Unavailability handling
 	MarkSellerUnavailable(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) error
 	MarkBuyerUnavailable(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*ForcedReturnInfo, error)
 	CompleteForcedReturn(ctx context.Context, userID uuid.UUID, jobID uuid.UUID, code string) error
@@ -156,8 +154,6 @@ func (s *RiderServiceImpl) UpdateLocation(ctx context.Context, userID uuid.UUID,
 	if err := s.riderRepo.UpdateLocation(ctx, profile.ID, lat, lng); err != nil {
 		return fmt.Errorf("failed to update location: %w", err)
 	}
-
-	// Store in Redis for nearby riders feature (only if online)
 	if profile.IsOnline && s.riderLocationCache != nil {
 		if err := s.riderLocationCache.UpdateLocation(ctx, profile.ID, lat, lng, heading, speed); err != nil {
 			s.logger.Warn("failed to update rider location in cache", zap.Error(err))
@@ -289,8 +285,6 @@ func (s *RiderServiceImpl) GoOffline(ctx context.Context, userID uuid.UUID) erro
 	if err := s.riderRepo.SetOnline(ctx, profile.ID, false); err != nil {
 		return fmt.Errorf("failed to go offline: %w", err)
 	}
-
-	// Remove from Redis location cache
 	if s.riderLocationCache != nil {
 		if err := s.riderLocationCache.RemoveLocation(ctx, profile.ID); err != nil {
 			s.logger.Warn("failed to remove rider location from cache", zap.Error(err))
@@ -327,8 +321,6 @@ func (s *RiderServiceImpl) GetAvailableJobs(ctx context.Context, userID uuid.UUI
 	result := make([]*AvailableJob, len(jobs))
 	for i, job := range jobs {
 		availableJob := &AvailableJob{Job: job}
-
-		// If this is an errand job, fetch errand details
 		if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 			errand, err := s.errandService.GetByErrandID(ctx, *job.ErrandID)
 			if err != nil {
@@ -361,13 +353,9 @@ func (s *RiderServiceImpl) GetAvailableJobByID(ctx context.Context, userID uuid.
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	// Verify job is still available (searching status)
 	if job.Status != domain.DJStatusSearching {
 		return nil, nil, nil, domain.ErrJobAlreadyAccepted
 	}
-
-	// Verify vehicle type matches if required
 	if job.RequiredVehicleType != "" {
 		if profile.VehicleType == nil || *profile.VehicleType == "" {
 			return nil, nil, nil, domain.ErrVehicleTypeMismatch
@@ -376,8 +364,6 @@ func (s *RiderServiceImpl) GetAvailableJobByID(ctx context.Context, userID uuid.
 			return nil, nil, nil, domain.ErrVehicleTypeMismatch
 		}
 	}
-
-	// Get payment request for package details
 	var pr *domain.PaymentRequest
 	if job.PaymentRequestID != uuid.Nil {
 		pr, err = s.prRepo.GetByID(ctx, job.PaymentRequestID)
@@ -388,8 +374,6 @@ func (s *RiderServiceImpl) GetAvailableJobByID(ctx context.Context, userID uuid.
 			)
 		}
 	}
-
-	// Get errand details if this is an errand job
 	var errand *domain.Errand
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		errand, err = s.errandService.GetByErrandID(ctx, *job.ErrandID)
@@ -460,7 +444,6 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 			s.logger.Warn("failed to update errand status to accepted", zap.Error(err))
 		}
 	} else if job.IsReturn {
-		// For return jobs, update status to return_in_progress
 		if err := s.prRepo.UpdateStatus(ctx, job.PaymentRequestID, domain.PRStatusReturnInProgress); err != nil {
 			s.logger.Warn("failed to update payment request status to return_in_progress", zap.Error(err))
 		}
@@ -475,16 +458,12 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 		zap.String("job_id", jobID.String()),
 		zap.Bool("is_return", job.IsReturn),
 	)
-
-	// Notify buyer and seller that rider is assigned
 	if s.notificationService != nil {
 		pr, _ := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if pr != nil {
 			data := map[string]string{"job_id": jobID.String(), "payment_request_id": pr.ID.String()}
 
 			if job.IsReturn {
-				// For return jobs: roles are reversed
-				// Buyer is at pickup (gets pickup code), Seller is at dropoff (gets dropoff code)
 				if pr.BuyerID != nil {
 					data["pickup_code"] = pickupCode
 					go s.notificationService.SendToUser(context.Background(), *pr.BuyerID, "Return Rider Assigned",
@@ -496,7 +475,6 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 					fmt.Sprintf("A rider is picking up the item from the buyer for return. Your dropoff code: %s", dropoffCode),
 					data, domain.NotificationRiderAssigned)
 			} else {
-				// Normal delivery: Seller is at pickup, Buyer is at dropoff
 				if pr.BuyerID != nil {
 					go s.notificationService.SendToUser(context.Background(), *pr.BuyerID, "Rider Assigned", "A rider is on the way to pick up your order", data, domain.NotificationRiderAssigned)
 				}
@@ -504,8 +482,6 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 			}
 		}
 	}
-
-	// Get errand details if this is an errand job
 	var errand *domain.Errand
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		errand, err = s.errandService.GetByErrandID(ctx, *job.ErrandID)
@@ -536,8 +512,6 @@ func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (
 	details := &ActiveJobDetails{
 		Job: job,
 	}
-
-	// If this is an errand job, fetch errand details
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		errand, err := s.errandService.GetByErrandID(ctx, *job.ErrandID)
 		if err != nil {
@@ -549,8 +523,6 @@ func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (
 			details.Errand = errand
 		}
 	}
-
-	// Get payment request for package details and user IDs
 	if job.PaymentRequestID != uuid.Nil {
 		pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if err != nil {
@@ -560,8 +532,6 @@ func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (
 			)
 		} else {
 			details.PaymentRequest = pr
-
-			// Get seller info
 			seller, err := s.userRepo.GetByID(ctx, pr.SellerID)
 			if err == nil && seller != nil {
 				details.Seller = &ContactInfo{
@@ -569,8 +539,6 @@ func (s *RiderServiceImpl) GetActiveJob(ctx context.Context, userID uuid.UUID) (
 					Phone: seller.PhoneNumber,
 				}
 			}
-
-			// Get buyer info
 			if pr.BuyerID != nil {
 				buyer, err := s.userRepo.GetByID(ctx, *pr.BuyerID)
 				if err == nil && buyer != nil {
@@ -621,8 +589,6 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 			s.logger.Warn("failed to update errand status to picked_up", zap.Error(err))
 		}
 	} else if job.IsReturn {
-		// For return jobs, PR status stays as return_in_progress
-		// No escrow update needed as we're returning item
 		s.logger.Info("return pickup confirmed, PR status unchanged",
 			zap.String("job_id", jobID.String()),
 		)
@@ -644,15 +610,12 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 		zap.String("job_id", jobID.String()),
 		zap.Bool("is_return", job.IsReturn),
 	)
-
-	// Notify appropriate party based on job type
 	if s.notificationService != nil {
 		pr, _ := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if pr != nil {
 			data := map[string]string{"job_id": jobID.String()}
 
 			if job.IsReturn {
-				// For return: Buyer was at pickup, now notify seller item is on the way back
 				go s.notificationService.SendToUser(context.Background(), pr.SellerID, "Return Picked Up",
 					"The item has been picked up from the buyer and is on the way back to you.",
 					data, domain.NotificationOrderPickedUp)
@@ -662,7 +625,6 @@ func (s *RiderServiceImpl) ConfirmPickup(ctx context.Context, userID uuid.UUID, 
 						data, domain.NotificationOrderPickedUp)
 				}
 			} else if pr.BuyerID != nil {
-				// Normal delivery: notify buyer
 				go s.notificationService.SendToUser(context.Background(), *pr.BuyerID, "Order Picked Up", "Your order is on the way!", data, domain.NotificationOrderPickedUp)
 			}
 		}
@@ -692,13 +654,9 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 	}
 
 	now := time.Now()
-
-	// Check if this is a return job - handle differently
 	if job.IsReturn {
 		return s.confirmReturnDelivery(ctx, profile, job, now)
 	}
-
-	// Normal delivery flow
 	job.Status = domain.DJStatusDelivered
 	job.DeliveredAt = &now
 
@@ -759,8 +717,6 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 		zap.String("job_id", jobID.String()),
 		zap.Float64("delivery_fee", job.DeliveryFee),
 	)
-
-	// Notify buyer and seller that order is delivered
 	if s.notificationService != nil {
 		pr, _ := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if pr != nil {
@@ -774,10 +730,7 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 
 	return nil
 }
-
-// confirmReturnDelivery handles delivery confirmation for return jobs
 func (s *RiderServiceImpl) confirmReturnDelivery(ctx context.Context, profile *domain.RiderProfile, job *domain.DeliveryJob, now time.Time) error {
-	// For return jobs, set status to return_delivered (waiting for seller confirmation)
 	job.Status = domain.DJStatusReturnDelivered
 	job.DeliveredAt = &now
 
@@ -786,21 +739,15 @@ func (s *RiderServiceImpl) confirmReturnDelivery(ctx context.Context, profile *d
 	}
 
 	s.broadcastJobStatus(job.ID, domain.DJStatusReturnDelivered)
-
-	// Increment rider deliveries
 	if err := s.riderRepo.IncrementDeliveries(ctx, profile.ID); err != nil {
 		s.logger.Error("failed to increment deliveries for return job", zap.Error(err))
 	}
-
-	// Handle rider earnings for return (if any fee)
 	if job.DeliveryFee > 0 {
 		riderTake := domain.CalculateRiderTake(job.DeliveryFee)
 		if err := s.riderRepo.AddEarnings(ctx, profile.ID, riderTake); err != nil {
 			s.logger.Error("failed to update rider earnings for return job", zap.Error(err))
 		}
 	}
-
-	// Update payment request status
 	if err := s.prRepo.UpdateStatus(ctx, job.PaymentRequestID, domain.PRStatusReturnDelivered); err != nil {
 		s.logger.Error("failed to update payment request status to return_delivered", zap.Error(err))
 	}
@@ -809,8 +756,6 @@ func (s *RiderServiceImpl) confirmReturnDelivery(ctx context.Context, profile *d
 		zap.String("job_id", job.ID.String()),
 		zap.Bool("is_return", job.IsReturn),
 	)
-
-	// Notify seller to confirm return receipt
 	if s.notificationService != nil {
 		pr, _ := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 		if pr != nil {
@@ -886,8 +831,6 @@ func (s *RiderServiceImpl) MarkSellerUnavailable(ctx context.Context, userID uui
 	}
 
 	s.broadcastJobStatus(jobID, domain.DJStatusSellerUnavailable)
-
-	// Update payment request status and refund buyer
 	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 	if err != nil {
 		return fmt.Errorf("failed to get payment request: %w", err)
@@ -896,8 +839,6 @@ func (s *RiderServiceImpl) MarkSellerUnavailable(ctx context.Context, userID uui
 	if err := s.prRepo.UpdateStatus(ctx, pr.ID, domain.PRStatusCancelledSellerUnavailable); err != nil {
 		s.logger.Error("failed to update payment request status", zap.Error(err))
 	}
-
-	// Full refund to buyer
 	if pr.EscrowID != nil {
 		if err := s.escrowService.Refund(ctx, *pr.EscrowID, "Seller unavailable at pickup"); err != nil {
 			s.logger.Error("failed to refund buyer", zap.Error(err))
@@ -908,8 +849,6 @@ func (s *RiderServiceImpl) MarkSellerUnavailable(ctx context.Context, userID uui
 		zap.String("job_id", jobID.String()),
 		zap.String("rider_id", profile.ID.String()),
 	)
-
-	// Notify buyer
 	if s.notificationService != nil && pr.BuyerID != nil {
 		data := map[string]string{"job_id": jobID.String(), "payment_request_id": pr.ID.String()}
 		go s.notificationService.SendToUser(context.Background(), *pr.BuyerID, "Order Cancelled",
@@ -919,10 +858,6 @@ func (s *RiderServiceImpl) MarkSellerUnavailable(ctx context.Context, userID uui
 
 	return nil
 }
-
-// MarkBuyerUnavailable handles when buyer is not available at dropoff
-// Flow: set status to buyer_unavailable, start 45-min timer
-// Rider keeps item. Admin/buyer can rebook within 45 min, otherwise forced return initiated
 func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid.UUID, jobID uuid.UUID) (*ForcedReturnInfo, error) {
 	profile, err := s.riderRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -956,8 +891,6 @@ func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid
 	if err != nil {
 		return nil, fmt.Errorf("failed to get payment request: %w", err)
 	}
-
-	// Set 45-min deadline for rebook (rider keeps item, no return job yet)
 	rebookDeadline := now.Add(45 * time.Minute)
 	pr.RebookDeadline = &rebookDeadline
 	pr.Status = domain.PRStatusPendingRebook
@@ -965,8 +898,6 @@ func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return nil, fmt.Errorf("failed to update payment request: %w", err)
 	}
-
-	// Notify buyer, seller, and admin
 	if s.notificationService != nil {
 		data := map[string]string{
 			"job_id":             jobID.String(),
@@ -1075,8 +1006,6 @@ func (s *RiderServiceImpl) CompleteForcedReturn(ctx context.Context, userID uuid
 	s.logger.Info("job status updated successfully")
 
 	s.broadcastJobStatus(jobID, domain.DJStatusForcedReturnDone)
-
-	// Platform pays rider for forced return delivery
 	if job.DeliveryFee > 0 {
 		riderTake := domain.CalculateRiderTake(job.DeliveryFee)
 		s.logger.Info("adding rider earnings for forced return",

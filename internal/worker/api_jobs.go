@@ -10,8 +10,6 @@ import (
 	"kipa/internal/repository"
 	"kipa/internal/websocket"
 )
-
-// APIJobRunner runs background jobs that need WebSocket access (runs in API server, not worker)
 type APIJobRunner struct {
 	deliveryJobRepo         repository.DeliveryJobRepository
 	nearbyRidersFinder      NearbyRidersFinder
@@ -67,8 +65,6 @@ func (r *APIJobRunner) broadcastNearbyRidersToSearchingJobs(ctx context.Context)
 	if r.nearbyRidersFinder == nil || r.nearbyRidersBroadcaster == nil {
 		return
 	}
-
-	// Get all jobs in searching status
 	jobs, err := r.deliveryJobRepo.GetSearchingJobs(ctx, 100)
 	if err != nil {
 		r.logger.Error("nearby riders job: failed to get searching jobs", zap.Error(err))
@@ -85,19 +81,14 @@ func (r *APIJobRunner) broadcastNearbyRidersToSearchingJobs(ctx context.Context)
 }
 
 func (r *APIJobRunner) broadcastNearbyRidersForJob(ctx context.Context, job *domain.DeliveryJob) {
-	// Get job coordinates
 	coords, err := r.deliveryJobRepo.GetJobCoordinates(ctx, job.ID)
 	if err != nil || coords == nil {
 		return
 	}
-
-	// Search radius based on job's search radius or default
 	radiusKM := float64(job.SearchRadiusKM)
 	if radiusKM == 0 {
 		radiusKM = 5.0 // Default 5km
 	}
-
-	// Find nearby riders
 	riders, err := r.nearbyRidersFinder.GetNearbyRiders(ctx, coords.PickupLat, coords.PickupLng, radiusKM, 20)
 	if err != nil {
 		r.logger.Warn("nearby riders job: failed to find nearby riders",
@@ -106,8 +97,6 @@ func (r *APIJobRunner) broadcastNearbyRidersForJob(ctx context.Context, job *dom
 		)
 		return
 	}
-
-	// Convert to WebSocket format
 	wsRiders := make([]websocket.NearbyRiderInfo, len(riders))
 	for i, rd := range riders {
 		wsRiders[i] = websocket.NearbyRiderInfo{
@@ -119,7 +108,5 @@ func (r *APIJobRunner) broadcastNearbyRidersForJob(ctx context.Context, job *dom
 			DistanceKM: rd.DistanceKM,
 		}
 	}
-
-	// Broadcast to job room
 	r.nearbyRidersBroadcaster.BroadcastNearbyRiders(job.ID.String(), wsRiders)
 }

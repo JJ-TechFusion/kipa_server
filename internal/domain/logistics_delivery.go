@@ -5,8 +5,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// LogisticsDeliveryStatus represents the state of an inter-state logistics delivery
 type LogisticsDeliveryStatus string
 
 const (
@@ -27,8 +25,6 @@ const (
 	LDStatusReleasedByAdmin       LogisticsDeliveryStatus = "released_by_admin"
 	LDStatusCancelled             LogisticsDeliveryStatus = "cancelled"
 )
-
-// LogisticsCarrier represents known logistics companies
 type LogisticsCarrier string
 
 const (
@@ -66,61 +62,39 @@ func (c LogisticsCarrier) DisplayName() string {
 	}
 	return string(c)
 }
-
-// LogisticsDelivery represents an inter-state delivery using third-party logistics
 type LogisticsDelivery struct {
 	ID               uuid.UUID `db:"id" json:"id"`
 	PaymentRequestID uuid.UUID `db:"payment_request_id" json:"payment_request_id"`
 	EscrowID         uuid.UUID `db:"escrow_id" json:"escrow_id"`
 	SellerID         uuid.UUID `db:"seller_id" json:"seller_id"`
 	BuyerID          uuid.UUID `db:"buyer_id" json:"buyer_id"`
-
-	// Logistics info
 	Carrier             *LogisticsCarrier `db:"carrier" json:"carrier,omitempty"`
 	CarrierOtherName    *string          `db:"carrier_other_name" json:"carrier_other_name,omitempty"`
 	TrackingNumber      *string          `db:"tracking_number" json:"tracking_number,omitempty"`
 	TrackingURL         *string          `db:"tracking_url" json:"tracking_url,omitempty"`
 	ShipmentReceiptURL  *string          `db:"shipment_receipt_url" json:"shipment_receipt_url,omitempty"`
 	EstimatedDeliveryAt *time.Time       `db:"estimated_delivery_at" json:"estimated_delivery_at,omitempty"`
-
-	// Addresses (copied from payment request for record)
 	PickupAddress  string `db:"pickup_address" json:"pickup_address"`
 	PickupState    string `db:"pickup_state" json:"pickup_state"`
 	DropoffAddress string `db:"dropoff_address" json:"dropoff_address"`
 	DropoffState   string `db:"dropoff_state" json:"dropoff_state"`
-
-	// Status
 	Status LogisticsDeliveryStatus `db:"status" json:"status"`
-
-	// Deadlines
 	ShipDeadline              time.Time  `db:"ship_deadline" json:"ship_deadline"`
 	ConfirmationDeadline      *time.Time `db:"confirmation_deadline" json:"confirmation_deadline,omitempty"`
 	DisputeAutoEscalationAt   *time.Time `db:"dispute_auto_escalation_at" json:"dispute_auto_escalation_at,omitempty"`
-
-	// High value flag
 	RequiresAdminApproval bool `db:"requires_admin_approval" json:"requires_admin_approval"`
-
-	// Return flow
 	ReturnTrackingNumber  *string  `db:"return_tracking_number" json:"return_tracking_number,omitempty"`
 	ReturnCarrier         *string  `db:"return_carrier" json:"return_carrier,omitempty"`
 	ReturnCostBuyerShare  *float64 `db:"return_cost_buyer_share" json:"return_cost_buyer_share,omitempty"`
 	ReturnCostSellerShare *float64 `db:"return_cost_seller_share" json:"return_cost_seller_share,omitempty"`
-
-	// Return condition and damage claim
 	ReturnCondition       *string    `db:"return_condition" json:"return_condition,omitempty"`
 	DamageClaimReason     *string    `db:"damage_claim_reason" json:"damage_claim_reason,omitempty"`
 	DamageClaimEvidenceURLs []string `db:"-" json:"damage_claim_evidence_urls,omitempty"` // Loaded from evidence table
 	ReturnReceivedAt      *time.Time `db:"return_received_at" json:"return_received_at,omitempty"`
-
-	// Dispute reference
 	DisputeID         *uuid.UUID `db:"dispute_id" json:"dispute_id,omitempty"`
 	DisputeOutcome    *string    `db:"dispute_outcome" json:"dispute_outcome,omitempty"` // buyer_wins, seller_wins, partial_refund
-
-	// Reminder tracking
 	LastReminderSentAt *time.Time `db:"last_reminder_sent_at" json:"last_reminder_sent_at,omitempty"`
 	ReminderCount      int        `db:"reminder_count" json:"reminder_count"`
-
-	// Timestamps
 	ShippedAt            *time.Time `db:"shipped_at" json:"shipped_at,omitempty"`
 	DeliveryClaimedAt    *time.Time `db:"delivery_claimed_at" json:"delivery_claimed_at,omitempty"`
 	ConfirmedAt          *time.Time `db:"confirmed_at" json:"confirmed_at,omitempty"`
@@ -129,8 +103,6 @@ type LogisticsDelivery struct {
 	CreatedAt            time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt            time.Time  `db:"updated_at" json:"updated_at"`
 }
-
-// CanTransitionTo validates state transitions
 func (s LogisticsDeliveryStatus) CanTransitionTo(next LogisticsDeliveryStatus) bool {
 	transitions := map[LogisticsDeliveryStatus][]LogisticsDeliveryStatus{
 		LDStatusAwaitingShipment: {
@@ -139,7 +111,6 @@ func (s LogisticsDeliveryStatus) CanTransitionTo(next LogisticsDeliveryStatus) b
 		},
 		LDStatusShipped: {
 			LDStatusDeliveryClaimed,
-			// Dispute only allowed after seller claims delivery
 		},
 		LDStatusDeliveryClaimed: {
 			LDStatusConfirmed,
@@ -192,8 +163,6 @@ func (s LogisticsDeliveryStatus) CanTransitionTo(next LogisticsDeliveryStatus) b
 	}
 	return false
 }
-
-// IsTerminal checks if the status is a final state
 func (s LogisticsDeliveryStatus) IsTerminal() bool {
 	switch s {
 	case LDStatusFundsReleased, LDStatusRefunded, LDStatusReleasedByAdmin, LDStatusCancelled:
@@ -201,34 +170,21 @@ func (s LogisticsDeliveryStatus) IsTerminal() bool {
 	}
 	return false
 }
-
-// CanBeCancelled checks if the delivery can be cancelled
 func (ld *LogisticsDelivery) CanBeCancelled() bool {
 	return ld.Status == LDStatusAwaitingShipment
 }
-
-// CanBeShipped checks if seller can mark as shipped
 func (ld *LogisticsDelivery) CanBeShipped() bool {
 	return ld.Status == LDStatusAwaitingShipment
 }
-
-// CanClaimDelivery checks if seller can claim delivery
 func (ld *LogisticsDelivery) CanClaimDelivery() bool {
 	return ld.Status == LDStatusShipped
 }
-
-// CanConfirmDelivery checks if buyer can confirm
 func (ld *LogisticsDelivery) CanConfirmDelivery() bool {
 	return ld.Status == LDStatusDeliveryClaimed
 }
-
-// CanOpenDispute checks if buyer can open a dispute
-// Buyer can only dispute after seller has claimed delivery
 func (ld *LogisticsDelivery) CanOpenDispute() bool {
 	return ld.Status == LDStatusDeliveryClaimed
 }
-
-// CanSellerOpenDispute checks if seller can open dispute (buyer unresponsive)
 func (ld *LogisticsDelivery) CanSellerOpenDispute() bool {
 	if ld.Status != LDStatusDeliveryClaimed {
 		return false
@@ -236,16 +192,11 @@ func (ld *LogisticsDelivery) CanSellerOpenDispute() bool {
 	if ld.DeliveryClaimedAt == nil {
 		return false
 	}
-	// Seller can open dispute after 7 days of buyer non-response
 	return time.Since(*ld.DeliveryClaimedAt) >= 7*24*time.Hour
 }
-
-// CanSellerConfirmReturn checks if seller can confirm return received
 func (ld *LogisticsDelivery) CanSellerConfirmReturn() bool {
 	return ld.Status == LDStatusReturnShipped
 }
-
-// IsInReturnFlow checks if delivery is in return flow
 func (ld *LogisticsDelivery) IsInReturnFlow() bool {
 	switch ld.Status {
 	case LDStatusReturnRequired, LDStatusReturnShipped,
@@ -254,18 +205,12 @@ func (ld *LogisticsDelivery) IsInReturnFlow() bool {
 	}
 	return false
 }
-
-// HasDamageClaim checks if there's a pending damage claim
 func (ld *LogisticsDelivery) HasDamageClaim() bool {
 	return ld.Status == LDStatusReturnDamageDisputed
 }
-
-// IsShipDeadlineExceeded checks if ship deadline has passed
 func (ld *LogisticsDelivery) IsShipDeadlineExceeded() bool {
 	return ld.Status == LDStatusAwaitingShipment && time.Now().After(ld.ShipDeadline)
 }
-
-// ShouldAutoEscalate checks if this should be auto-escalated to admin
 func (ld *LogisticsDelivery) ShouldAutoEscalate() bool {
 	if ld.Status != LDStatusDeliveryClaimed {
 		return false
@@ -275,8 +220,6 @@ func (ld *LogisticsDelivery) ShouldAutoEscalate() bool {
 	}
 	return time.Now().After(*ld.DisputeAutoEscalationAt)
 }
-
-// LogisticsDeliveryEvent represents an audit log entry for a logistics delivery
 type LogisticsDeliveryEvent struct {
 	ID                   uuid.UUID                `db:"id" json:"id"`
 	LogisticsDeliveryID  uuid.UUID                `db:"logistics_delivery_id" json:"logistics_delivery_id"`
@@ -288,8 +231,6 @@ type LogisticsDeliveryEvent struct {
 	Metadata             []byte                   `db:"metadata" json:"-"` // JSONB
 	CreatedAt            time.Time                `db:"created_at" json:"created_at"`
 }
-
-// LogisticsEvidence represents uploaded evidence for a logistics delivery
 type LogisticsEvidence struct {
 	ID                  uuid.UUID  `db:"id" json:"id"`
 	LogisticsDeliveryID uuid.UUID  `db:"logistics_delivery_id" json:"logistics_delivery_id"`
@@ -300,8 +241,6 @@ type LogisticsEvidence struct {
 	Description         *string    `db:"description" json:"description,omitempty"`
 	UploadedAt          time.Time  `db:"uploaded_at" json:"uploaded_at"`
 }
-
-// LogisticsDeliveryDetails includes related entities for display
 type LogisticsDeliveryDetails struct {
 	Delivery       *LogisticsDelivery   `json:"delivery"`
 	PaymentRequest *PaymentRequest      `json:"payment_request"`

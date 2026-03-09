@@ -9,14 +9,9 @@ import (
 
 	"kipa/internal/domain"
 )
-
-// DriverServiceInterface is the subset of DriverService needed by the worker
 type DriverServiceInterface interface {
-	// Phase 4: Auto-confirm
 	GetExpiredConfirmationWindows(ctx context.Context) ([]*domain.DriverDelivery, error)
 	AutoConfirmDelivery(ctx context.Context, deliveryID uuid.UUID) error
-
-	// Phase 5: Edge cases
 	GetExpiredUnreachableDeliveries(ctx context.Context) ([]*domain.DriverDelivery, error)
 	ProcessExpiredUnreachable(ctx context.Context, deliveryID uuid.UUID) error
 	GetStaleAwaitingDriver(ctx context.Context, hoursThreshold int) ([]*domain.DriverDelivery, error)
@@ -24,19 +19,12 @@ type DriverServiceInterface interface {
 	GetAbandonedTrips(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error)
 	ProcessAbandonedTrip(ctx context.Context, tripID uuid.UUID) error
 	GetStaleDepartures(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error)
-
-	// Driver offer expiry
 	ExpireStaleOffers(ctx context.Context) error
 }
-
-// runDriverDeliveryAutoConfirmJob runs periodically to auto-confirm deliveries
-// whose 24h confirmation window has expired
 func (p *JobProcessor) runDriverDeliveryAutoConfirmJob(ctx context.Context) {
 	interval := 5 * time.Minute // Check every 5 minutes
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-
-	// Process immediately on start
 	p.processDriverDeliveryAutoConfirm(ctx)
 
 	for {
@@ -101,20 +89,10 @@ func (p *JobProcessor) processDriverDeliveryAutoConfirm(ctx context.Context) {
 
 	p.logger.Debug("driver delivery auto-confirm job: completed successfully")
 }
-
-// ============================================
-// PHASE 5: EDGE CASE MONITOR JOBS
-// ============================================
-
-// runDriverDeliveryMonitorJob monitors for edge cases:
-// - Buyer unreachable deadline expired (24h)
-// - No driver found (48h)
 func (p *JobProcessor) runDriverDeliveryMonitorJob(ctx context.Context) {
 	interval := 10 * time.Minute
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-
-	// Process immediately on start
 	p.processExpiredUnreachable(ctx)
 	p.processStaleAwaitingDriver(ctx)
 
@@ -180,8 +158,6 @@ func (p *JobProcessor) processStaleAwaitingDriver(ctx context.Context) {
 	if release != nil {
 		defer release()
 	}
-
-	// 48 hours threshold for no driver found
 	deliveries, err := p.driverService.GetStaleAwaitingDriver(ctx, 48)
 	if err != nil {
 		p.logger.Error("driver monitor job: failed to get stale awaiting driver deliveries",
@@ -203,16 +179,10 @@ func (p *JobProcessor) processStaleAwaitingDriver(ctx context.Context) {
 		)
 	}
 }
-
-// runDriverTripMonitorJob monitors for trip edge cases:
-// - Stale departures (scheduled but no departure after 24h)
-// - Abandoned trips (in transit but no updates for 72h)
 func (p *JobProcessor) runDriverTripMonitorJob(ctx context.Context) {
 	interval := 30 * time.Minute
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-
-	// Process immediately on start
 	p.processStaleDepartures(ctx)
 	p.processAbandonedTrips(ctx)
 
@@ -243,8 +213,6 @@ func (p *JobProcessor) processStaleDepartures(ctx context.Context) {
 	if release != nil {
 		defer release()
 	}
-
-	// 24 hours threshold for stale departure
 	trips, err := p.driverService.GetStaleDepartures(ctx, 24)
 	if err != nil {
 		p.logger.Error("driver trip monitor job: failed to get stale departures",
@@ -254,12 +222,10 @@ func (p *JobProcessor) processStaleDepartures(ctx context.Context) {
 	}
 
 	for _, trip := range trips {
-		// Send reminder notification to driver
 		p.logger.Warn("driver trip monitor job: stale departure detected",
 			zap.String("trip_id", trip.ID.String()),
 			zap.String("driver_id", trip.DriverID.String()),
 		)
-		// TODO: Send notification to driver
 	}
 }
 
@@ -275,8 +241,6 @@ func (p *JobProcessor) processAbandonedTrips(ctx context.Context) {
 	if release != nil {
 		defer release()
 	}
-
-	// 72 hours threshold for abandoned trip
 	trips, err := p.driverService.GetAbandonedTrips(ctx, 72)
 	if err != nil {
 		p.logger.Error("driver trip monitor job: failed to get abandoned trips",

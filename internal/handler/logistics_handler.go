@@ -26,32 +26,21 @@ func (h *LogisticsHandler) RegisterRoutes(router *gin.RouterGroup, authMiddlewar
 	logistics := router.Group("/logistics")
 	logistics.Use(authMiddleware.RequireAuth())
 	{
-		// Queries
 		logistics.GET("/:id", h.GetDelivery)
 		logistics.GET("/:id/details", h.GetDeliveryDetails)
 		logistics.GET("/:id/timeline", h.GetTimeline)
 		logistics.GET("/seller", h.ListSellerDeliveries)
 		logistics.GET("/buyer", h.ListBuyerDeliveries)
-
-		// Seller actions
 		logistics.POST("/:id/ship", h.MarkShipped)
 		logistics.PATCH("/:id/tracking", h.UpdateTracking)
 		logistics.POST("/:id/claim-delivery", h.ClaimDelivery)
 		logistics.POST("/:id/confirm-return", h.ConfirmReturnReceived)
-
-		// Buyer actions
 		logistics.POST("/:id/confirm", h.ConfirmDelivery)
 		logistics.POST("/:id/cancel", h.CancelDelivery)
 		logistics.POST("/:id/return-shipped", h.MarkReturnShipped)
-
-		// Dispute actions (both buyer and seller)
 		logistics.POST("/:id/dispute", h.OpenDispute)
-
-		// Evidence upload
 		logistics.POST("/:id/evidence", h.UploadEvidence)
 	}
-
-	// Admin routes
 	admin := router.Group("/admin/logistics")
 	admin.Use(authMiddleware.RequireAuth(), adminMiddleware.RequireAdmin())
 	{
@@ -64,10 +53,6 @@ func (h *LogisticsHandler) RegisterRoutes(router *gin.RouterGroup, authMiddlewar
 		admin.POST("/:id/approve-refund", h.ApproveRefund)
 	}
 }
-
-// ============================================
-// QUERIES
-// ============================================
 
 func (h *LogisticsHandler) GetDelivery(c *gin.Context) {
 	deliveryID, err := uuid.Parse(c.Param("id"))
@@ -87,14 +72,10 @@ func (h *LogisticsHandler) GetDelivery(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Check authorization
 	if delivery.SellerID != userID && delivery.BuyerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "Not authorized to view this delivery")
 		return
 	}
-
-	// Get timeline
 	timeline, _ := h.logisticsService.GetTimeline(c.Request.Context(), deliveryID)
 
 	util.Success(c, http.StatusOK, gin.H{
@@ -121,14 +102,10 @@ func (h *LogisticsHandler) GetDeliveryDetails(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-
-	// Check authorization
 	if details.Delivery.SellerID != userID && details.Delivery.BuyerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "Not authorized to view this delivery")
 		return
 	}
-
-	// Get timeline
 	timeline, _ := h.logisticsService.GetTimeline(c.Request.Context(), deliveryID)
 
 	util.Success(c, http.StatusOK, gin.H{
@@ -209,10 +186,6 @@ func (h *LogisticsHandler) ListBuyerDeliveries(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, response)
 }
-
-// ============================================
-// SELLER ACTIONS
-// ============================================
 
 func (h *LogisticsHandler) MarkShipped(c *gin.Context) {
 	deliveryID, err := uuid.Parse(c.Param("id"))
@@ -322,10 +295,6 @@ func (h *LogisticsHandler) ConfirmReturnReceived(c *gin.Context) {
 	util.Success(c, http.StatusOK, gin.H{"message": "Return confirmed - refund will be processed"})
 }
 
-// ============================================
-// BUYER ACTIONS
-// ============================================
-
 func (h *LogisticsHandler) ConfirmDelivery(c *gin.Context) {
 	deliveryID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -407,10 +376,6 @@ func (h *LogisticsHandler) MarkReturnShipped(c *gin.Context) {
 	util.Success(c, http.StatusOK, gin.H{"message": "Return shipped - seller has been notified"})
 }
 
-// ============================================
-// DISPUTE ACTIONS
-// ============================================
-
 func (h *LogisticsHandler) OpenDispute(c *gin.Context) {
 	deliveryID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -429,8 +394,6 @@ func (h *LogisticsHandler) OpenDispute(c *gin.Context) {
 		util.ValidationError(c, err)
 		return
 	}
-
-	// Determine opener type by checking delivery
 	delivery, err := h.logisticsService.GetByID(c.Request.Context(), deliveryID)
 	if err != nil {
 		h.handleError(c, err)
@@ -455,10 +418,6 @@ func (h *LogisticsHandler) OpenDispute(c *gin.Context) {
 	util.Success(c, http.StatusOK, gin.H{"message": "Dispute opened - admin will review"})
 }
 
-// ============================================
-// EVIDENCE
-// ============================================
-
 func (h *LogisticsHandler) UploadEvidence(c *gin.Context) {
 	deliveryID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -477,8 +436,6 @@ func (h *LogisticsHandler) UploadEvidence(c *gin.Context) {
 		util.ValidationError(c, err)
 		return
 	}
-
-	// Determine uploader type
 	delivery, err := h.logisticsService.GetByID(c.Request.Context(), deliveryID)
 	if err != nil {
 		h.handleError(c, err)
@@ -502,10 +459,6 @@ func (h *LogisticsHandler) UploadEvidence(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, gin.H{"message": "Evidence uploaded"})
 }
-
-// ============================================
-// ADMIN ACTIONS
-// ============================================
 
 func (h *LogisticsHandler) ListPendingAdminApproval(c *gin.Context) {
 	var req dto.ListLogisticsDeliveriesRequest
@@ -694,8 +647,6 @@ func (h *LogisticsHandler) GetTimeline(c *gin.Context) {
 		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
 		return
 	}
-
-	// Check authorization first
 	delivery, err := h.logisticsService.GetByID(c.Request.Context(), deliveryID)
 	if err != nil {
 		h.handleError(c, err)
@@ -715,10 +666,6 @@ func (h *LogisticsHandler) GetTimeline(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, timeline)
 }
-
-// ============================================
-// ERROR HANDLING
-// ============================================
 
 func (h *LogisticsHandler) handleError(c *gin.Context, err error) {
 	status, code, message := mapLogisticsErrorToResponse(err)

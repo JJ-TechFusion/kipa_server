@@ -14,10 +14,6 @@ import (
 	"github.com/lib/pq"
 )
 
-// ============================================
-// DRIVER PROFILE REPOSITORY
-// ============================================
-
 type DriverProfileRepo struct {
 	db *sqlx.DB
 }
@@ -276,10 +272,6 @@ func (r *DriverProfileRepo) GetStatistics(ctx context.Context) (*repository.Driv
 
 	return &stats, nil
 }
-
-// ============================================
-// DRIVER TRIP REPOSITORY
-// ============================================
 
 type DriverTripRepo struct {
 	db *sqlx.DB
@@ -600,10 +592,6 @@ func (r *DriverTripRepo) GetAbandonedTrips(ctx context.Context, hoursThreshold i
 
 	return trips, nil
 }
-
-// ============================================
-// DRIVER DELIVERY REPOSITORY
-// ============================================
 
 type DriverDeliveryRepo struct {
 	db *sqlx.DB
@@ -1064,7 +1052,6 @@ func (r *DriverDeliveryRepo) GetStaleInTransit(ctx context.Context, hoursThresho
 
 func (r *DriverDeliveryRepo) GetExpiredConfirmationWindow(ctx context.Context) ([]*domain.DriverDelivery, error) {
 	var deliveries []*domain.DriverDelivery
-	// Auto-confirm after 7 days if buyer doesn't respond
 	query := `
 		SELECT * FROM driver_deliveries
 		WHERE status = 'confirmation_window'
@@ -1079,10 +1066,6 @@ func (r *DriverDeliveryRepo) GetExpiredConfirmationWindow(ctx context.Context) (
 
 	return deliveries, nil
 }
-
-// ============================================
-// DRIVER DELIVERY EVENT REPOSITORY
-// ============================================
 
 type DriverDeliveryEventRepo struct {
 	db *sqlx.DB

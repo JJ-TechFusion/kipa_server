@@ -64,8 +64,6 @@ type FeeCalculatorServiceImpl struct {
 	mapsClient   maps.MapsClient
 	config       *config.Config
 	logger       *zap.Logger
-
-	// Caching
 	pricingCache   *domain.DeliveryPricing
 	feesCache      *domain.PlatformFees
 	cacheExpiry    time.Time
@@ -101,7 +99,6 @@ func (s *FeeCalculatorServiceImpl) CalculateDeliveryFee(ctx context.Context, pic
 				zap.Error(err),
 			)
 			distanceKM = s.calculateDistanceKM(pickupLat, pickupLng, dropoffLat, dropoffLng)
-			// Estimate duration: ~30 km/h average speed in traffic
 			durationMinutes = int(distanceKM * 2)
 		} else {
 			distanceKM = etaResult.DistanceKM
@@ -258,12 +255,8 @@ func (s *FeeCalculatorServiceImpl) getDeliveryPricing() *domain.DeliveryPricing 
 		return pricing
 	}
 	s.cacheMutex.RUnlock()
-
-	// Cache miss - fetch from database
 	s.cacheMutex.Lock()
 	defer s.cacheMutex.Unlock()
-
-	// Double-check after acquiring write lock
 	if s.pricingCache != nil && time.Now().Before(s.cacheExpiry) {
 		return s.pricingCache
 	}
@@ -299,12 +292,8 @@ func (s *FeeCalculatorServiceImpl) getPlatformFees() *domain.PlatformFees {
 		return fees
 	}
 	s.cacheMutex.RUnlock()
-
-	// Cache miss - fetch from database
 	s.cacheMutex.Lock()
 	defer s.cacheMutex.Unlock()
-
-	// Double-check after acquiring write lock
 	if s.feesCache != nil && time.Now().Before(s.cacheExpiry) {
 		return s.feesCache
 	}

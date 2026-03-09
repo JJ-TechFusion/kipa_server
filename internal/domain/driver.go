@@ -5,8 +5,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// DriverStatus represents the operational status of a driver
 type DriverStatus string
 
 const (
@@ -29,8 +27,6 @@ func (s DriverStatus) IsValid() bool {
 func (s DriverStatus) CanAcceptDeliveries() bool {
 	return s == DriverStatusIdle || s == DriverStatusLoading
 }
-
-// DriverVehicleType represents the type of vehicle a driver operates
 type DriverVehicleType string
 
 const (
@@ -46,37 +42,23 @@ func (v DriverVehicleType) IsValid() bool {
 	}
 	return false
 }
-
-// DriverProfile represents an inter-state driver's profile
 type DriverProfile struct {
 	ID     uuid.UUID `db:"id" json:"id"`
 	UserID uuid.UUID `db:"user_id" json:"user_id"`
-
-	// Status
 	Status DriverStatus `db:"status" json:"status"`
-
-	// Capacity limits
 	MaxCarryingValue    float64 `db:"max_carrying_value" json:"max_carrying_value"`
 	CurrentCarryValue   float64 `db:"current_carry_value" json:"current_carry_value"`
 	MaxPackageCount     int     `db:"max_package_count" json:"max_package_count"`
 	CurrentPackageCount int     `db:"current_package_count" json:"current_package_count"`
-
-	// Vehicle info
 	VehicleType  DriverVehicleType `db:"vehicle_type" json:"vehicle_type"`
 	LicensePlate string            `db:"license_plate" json:"license_plate"`
 	IsVerified   bool              `db:"is_verified" json:"is_verified"`
-
-	// Stats
 	TotalDeliveries int     `db:"total_deliveries" json:"total_deliveries"`
 	TotalEarnings   float64 `db:"total_earnings" json:"total_earnings"`
 	Rating          float64 `db:"rating" json:"rating"`
-
-	// Current trip
 	CurrentTripID   *uuid.UUID `db:"current_trip_id" json:"current_trip_id,omitempty"`
 	OriginCity      *string    `db:"origin_city" json:"origin_city,omitempty"`
 	DestinationCity *string    `db:"destination_city" json:"destination_city,omitempty"`
-
-	// Verification documents
 	NINNumber        *string `db:"nin_number" json:"nin_number,omitempty"`
 	NINPhotoURL      *string `db:"nin_photo_url" json:"nin_photo_url,omitempty"`
 	LicenseNumber    *string `db:"license_number" json:"license_number,omitempty"`
@@ -152,8 +134,6 @@ func (d *DriverProfile) AvailableCapacity() float64 {
 func (d *DriverProfile) AvailableSlots() int {
 	return d.MaxPackageCount - d.CurrentPackageCount
 }
-
-// DriverTripStatus represents the status of a driver trip
 type DriverTripStatus string
 
 const (
@@ -183,25 +163,15 @@ func (s DriverTripStatus) CanAcceptDeliveries() bool {
 func (s DriverTripStatus) IsTerminal() bool {
 	return s == DriverTripStatusCompleted || s == DriverTripStatusCancelled
 }
-
-// DriverTrip groups multiple deliveries for a single driver route
 type DriverTrip struct {
 	ID       uuid.UUID `db:"id" json:"id"`
 	DriverID uuid.UUID `db:"driver_id" json:"driver_id"`
-
-	// Route
 	OriginCity      string `db:"origin_city" json:"origin_city"`
 	DestinationCity string `db:"destination_city" json:"destination_city"`
-
-	// Status
 	Status DriverTripStatus `db:"status" json:"status"`
-
-	// Aggregates
 	TotalPackages  int     `db:"total_packages" json:"total_packages"`
 	TotalValue     float64 `db:"total_value" json:"total_value"`
 	TotalDriverFee float64 `db:"total_driver_fee" json:"total_driver_fee"`
-
-	// Timeline
 	AcceptingUntil *time.Time `db:"accepting_until" json:"accepting_until,omitempty"`
 	DepartedAt     *time.Time `db:"departed_at" json:"departed_at,omitempty"`
 	ArrivedAt      *time.Time `db:"arrived_at" json:"arrived_at,omitempty"`
@@ -243,8 +213,6 @@ func (t *DriverTrip) RemoveDelivery(itemValue, driverFee float64) {
 		t.TotalDriverFee = 0
 	}
 }
-
-// DriverDeliveryStatus represents the status of an individual driver delivery
 type DriverDeliveryStatus string
 
 const (
@@ -321,36 +289,24 @@ func (s DriverDeliveryStatus) CanTransitionTo(next DriverDeliveryStatus) bool {
 	}
 	return false
 }
-
-// DriverDelivery represents a single package being delivered by a driver
 type DriverDelivery struct {
 	ID               uuid.UUID  `db:"id" json:"id"`
 	PaymentRequestID uuid.UUID  `db:"payment_request_id" json:"payment_request_id"`
 	TripID           *uuid.UUID `db:"trip_id" json:"trip_id,omitempty"`
 	DriverID         *uuid.UUID `db:"driver_id" json:"driver_id,omitempty"`
-
-	// Route
 	OriginCity      string `db:"origin_city" json:"origin_city"`
 	DestinationCity string `db:"destination_city" json:"destination_city"`
 	PickupAddress   string `db:"pickup_address" json:"pickup_address"`
 	DropoffAddress  string `db:"dropoff_address" json:"dropoff_address"`
-
-	// Value
 	ItemValue float64 `db:"item_value" json:"item_value"`
 	DriverFee float64 `db:"driver_fee" json:"driver_fee"`
-
-	// Codes
 	PickupCode            *string    `db:"pickup_code" json:"pickup_code,omitempty"`
 	PickupCodeGeneratedAt *time.Time `db:"pickup_code_generated_at" json:"pickup_code_generated_at,omitempty"`
 	PickupAttempts        int        `db:"pickup_attempts" json:"pickup_attempts"`
 	DropoffCode           *string    `db:"dropoff_code" json:"dropoff_code,omitempty"`
 	DropoffCodeGeneratedAt *time.Time `db:"dropoff_code_generated_at" json:"dropoff_code_generated_at,omitempty"`
 	DropoffAttempts       int        `db:"dropoff_attempts" json:"dropoff_attempts"`
-
-	// Status
 	Status DriverDeliveryStatus `db:"status" json:"status"`
-
-	// Timeline (manual updates, no GPS)
 	DriverAssignedAt *time.Time `db:"driver_assigned_at" json:"driver_assigned_at,omitempty"`
 	AtPickupAt       *time.Time `db:"at_pickup_at" json:"at_pickup_at,omitempty"`
 	PickedUpAt       *time.Time `db:"picked_up_at" json:"picked_up_at,omitempty"`
@@ -358,15 +314,9 @@ type DriverDelivery struct {
 	ArrivedAt        *time.Time `db:"arrived_at" json:"arrived_at,omitempty"`
 	DeliveredAt      *time.Time `db:"delivered_at" json:"delivered_at,omitempty"`
 	CompletedAt      *time.Time `db:"completed_at" json:"completed_at,omitempty"`
-
-	// Buyer unreachable
 	BuyerUnreachableAt  *time.Time `db:"buyer_unreachable_at" json:"buyer_unreachable_at,omitempty"`
 	UnreachableDeadline *time.Time `db:"unreachable_deadline" json:"unreachable_deadline,omitempty"`
-
-	// Escrow
 	EscrowID *uuid.UUID `db:"escrow_id" json:"escrow_id,omitempty"`
-
-	// Seller/Buyer references (from payment request)
 	SellerID uuid.UUID  `db:"seller_id" json:"seller_id"`
 	BuyerID  *uuid.UUID `db:"buyer_id" json:"buyer_id,omitempty"`
 
@@ -379,7 +329,6 @@ const (
 	MaxDropoffAttempts = 3
 	CodeLength         = 6
 	CodeExpiryHours    = 24
-	// AutoConfirmDays is for auto-confirm if buyer doesn't respond (not a constraint on manual confirm)
 	AutoConfirmDays = 7
 	BuyerUnreachableWindowHours = 24
 	BuyerUnreachablePenaltyPercent = 10.0
@@ -414,27 +363,21 @@ func (d *DriverDelivery) IsDropoffCodeLocked() bool {
 func (d *DriverDelivery) HasDriver() bool {
 	return d.DriverID != nil
 }
-
-// IsAcceptingOffers checks if the delivery is accepting offers from drivers
 func (d *DriverDelivery) IsAcceptingOffers() bool {
 	return d.Status == DDStatusAwaitingOffers
 }
 
 func (d *DriverDelivery) CanBeCancelled() bool {
-	// Can only cancel before item is picked up
 	switch d.Status {
 	case DDStatusAwaitingDriver, DDStatusAwaitingOffers, DDStatusDriverAssigned, DDStatusAwaitingPickup:
 		return true
 	}
 	return false
 }
-
-// CanBeCancelledWithTrip checks if delivery can be cancelled considering trip status
 func (d *DriverDelivery) CanBeCancelledWithTrip(tripStatus DriverTripStatus) bool {
 	if !d.CanBeCancelled() {
 		return false
 	}
-	// If trip assigned, can only cancel before trip departs (in_transit)
 	if d.TripID != nil {
 		return tripStatus == DriverTripStatusAccepting || tripStatus == DriverTripStatusLoading
 	}
@@ -444,8 +387,6 @@ func (d *DriverDelivery) CanBeCancelledWithTrip(tripStatus DriverTripStatus) boo
 func (d *DriverDelivery) CalculatePenalty() float64 {
 	return d.ItemValue * (BuyerUnreachablePenaltyPercent / 100.0)
 }
-
-// DriverDeliveryActorType represents who performed an action
 type DriverDeliveryActorType string
 
 const (
@@ -455,8 +396,6 @@ const (
 	DDActorSystem DriverDeliveryActorType = "system"
 	DDActorAdmin  DriverDeliveryActorType = "admin"
 )
-
-// DriverDeliveryEvent tracks status changes for audit
 type DriverDeliveryEvent struct {
 	ID         uuid.UUID               `db:"id" json:"id"`
 	DeliveryID uuid.UUID               `db:"delivery_id" json:"delivery_id"`

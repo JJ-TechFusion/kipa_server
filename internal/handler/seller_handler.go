@@ -49,19 +49,13 @@ func (h *SellerHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *
 		seller.GET("/sales/:id", h.GetSale)
 		seller.GET("/sales/:id/timeline", h.GetSaleTimeline)
 		seller.GET("/earnings", h.GetEarnings)
-
-		// Return flow endpoints
 		seller.GET("/sales/:id/return", h.GetReturnStatus)
 		seller.POST("/sales/:id/confirm-return", h.ConfirmReturn)
-
-		// Driver delivery endpoints (inter-state)
 		seller.GET("/driver-deliveries", h.ListDriverDeliveries)
 		seller.GET("/driver-deliveries/:id", h.GetDriverDelivery)
 		seller.GET("/driver-deliveries/:id/timeline", h.GetDriverDeliveryTimeline)
 		seller.GET("/driver-deliveries/:id/pickup-code", h.GetPickupCode)
 		seller.POST("/driver-deliveries/:id/cancel", h.CancelDriverDelivery)
-
-		// Driver offer management (for inter-state deliveries)
 		seller.GET("/driver-deliveries/:id/offers", h.GetDeliveryOffers)
 		seller.POST("/driver-deliveries/:id/offers/:oid/accept", h.AcceptDriverOffer)
 		seller.POST("/driver-deliveries/:id/offers/:oid/reject", h.RejectDriverOffer)
@@ -74,8 +68,6 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
 		return
 	}
-
-	// Get status filter from query param
 	statusFilter := c.Query("status")
 
 	limit := 50
@@ -86,8 +78,6 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to fetch sales")
 		return
 	}
-
-	// Count orders by status for tabs
 	statusCounts := map[string]int{
 		"all":         0,
 		"processing":  0,
@@ -102,8 +92,6 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 		if err != nil {
 			continue
 		}
-
-		// Count by status
 		statusCounts["all"]++
 		switch order.Status {
 		case domain.OrderStatusPaid, domain.OrderStatusProcessing, domain.OrderStatusReady:
@@ -115,8 +103,6 @@ func (h *SellerHandler) ListSales(c *gin.Context) {
 		case domain.OrderStatusDisputed:
 			statusCounts["disputed"]++
 		}
-
-		// Apply status filter
 		if statusFilter != "" && statusFilter != "all" {
 			switch statusFilter {
 			case "processing":
@@ -204,8 +190,6 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 			}
 		}
 	}
-
-	// Get delivery job for timeline (intra-state)
 	var job *domain.DeliveryJob
 	var returnJob *domain.DeliveryJob
 	var forcedReturnJob *domain.DeliveryJob
@@ -213,17 +197,13 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 		if pr.DeliveryJobID != nil {
 			job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 		}
-		// Fetch return job if exists (dispute return)
 		if pr.ReturnDeliveryJobID != nil {
 			returnJob, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ReturnDeliveryJobID)
 		}
-		// Fetch forced return job if exists (buyer unavailable)
 		if pr.ForcedReturnJobID != nil {
 			forcedReturnJob, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.ForcedReturnJobID)
 		}
 	}
-
-	// Determine if we're in return phase
 	isReturnPhase := pr.Status.IsReturnFlow()
 
 	var deliveryInfo *SaleDeliveryInfo
@@ -234,7 +214,6 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 			RiderAssigned: job.RiderID != nil,
 			Phase:         "delivery",
 		}
-		// In normal delivery phase, seller sees pickup code
 		if job.RiderID != nil && job.PickupCode != nil {
 			deliveryInfo.PickupCode = job.PickupCode
 		}
@@ -246,16 +225,12 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 			t := job.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
 			deliveryInfo.DeliveredAt = &t
 		}
-
-		// If in return phase, include return job info
 		if isReturnPhase && returnJob != nil {
 			deliveryInfo.Phase = "return"
 			deliveryInfo.ReturnJobID = &returnJob.ID
 			returnStatus := string(returnJob.Status)
 			deliveryInfo.ReturnStatus = &returnStatus
 			deliveryInfo.ReturnRiderAssigned = returnJob.RiderID != nil
-
-			// In return phase, SELLER is at dropoff location, so seller sees DROPOFF code
 			if returnJob.RiderID != nil && returnJob.DropoffCode != nil {
 				deliveryInfo.DropoffCode = returnJob.DropoffCode
 			}
@@ -268,16 +243,11 @@ func (h *SellerHandler) GetSale(c *gin.Context) {
 				t := returnJob.DeliveredAt.Format("2006-01-02T15:04:05Z07:00")
 				deliveryInfo.ReturnDeliveredAt = &t
 			}
-
-			// Seller can confirm return when status is return_delivered
 			deliveryInfo.CanConfirmReturn = returnJob.Status == domain.DJStatusReturnDelivered
 		} else if isReturnPhase && returnJob == nil {
-			// Return is required but job not yet created
 			deliveryInfo.Phase = "return"
 		}
 	}
-
-	// Use forced return job for timeline if in rebook flow
 	timelineReturnJob := returnJob
 	if forcedReturnJob != nil && returnJob == nil {
 		timelineReturnJob = forcedReturnJob
@@ -393,8 +363,6 @@ type SaleDeliveryInfo struct {
 	RiderAssigned bool       `json:"rider_assigned"`
 	PickedUpAt    *string    `json:"picked_up_at,omitempty"`
 	DeliveredAt   *string    `json:"delivered_at,omitempty"`
-
-	// Return-specific fields
 	ReturnStatus        *string `json:"return_status,omitempty"`
 	ReturnRiderAssigned bool    `json:"return_rider_assigned,omitempty"`
 	ReturnPickedUpAt    *string `json:"return_picked_up_at,omitempty"`
@@ -438,8 +406,6 @@ func orderToSaleResponse(order *domain.Order, pr *domain.PaymentRequest, escrowS
 		paidAt := order.PaidAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.PaidAt = &paidAt
 	}
-
-	// Add delivery info if job exists
 	if job != nil {
 		deliveryInfo := &SaleDeliveryInfo{
 			JobID:         &job.ID,
@@ -447,8 +413,6 @@ func orderToSaleResponse(order *domain.Order, pr *domain.PaymentRequest, escrowS
 			RiderAssigned: job.RiderID != nil,
 			Phase:         "delivery",
 		}
-
-		// In delivery phase, seller sees pickup code
 		if job.RiderID != nil && job.PickupCode != nil {
 			deliveryInfo.PickupCode = job.PickupCode
 		}
@@ -513,8 +477,6 @@ func (h *SellerHandler) GetSaleTimeline(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, timeline)
 }
-
-// GetReturnStatus returns the return job status for a sale
 func (h *SellerHandler) GetReturnStatus(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -544,8 +506,6 @@ func (h *SellerHandler) GetReturnStatus(c *gin.Context) {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this sale")
 		return
 	}
-
-	// Check if there's a return job
 	if pr.ReturnDeliveryJobID == nil {
 		util.Error(c, http.StatusNotFound, "NO_RETURN", "No return in progress for this sale")
 		return
@@ -571,8 +531,6 @@ func (h *SellerHandler) GetReturnStatus(c *gin.Context) {
 		CanConfirm:        returnJob.Status == domain.DJStatusReturnDelivered,
 	})
 }
-
-// ConfirmReturn handles seller confirming return receipt
 func (h *SellerHandler) ConfirmReturn(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -613,8 +571,6 @@ func (h *SellerHandler) ConfirmReturn(c *gin.Context) {
 		util.Error(c, http.StatusBadRequest, "NO_RETURN", "No return in progress for this sale")
 		return
 	}
-
-	// Build service request
 	serviceReq := &service.ConfirmReturnRequest{
 		Condition:          req.Condition,
 		Notes:              req.Notes,
@@ -655,10 +611,6 @@ type ConfirmReturnRequest struct {
 	DamageReason       *string  `json:"damage_reason"`
 	DamageEvidenceURLs []string `json:"damage_evidence_urls"`
 }
-
-// ============================================
-// Driver Delivery Endpoints (Inter-state)
-// ============================================
 
 func (h *SellerHandler) ListDriverDeliveries(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -709,8 +661,6 @@ func (h *SellerHandler) GetDriverDelivery(c *gin.Context) {
 		util.Error(c, http.StatusNotFound, "NOT_FOUND", "Delivery not found")
 		return
 	}
-
-	// Get payment request for timeline
 	pr, _ := h.prService.GetByID(c.Request.Context(), delivery.PaymentRequestID)
 
 	resp := driverDeliveryToResponse(delivery)
@@ -810,10 +760,6 @@ func (h *SellerHandler) GetDriverDeliveryTimeline(c *gin.Context) {
 	timeline := BuildDriverDeliveryTimeline(TimelineViewSeller, delivery, pr)
 	util.Success(c, http.StatusOK, timeline)
 }
-
-// ============================================
-// Driver Offer Management (Inter-state)
-// ============================================
 
 func (h *SellerHandler) GetDeliveryOffers(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
@@ -959,10 +905,6 @@ func (h *SellerHandler) handleOfferError(c *gin.Context, err error) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "An error occurred")
 	}
 }
-
-// ============================================
-// Offer Response Types
-// ============================================
 
 type SellerDriverOfferResponse struct {
 	ID               string   `json:"id"`

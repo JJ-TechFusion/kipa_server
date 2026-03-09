@@ -15,79 +15,50 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// DriverService handles inter-state driver operations
 type DriverService interface {
-	// Profile management
 	CreateProfile(ctx context.Context, userID uuid.UUID, req *CreateDriverProfileRequest) (*domain.DriverProfile, error)
 	GetProfile(ctx context.Context, userID uuid.UUID) (*domain.DriverProfile, error)
 	GetProfileByID(ctx context.Context, id uuid.UUID) (*domain.DriverProfile, error)
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req *UpdateDriverProfileRequest) (*domain.DriverProfile, error)
-
-	// Online/Offline
 	GoOnline(ctx context.Context, userID uuid.UUID, originCity, destinationCity string) (*domain.DriverTrip, error)
 	GoOffline(ctx context.Context, userID uuid.UUID) error
-
-	// Available deliveries (for direct accept mode - kept for backward compatibility)
 	GetAvailableDeliveries(ctx context.Context, userID uuid.UUID) ([]*domain.DriverDelivery, error)
 	AcceptDelivery(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID) (*domain.DriverDelivery, error)
-
-	// Driver offer/bid actions
 	MakeOffer(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID, req *MakeOfferRequest) (*domain.DriverOffer, error)
 	WithdrawOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) error
 	AcceptCounterOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) (*domain.DriverDelivery, error)
 	RejectCounterOffer(ctx context.Context, userID uuid.UUID, offerID uuid.UUID) error
 	GetMyOffers(ctx context.Context, userID uuid.UUID, status *domain.DriverOfferStatus) ([]*domain.DriverOffer, error)
-
-	// Seller offer actions
 	GetOffersForDelivery(ctx context.Context, sellerID uuid.UUID, deliveryID uuid.UUID) ([]*domain.DriverOffer, error)
 	AcceptOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID) (*domain.DriverDelivery, error)
 	RejectOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID, note string) error
 	CounterOffer(ctx context.Context, sellerID uuid.UUID, offerID uuid.UUID, req *CounterOfferRequest) (*domain.DriverOffer, error)
-
-	// Background jobs
 	ExpireStaleOffers(ctx context.Context) error
-
-	// Trip management
 	GetCurrentTrip(ctx context.Context, userID uuid.UUID) (*domain.DriverTrip, error)
 	GetTripDeliveries(ctx context.Context, userID uuid.UUID) ([]*domain.DriverDelivery, error)
-
-	// Manual status updates (no GPS tracking)
 	MarkAtPickup(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID) error
 	VerifyPickupCode(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID, code string) error
 	MarkDeparted(ctx context.Context, userID uuid.UUID) error
 	MarkArrived(ctx context.Context, userID uuid.UUID) error
 	VerifyDropoffCode(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID, code string) error
 	MarkBuyerUnreachable(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID) error
-
-	// History
 	GetTripHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DriverTrip, error)
 	GetDeliveryHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DriverDelivery, error)
 	GetEarnings(ctx context.Context, userID uuid.UUID) (*DriverEarnings, error)
-
-	// Seller endpoints
 	GetDeliveriesBySeller(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.DriverDelivery, error)
 	GetDeliveryForSeller(ctx context.Context, sellerID, deliveryID uuid.UUID) (*domain.DriverDelivery, error)
 	GetPickupCodeForSeller(ctx context.Context, sellerID, deliveryID uuid.UUID) (string, error)
-
-	// Buyer endpoints
 	GetDeliveriesByBuyer(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.DriverDelivery, error)
 	GetDeliveryForBuyer(ctx context.Context, buyerID, deliveryID uuid.UUID) (*domain.DriverDelivery, error)
 	GetDropoffCodeForBuyer(ctx context.Context, buyerID, deliveryID uuid.UUID) (string, error)
-
-	// Confirmation and completion (Phase 4)
 	ConfirmDelivery(ctx context.Context, buyerID, deliveryID uuid.UUID) error
 	DisputeDelivery(ctx context.Context, buyerID, deliveryID uuid.UUID, reason string) error
 	ProcessDriverPayment(ctx context.Context, deliveryID uuid.UUID) error
-
-	// Edge cases (Phase 5)
 	CancelDelivery(ctx context.Context, sellerID, deliveryID uuid.UUID) error
 	ProcessExpiredUnreachable(ctx context.Context, deliveryID uuid.UUID) error
 	InitiateReturnToSeller(ctx context.Context, deliveryID uuid.UUID) error
 	ProcessAbandonedTrip(ctx context.Context, tripID uuid.UUID) error
 	ExpireAwaitingDriverDelivery(ctx context.Context, deliveryID uuid.UUID) error
-
-	// For background jobs
 	GetExpiredConfirmationWindows(ctx context.Context) ([]*domain.DriverDelivery, error)
 	AutoConfirmDelivery(ctx context.Context, deliveryID uuid.UUID) error
 	GetExpiredUnreachableDeliveries(ctx context.Context) ([]*domain.DriverDelivery, error)
@@ -95,8 +66,6 @@ type DriverService interface {
 	GetAbandonedTrips(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error)
 	GetStaleDepartures(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error)
 }
-
-// Request/Response DTOs
 
 type CreateDriverProfileRequest struct {
 	VehicleType     string `json:"vehicle_type" binding:"required,oneof=car van bus"`
@@ -130,8 +99,6 @@ type CounterOfferRequest struct {
 	Amount float64 `json:"amount" binding:"required,gt=0"`
 	Note   string  `json:"note"`
 }
-
-// DriverServiceImpl implements DriverService
 type DriverServiceImpl struct {
 	driverRepo       repository.DriverProfileRepository
 	tripRepo         repository.DriverTripRepository
@@ -173,10 +140,6 @@ func NewDriverService(
 		logger:          logger,
 	}
 }
-
-// ============================================
-// PROFILE MANAGEMENT
-// ============================================
 
 func (s *DriverServiceImpl) CreateProfile(ctx context.Context, userID uuid.UUID, req *CreateDriverProfileRequest) (*domain.DriverProfile, error) {
 	existing, err := s.driverRepo.GetByUserID(ctx, userID)
@@ -244,10 +207,6 @@ func (s *DriverServiceImpl) UpdateProfile(ctx context.Context, userID uuid.UUID,
 	return profile, nil
 }
 
-// ============================================
-// ONLINE/OFFLINE
-// ============================================
-
 func (s *DriverServiceImpl) GoOnline(ctx context.Context, userID uuid.UUID, originCity, destinationCity string) (*domain.DriverTrip, error) {
 	profile, err := s.driverRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -261,14 +220,10 @@ func (s *DriverServiceImpl) GoOnline(ctx context.Context, userID uuid.UUID, orig
 	if profile.Status != domain.DriverStatusOffline {
 		return nil, domain.ErrDriverAlreadyOnline
 	}
-
-	// Check for existing active trip
 	existingTrip, err := s.tripRepo.GetActiveByDriverID(ctx, profile.ID)
 	if err == nil && existingTrip != nil {
 		return nil, domain.ErrDriverHasActiveTrip
 	}
-
-	// Create new trip for this route
 	acceptingUntil := time.Now().Add(4 * time.Hour) // 4 hour window to accept packages
 	trip := &domain.DriverTrip{
 		DriverID:        profile.ID,
@@ -281,8 +236,6 @@ func (s *DriverServiceImpl) GoOnline(ctx context.Context, userID uuid.UUID, orig
 	if err := s.tripRepo.Create(ctx, trip); err != nil {
 		return nil, fmt.Errorf("failed to create trip: %w", err)
 	}
-
-	// Update driver profile
 	profile.Status = domain.DriverStatusIdle
 	profile.CurrentTripID = &trip.ID
 	profile.OriginCity = &originCity
@@ -311,8 +264,6 @@ func (s *DriverServiceImpl) GoOffline(ctx context.Context, userID uuid.UUID) err
 	if err := profile.GoOffline(); err != nil {
 		return err
 	}
-
-	// If there's an accepting trip with no packages, cancel it
 	if profile.CurrentTripID != nil {
 		trip, err := s.tripRepo.GetByID(ctx, *profile.CurrentTripID)
 		if err == nil && trip.Status == domain.DriverTripStatusAccepting && trip.TotalPackages == 0 {
@@ -334,10 +285,6 @@ func (s *DriverServiceImpl) GoOffline(ctx context.Context, userID uuid.UUID) err
 	return nil
 }
 
-// ============================================
-// AVAILABLE DELIVERIES
-// ============================================
-
 func (s *DriverServiceImpl) GetAvailableDeliveries(ctx context.Context, userID uuid.UUID) ([]*domain.DriverDelivery, error) {
 	profile, err := s.driverRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -351,8 +298,6 @@ func (s *DriverServiceImpl) GetAvailableDeliveries(ctx context.Context, userID u
 	if profile.OriginCity == nil || profile.DestinationCity == nil {
 		return nil, fmt.Errorf("driver route not set")
 	}
-
-	// Get deliveries matching driver's route and within capacity
 	availableCapacity := profile.AvailableCapacity()
 	deliveries, err := s.deliveryRepo.GetAvailableForRoute(ctx, *profile.OriginCity, *profile.DestinationCity, availableCapacity, 50)
 	if err != nil {
@@ -380,13 +325,9 @@ func (s *DriverServiceImpl) AcceptDelivery(ctx context.Context, userID uuid.UUID
 	if delivery.Status != domain.DDStatusAwaitingDriver {
 		return nil, domain.ErrDeliveryAlreadyAssigned
 	}
-
-	// Check capacity
 	if !profile.CanAcceptDelivery(delivery.ItemValue) {
 		return nil, domain.ErrDriverCapacityExceeded
 	}
-
-	// Verify route matches
 	if profile.OriginCity == nil || profile.DestinationCity == nil {
 		return nil, fmt.Errorf("driver route not set")
 	}
@@ -398,15 +339,11 @@ func (s *DriverServiceImpl) AcceptDelivery(ctx context.Context, userID uuid.UUID
 	if err != nil {
 		return nil, fmt.Errorf("failed to get driver trip: %w", err)
 	}
-
-	// Assign driver to delivery
 	now := time.Now()
 	delivery.DriverID = &profile.ID
 	delivery.TripID = &trip.ID
 	delivery.Status = domain.DDStatusDriverAssigned
 	delivery.DriverAssignedAt = &now
-
-	// Generate pickup code
 	pickupCode := generateDriverCode()
 	delivery.PickupCode = &pickupCode
 	delivery.PickupCodeGeneratedAt = &now
@@ -414,8 +351,6 @@ func (s *DriverServiceImpl) AcceptDelivery(ctx context.Context, userID uuid.UUID
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return nil, fmt.Errorf("failed to update delivery: %w", err)
 	}
-
-	// Update driver capacity
 	profile.AddCapacity(delivery.ItemValue)
 	if profile.Status == domain.DriverStatusIdle {
 		profile.Status = domain.DriverStatusLoading
@@ -423,21 +358,15 @@ func (s *DriverServiceImpl) AcceptDelivery(ctx context.Context, userID uuid.UUID
 	if err := s.driverRepo.Update(ctx, profile); err != nil {
 		s.logger.Error("failed to update driver capacity", zap.Error(err))
 	}
-
-	// Update trip aggregates
 	if err := s.tripRepo.AddDelivery(ctx, trip.ID, delivery.ItemValue, delivery.DriverFee); err != nil {
 		s.logger.Error("failed to update trip aggregates", zap.Error(err))
 	}
-
-	// Update trip status if needed
 	if trip.Status == domain.DriverTripStatusAccepting {
 		trip.Status = domain.DriverTripStatusLoading
 		if err := s.tripRepo.Update(ctx, trip); err != nil {
 			s.logger.Error("failed to update trip status", zap.Error(err))
 		}
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, delivery.ID, nil, domain.DDStatusDriverAssigned, domain.DDActorDriver, &profile.UserID, "Driver accepted delivery", nil)
 
 	s.logger.Info("driver accepted delivery",
@@ -445,8 +374,6 @@ func (s *DriverServiceImpl) AcceptDelivery(ctx context.Context, userID uuid.UUID
 		zap.String("delivery_id", deliveryID.String()),
 		zap.Float64("item_value", delivery.ItemValue),
 	)
-
-	// Notify seller with pickup code
 	if s.notificationSvc != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -463,10 +390,6 @@ func (s *DriverServiceImpl) AcceptDelivery(ctx context.Context, userID uuid.UUID
 
 	return delivery, nil
 }
-
-// ============================================
-// TRIP MANAGEMENT
-// ============================================
 
 func (s *DriverServiceImpl) GetCurrentTrip(ctx context.Context, userID uuid.UUID) (*domain.DriverTrip, error) {
 	profile, err := s.driverRepo.GetByUserID(ctx, userID)
@@ -493,10 +416,6 @@ func (s *DriverServiceImpl) GetTripDeliveries(ctx context.Context, userID uuid.U
 
 	return s.deliveryRepo.GetByTripID(ctx, *profile.CurrentTripID)
 }
-
-// ============================================
-// MANUAL STATUS UPDATES
-// ============================================
 
 func (s *DriverServiceImpl) MarkAtPickup(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID) error {
 	profile, err := s.driverRepo.GetByUserID(ctx, userID)
@@ -531,8 +450,6 @@ func (s *DriverServiceImpl) MarkAtPickup(ctx context.Context, userID uuid.UUID, 
 	s.logger.Info("driver marked at pickup",
 		zap.String("delivery_id", deliveryID.String()),
 	)
-
-	// Notify seller that driver has arrived
 	if s.notificationSvc != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -568,15 +485,11 @@ func (s *DriverServiceImpl) VerifyPickupCode(ctx context.Context, userID uuid.UU
 		}
 		return domain.ErrInvalidStatusTransition
 	}
-
-	// Check code expiry (24 hours)
 	if delivery.PickupCodeGeneratedAt != nil {
 		if time.Since(*delivery.PickupCodeGeneratedAt) > domain.CodeExpiryHours*time.Hour {
 			return domain.ErrPickupCodeExpired
 		}
 	}
-
-	// Check code
 	if delivery.PickupCode == nil || *delivery.PickupCode != code {
 		locked := delivery.IncrementPickupAttempts()
 		if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
@@ -590,8 +503,6 @@ func (s *DriverServiceImpl) VerifyPickupCode(ctx context.Context, userID uuid.UU
 				s.logger.Error("failed to update status to lockout", zap.Error(err))
 			}
 			s.recordDeliveryEvent(ctx, delivery.ID, &oldStatus, delivery.Status, domain.DDActorSystem, nil, "Pickup code lockout - max attempts exceeded", nil)
-
-			// Notify admin about lockout
 			s.notifyAdminLockout(ctx, delivery, "pickup", profile.ID)
 
 			return domain.ErrPickupCodeLocked
@@ -599,14 +510,10 @@ func (s *DriverServiceImpl) VerifyPickupCode(ctx context.Context, userID uuid.UU
 
 		return domain.ErrInvalidPickupCode
 	}
-
-	// Code verified - mark as picked up
 	now := time.Now()
 	oldStatus := delivery.Status
 	delivery.Status = domain.DDStatusPickedUp
 	delivery.PickedUpAt = &now
-
-	// Generate dropoff code for buyer
 	dropoffCode := generateDriverCode()
 	delivery.DropoffCode = &dropoffCode
 	delivery.DropoffCodeGeneratedAt = &now
@@ -620,8 +527,6 @@ func (s *DriverServiceImpl) VerifyPickupCode(ctx context.Context, userID uuid.UU
 	s.logger.Info("pickup code verified",
 		zap.String("delivery_id", deliveryID.String()),
 	)
-
-	// Notify buyer with dropoff code
 	if s.notificationSvc != nil && delivery.BuyerID != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -657,8 +562,6 @@ func (s *DriverServiceImpl) MarkDeparted(ctx context.Context, userID uuid.UUID) 
 	if !trip.CanDepart() {
 		return fmt.Errorf("cannot depart: trip status is %s or no packages picked up", trip.Status)
 	}
-
-	// Verify all deliveries in trip are picked up
 	deliveries, err := s.deliveryRepo.GetByTripID(ctx, trip.ID)
 	if err != nil {
 		return err
@@ -669,8 +572,6 @@ func (s *DriverServiceImpl) MarkDeparted(ctx context.Context, userID uuid.UUID) 
 			return fmt.Errorf("delivery %s not yet picked up (status: %s)", d.ID, d.Status)
 		}
 	}
-
-	// Mark trip as in transit
 	now := time.Now()
 	trip.Status = domain.DriverTripStatusInTransit
 	trip.DepartedAt = &now
@@ -678,8 +579,6 @@ func (s *DriverServiceImpl) MarkDeparted(ctx context.Context, userID uuid.UUID) 
 	if err := s.tripRepo.Update(ctx, trip); err != nil {
 		return fmt.Errorf("failed to update trip: %w", err)
 	}
-
-	// Update all deliveries to in_transit
 	for _, d := range deliveries {
 		oldStatus := d.Status
 		d.Status = domain.DDStatusInTransit
@@ -689,8 +588,6 @@ func (s *DriverServiceImpl) MarkDeparted(ctx context.Context, userID uuid.UUID) 
 		}
 		s.recordDeliveryEvent(ctx, d.ID, &oldStatus, d.Status, domain.DDActorDriver, &profile.UserID, "Driver departed", nil)
 	}
-
-	// Update driver status
 	profile.Status = domain.DriverStatusInTransit
 	if err := s.driverRepo.Update(ctx, profile); err != nil {
 		s.logger.Error("failed to update driver status", zap.Error(err))
@@ -700,8 +597,6 @@ func (s *DriverServiceImpl) MarkDeparted(ctx context.Context, userID uuid.UUID) 
 		zap.String("trip_id", trip.ID.String()),
 		zap.Int("packages", len(deliveries)),
 	)
-
-	// Notify all buyers
 	if s.notificationSvc != nil {
 		for _, d := range deliveries {
 			if d.BuyerID != nil {
@@ -746,8 +641,6 @@ func (s *DriverServiceImpl) MarkArrived(ctx context.Context, userID uuid.UUID) e
 	if err := s.tripRepo.Update(ctx, trip); err != nil {
 		return fmt.Errorf("failed to update trip: %w", err)
 	}
-
-	// Update all in-transit deliveries to arrived
 	deliveries, err := s.deliveryRepo.GetByTripID(ctx, trip.ID)
 	if err != nil {
 		return err
@@ -764,14 +657,10 @@ func (s *DriverServiceImpl) MarkArrived(ctx context.Context, userID uuid.UUID) e
 			s.recordDeliveryEvent(ctx, d.ID, &oldStatus, d.Status, domain.DDActorDriver, &profile.UserID, "Driver arrived at destination", nil)
 		}
 	}
-
-	// Update driver status
 	profile.Status = domain.DriverStatusDelivering
 	if err := s.driverRepo.Update(ctx, profile); err != nil {
 		s.logger.Error("failed to update driver status", zap.Error(err))
 	}
-
-	// Update trip status
 	trip.Status = domain.DriverTripStatusDelivering
 	if err := s.tripRepo.Update(ctx, trip); err != nil {
 		s.logger.Error("failed to update trip status", zap.Error(err))
@@ -780,8 +669,6 @@ func (s *DriverServiceImpl) MarkArrived(ctx context.Context, userID uuid.UUID) e
 	s.logger.Info("driver arrived at destination",
 		zap.String("trip_id", trip.ID.String()),
 	)
-
-	// Notify all buyers
 	if s.notificationSvc != nil {
 		for _, d := range deliveries {
 			if d.BuyerID != nil {
@@ -821,15 +708,11 @@ func (s *DriverServiceImpl) VerifyDropoffCode(ctx context.Context, userID uuid.U
 		}
 		return domain.ErrInvalidStatusTransition
 	}
-
-	// Check code expiry (24 hours)
 	if delivery.DropoffCodeGeneratedAt != nil {
 		if time.Since(*delivery.DropoffCodeGeneratedAt) > domain.CodeExpiryHours*time.Hour {
 			return domain.ErrDropoffCodeExpired
 		}
 	}
-
-	// Check code
 	if delivery.DropoffCode == nil || *delivery.DropoffCode != code {
 		locked := delivery.IncrementDropoffAttempts()
 		if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
@@ -843,8 +726,6 @@ func (s *DriverServiceImpl) VerifyDropoffCode(ctx context.Context, userID uuid.U
 				s.logger.Error("failed to update status to lockout", zap.Error(err))
 			}
 			s.recordDeliveryEvent(ctx, delivery.ID, &oldStatus, delivery.Status, domain.DDActorSystem, nil, "Dropoff code lockout - max attempts exceeded", nil)
-
-			// Notify admin about lockout
 			s.notifyAdminLockout(ctx, delivery, "dropoff", profile.ID)
 
 			return domain.ErrDropoffCodeLocked
@@ -852,8 +733,6 @@ func (s *DriverServiceImpl) VerifyDropoffCode(ctx context.Context, userID uuid.U
 
 		return domain.ErrInvalidDropoffCode
 	}
-
-	// Code verified - start confirmation window
 	now := time.Now()
 	oldStatus := delivery.Status
 	delivery.Status = domain.DDStatusConfirmationWindow
@@ -868,8 +747,6 @@ func (s *DriverServiceImpl) VerifyDropoffCode(ctx context.Context, userID uuid.U
 	s.logger.Info("dropoff code verified",
 		zap.String("delivery_id", deliveryID.String()),
 	)
-
-	// Notify buyer about confirmation window
 	if s.notificationSvc != nil && delivery.BuyerID != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -880,8 +757,6 @@ func (s *DriverServiceImpl) VerifyDropoffCode(ctx context.Context, userID uuid.U
 			domain.NotificationOrderDelivered,
 		)
 	}
-
-	// Check if all deliveries in trip are done
 	s.checkTripCompletion(ctx, profile, delivery.TripID)
 
 	return nil
@@ -924,8 +799,6 @@ func (s *DriverServiceImpl) MarkBuyerUnreachable(ctx context.Context, userID uui
 		zap.String("delivery_id", deliveryID.String()),
 		zap.Time("deadline", deadline),
 	)
-
-	// Notify buyer urgently
 	if s.notificationSvc != nil && delivery.BuyerID != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -942,10 +815,6 @@ func (s *DriverServiceImpl) MarkBuyerUnreachable(ctx context.Context, userID uui
 
 	return nil
 }
-
-// ============================================
-// HISTORY
-// ============================================
 
 func (s *DriverServiceImpl) GetTripHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.DriverTrip, error) {
 	profile, err := s.driverRepo.GetByUserID(ctx, userID)
@@ -982,10 +851,6 @@ func (s *DriverServiceImpl) GetEarnings(ctx context.Context, userID uuid.UUID) (
 	}, nil
 }
 
-// ============================================
-// SELLER ENDPOINTS
-// ============================================
-
 func (s *DriverServiceImpl) GetDeliveriesBySeller(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.DriverDelivery, error) {
 	return s.deliveryRepo.GetBySellerID(ctx, sellerID, limit, offset)
 }
@@ -1017,18 +882,12 @@ func (s *DriverServiceImpl) GetPickupCodeForSeller(ctx context.Context, sellerID
 	if delivery.PickupCode == nil {
 		return "", fmt.Errorf("pickup code not yet generated")
 	}
-
-	// Only show code when driver is at pickup (awaiting verification)
 	if delivery.Status != domain.DDStatusAwaitingPickup {
 		return "", fmt.Errorf("driver has not arrived at pickup location")
 	}
 
 	return *delivery.PickupCode, nil
 }
-
-// ============================================
-// BUYER ENDPOINTS
-// ============================================
 
 func (s *DriverServiceImpl) GetDeliveriesByBuyer(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.DriverDelivery, error) {
 	return s.deliveryRepo.GetByBuyerID(ctx, buyerID, limit, offset)
@@ -1061,18 +920,12 @@ func (s *DriverServiceImpl) GetDropoffCodeForBuyer(ctx context.Context, buyerID,
 	if delivery.DropoffCode == nil {
 		return "", fmt.Errorf("dropoff code not yet generated")
 	}
-
-	// Only show code when driver has arrived at destination
 	if delivery.Status != domain.DDStatusArrived {
 		return "", fmt.Errorf("driver has not arrived at dropoff location")
 	}
 
 	return *delivery.DropoffCode, nil
 }
-
-// ============================================
-// CONFIRMATION AND COMPLETION (Phase 4)
-// ============================================
 
 func (s *DriverServiceImpl) ConfirmDelivery(ctx context.Context, buyerID, deliveryID uuid.UUID) error {
 	delivery, err := s.GetDeliveryForBuyer(ctx, buyerID, deliveryID)
@@ -1084,8 +937,6 @@ func (s *DriverServiceImpl) ConfirmDelivery(ctx context.Context, buyerID, delive
 		return fmt.Errorf("delivery is not in confirmation window")
 	}
 
-	// Buyer can confirm anytime after delivery (no time constraint)
-
 	now := time.Now()
 	oldStatus := delivery.Status
 	delivery.Status = domain.DDStatusCompleted
@@ -1094,18 +945,12 @@ func (s *DriverServiceImpl) ConfirmDelivery(ctx context.Context, buyerID, delive
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return err
 	}
-
-	// Release escrow to seller
 	if delivery.EscrowID != nil {
 		if err := s.escrowService.Release(ctx, *delivery.EscrowID); err != nil {
 			s.logger.Error("failed to release escrow", zap.Error(err), zap.String("escrow_id", delivery.EscrowID.String()))
 		}
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, deliveryID, &oldStatus, domain.DDStatusCompleted, domain.DDActorBuyer, &buyerID, "buyer confirmed delivery", nil)
-
-	// Notify seller and driver
 	if s.notificationSvc != nil {
 		pr, _ := s.prRepo.GetByID(ctx, delivery.PaymentRequestID)
 		if pr != nil {
@@ -1120,8 +965,6 @@ func (s *DriverServiceImpl) ConfirmDelivery(ctx context.Context, buyerID, delive
 			}
 		}
 	}
-
-	// Process driver payment
 	go func() {
 		if err := s.ProcessDriverPayment(context.Background(), deliveryID); err != nil {
 			s.logger.Error("failed to process driver payment", zap.Error(err), zap.String("delivery_id", deliveryID.String()))
@@ -1136,13 +979,9 @@ func (s *DriverServiceImpl) DisputeDelivery(ctx context.Context, buyerID, delive
 	if err != nil {
 		return err
 	}
-
-	// Can dispute during confirmation window or within 48h after
 	if delivery.Status != domain.DDStatusConfirmationWindow && delivery.Status != domain.DDStatusCompleted {
 		return fmt.Errorf("cannot dispute delivery in current status")
 	}
-
-	// If completed, check 48h window
 	if delivery.Status == domain.DDStatusCompleted {
 		if delivery.CompletedAt != nil {
 			disputeDeadline := delivery.CompletedAt.Add(48 * time.Hour)
@@ -1158,18 +997,12 @@ func (s *DriverServiceImpl) DisputeDelivery(ctx context.Context, buyerID, delive
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return err
 	}
-
-	// Put escrow in dispute state
 	if delivery.EscrowID != nil {
 		if err := s.escrowService.Dispute(ctx, *delivery.EscrowID, reason); err != nil {
 			s.logger.Error("failed to dispute escrow", zap.Error(err), zap.String("escrow_id", delivery.EscrowID.String()))
 		}
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, deliveryID, &oldStatus, domain.DDStatusDisputed, domain.DDActorBuyer, &buyerID, reason, nil)
-
-	// Notify all parties
 	if s.notificationSvc != nil {
 		pr, _ := s.prRepo.GetByID(ctx, delivery.PaymentRequestID)
 		if pr != nil {
@@ -1211,38 +1044,26 @@ func (s *DriverServiceImpl) ProcessDriverPayment(ctx context.Context, deliveryID
 	if err != nil {
 		return err
 	}
-
-	// Calculate driver payout (85% of driver fee, 15% platform fee)
 	platformFeePercent := 15.0
 	driverPayout := delivery.DriverFee * (100 - platformFeePercent) / 100
-
-	// Credit driver wallet (with idempotency key)
 	idempotencyKey := fmt.Sprintf("driver_payout_%s", deliveryID.String())
 	_, err = s.walletService.Credit(ctx, profile.UserID, driverPayout, domain.WalletTxDeliveryPayout,
 		"driver_delivery", deliveryID, fmt.Sprintf("Driver delivery payment: %s", deliveryID.String()[:8]), idempotencyKey)
 	if err != nil {
 		return fmt.Errorf("failed to credit driver wallet: %w", err)
 	}
-
-	// Update delivery status to driver_paid
 	oldStatus := delivery.Status
 	delivery.Status = domain.DDStatusDriverPaid
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return err
 	}
-
-	// Update driver profile stats
 	profile.TotalDeliveries++
 	profile.TotalEarnings += driverPayout
 	if err := s.driverRepo.Update(ctx, profile); err != nil {
 		s.logger.Error("failed to update driver stats", zap.Error(err))
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, deliveryID, &oldStatus, domain.DDStatusDriverPaid, domain.DDActorSystem, nil,
 		fmt.Sprintf("driver paid %.2f", driverPayout), nil)
-
-	// Notify driver
 	if s.notificationSvc != nil {
 		_ = s.notificationSvc.SendToUser(ctx, profile.UserID, "Payment Received",
 			fmt.Sprintf("₦%.2f has been credited to your wallet for delivery %s", driverPayout, deliveryID.String()[:8]),
@@ -1271,8 +1092,6 @@ func (s *DriverServiceImpl) AutoConfirmDelivery(ctx context.Context, deliveryID 
 	if delivery.Status != domain.DDStatusConfirmationWindow {
 		return fmt.Errorf("delivery is not in confirmation window")
 	}
-
-	// Verify auto-confirm window has actually expired (7 days)
 	if delivery.DeliveredAt != nil {
 		deadline := delivery.DeliveredAt.Add(domain.AutoConfirmDays * 24 * time.Hour)
 		if time.Now().Before(deadline) {
@@ -1288,18 +1107,12 @@ func (s *DriverServiceImpl) AutoConfirmDelivery(ctx context.Context, deliveryID 
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return err
 	}
-
-	// Release escrow to seller
 	if delivery.EscrowID != nil {
 		if err := s.escrowService.Release(ctx, *delivery.EscrowID); err != nil {
 			s.logger.Error("failed to release escrow on auto-confirm", zap.Error(err))
 		}
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, deliveryID, &oldStatus, domain.DDStatusCompleted, domain.DDActorSystem, nil, "auto-confirmed after 24h", nil)
-
-	// Notify parties
 	if s.notificationSvc != nil {
 		pr, _ := s.prRepo.GetByID(ctx, delivery.PaymentRequestID)
 		if pr != nil {
@@ -1311,8 +1124,6 @@ func (s *DriverServiceImpl) AutoConfirmDelivery(ctx context.Context, deliveryID 
 			}
 		}
 	}
-
-	// Process driver payment
 	if err := s.ProcessDriverPayment(ctx, deliveryID); err != nil {
 		s.logger.Error("failed to process driver payment on auto-confirm", zap.Error(err))
 	}
@@ -1324,22 +1135,14 @@ func (s *DriverServiceImpl) AutoConfirmDelivery(ctx context.Context, deliveryID 
 	return nil
 }
 
-// ============================================
-// EDGE CASES (Phase 5)
-// ============================================
-
 func (s *DriverServiceImpl) CancelDelivery(ctx context.Context, sellerID, deliveryID uuid.UUID) error {
 	delivery, err := s.deliveryRepo.GetByID(ctx, deliveryID)
 	if err != nil {
 		return err
 	}
-
-	// Verify seller ownership
 	if delivery.SellerID != sellerID {
 		return domain.ErrUnauthorized
 	}
-
-	// Check if trip has started (departed) - can't cancel after trip starts
 	if delivery.TripID != nil {
 		trip, err := s.tripRepo.GetByID(ctx, *delivery.TripID)
 		if err != nil {
@@ -1358,10 +1161,7 @@ func (s *DriverServiceImpl) CancelDelivery(ctx context.Context, sellerID, delive
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return fmt.Errorf("failed to update delivery: %w", err)
 	}
-
-	// If driver was assigned, release capacity
 	if delivery.DriverID != nil && delivery.TripID != nil {
-		// Release driver capacity
 		profile, err := s.driverRepo.GetByID(ctx, *delivery.DriverID)
 		if err == nil {
 			profile.ReleaseCapacity(delivery.ItemValue)
@@ -1369,29 +1169,21 @@ func (s *DriverServiceImpl) CancelDelivery(ctx context.Context, sellerID, delive
 				s.logger.Error("failed to release driver capacity", zap.Error(err))
 			}
 		}
-
-		// Remove from trip aggregates
 		if err := s.tripRepo.RemoveDelivery(ctx, *delivery.TripID, delivery.ItemValue, delivery.DriverFee); err != nil {
 			s.logger.Error("failed to update trip aggregates", zap.Error(err))
 		}
 	}
-
-	// Refund buyer if escrow exists
 	if delivery.EscrowID != nil {
 		if err := s.escrowService.Refund(ctx, *delivery.EscrowID, "Seller cancelled delivery"); err != nil {
 			s.logger.Error("failed to refund escrow", zap.Error(err), zap.String("escrow_id", delivery.EscrowID.String()))
 		}
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, deliveryID, &oldStatus, domain.DDStatusCancelled, domain.DDActorSeller, &sellerID, "seller cancelled delivery", nil)
 
 	s.logger.Info("delivery cancelled",
 		zap.String("delivery_id", deliveryID.String()),
 		zap.String("seller_id", sellerID.String()),
 	)
-
-	// Notify parties
 	if s.notificationSvc != nil {
 		if delivery.BuyerID != nil {
 			_ = s.notificationSvc.SendToUser(ctx, *delivery.BuyerID, "Delivery Cancelled",
@@ -1418,13 +1210,9 @@ func (s *DriverServiceImpl) ProcessExpiredUnreachable(ctx context.Context, deliv
 	if delivery.Status != domain.DDStatusBuyerUnreachable {
 		return fmt.Errorf("delivery is not in buyer_unreachable status")
 	}
-
-	// Verify deadline has passed
 	if delivery.UnreachableDeadline != nil && time.Now().Before(*delivery.UnreachableDeadline) {
 		return fmt.Errorf("unreachable deadline has not expired yet")
 	}
-
-	// Mark for return to seller
 	return s.InitiateReturnToSeller(ctx, deliveryID)
 }
 
@@ -1444,15 +1232,11 @@ func (s *DriverServiceImpl) InitiateReturnToSeller(ctx context.Context, delivery
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return fmt.Errorf("failed to update delivery: %w", err)
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, deliveryID, &oldStatus, domain.DDStatusReturnToSeller, domain.DDActorSystem, nil, "buyer unreachable deadline expired, returning to seller", nil)
 
 	s.logger.Info("delivery marked for return to seller",
 		zap.String("delivery_id", deliveryID.String()),
 	)
-
-	// Notify parties
 	if s.notificationSvc != nil {
 		_ = s.notificationSvc.SendToUser(ctx, delivery.SellerID, "Item Returning",
 			"The buyer was unreachable. The item is being returned to you.", nil, domain.NotificationDeliveryFailed)
@@ -1485,20 +1269,14 @@ func (s *DriverServiceImpl) ProcessAbandonedTrip(ctx context.Context, tripID uui
 	if trip.Status != domain.DriverTripStatusInTransit {
 		return fmt.Errorf("trip is not in transit")
 	}
-
-	// Mark trip as abandoned
 	trip.Status = domain.DriverTripStatusCancelled
 	if err := s.tripRepo.Update(ctx, trip); err != nil {
 		return fmt.Errorf("failed to update trip: %w", err)
 	}
-
-	// Get driver profile
 	profile, err := s.driverRepo.GetByID(ctx, trip.DriverID)
 	if err != nil {
 		s.logger.Error("failed to get driver profile", zap.Error(err))
 	}
-
-	// Process all deliveries in trip
 	deliveries, err := s.deliveryRepo.GetByTripID(ctx, tripID)
 	if err != nil {
 		return fmt.Errorf("failed to get trip deliveries: %w", err)
@@ -1516,25 +1294,17 @@ func (s *DriverServiceImpl) ProcessAbandonedTrip(ctx context.Context, tripID uui
 			s.logger.Error("failed to update delivery", zap.Error(err), zap.String("delivery_id", delivery.ID.String()))
 			continue
 		}
-
-		// Refund buyer
 		if delivery.EscrowID != nil {
 			if err := s.escrowService.Refund(ctx, *delivery.EscrowID, "Trip abandoned - driver unresponsive"); err != nil {
 				s.logger.Error("failed to refund escrow", zap.Error(err))
 			}
 		}
-
-		// Record event
 		s.recordDeliveryEvent(ctx, delivery.ID, &oldStatus, domain.DDStatusRefunded, domain.DDActorSystem, nil, "trip abandoned - driver unresponsive for 72h", nil)
-
-		// Notify buyer
 		if s.notificationSvc != nil && delivery.BuyerID != nil {
 			_ = s.notificationSvc.SendToUser(ctx, *delivery.BuyerID, "Delivery Failed",
 				"The driver abandoned the trip. Your payment will be refunded.", nil, domain.NotificationDeliveryFailed)
 		}
 	}
-
-	// Suspend driver
 	if profile != nil {
 		profile.Status = domain.DriverStatusOffline
 		profile.IsVerified = false // Requires re-verification
@@ -1583,22 +1353,16 @@ func (s *DriverServiceImpl) ExpireAwaitingDriverDelivery(ctx context.Context, de
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return fmt.Errorf("failed to update delivery: %w", err)
 	}
-
-	// Refund buyer
 	if delivery.EscrowID != nil {
 		if err := s.escrowService.Refund(ctx, *delivery.EscrowID, "No driver found within 48h"); err != nil {
 			s.logger.Error("failed to refund escrow", zap.Error(err))
 		}
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, deliveryID, &oldStatus, domain.DDStatusExpired, domain.DDActorSystem, nil, "no driver found within 48h", nil)
 
 	s.logger.Info("delivery expired - no driver found",
 		zap.String("delivery_id", deliveryID.String()),
 	)
-
-	// Notify parties
 	if s.notificationSvc != nil {
 		_ = s.notificationSvc.SendToUser(ctx, delivery.SellerID, "Delivery Expired",
 			"No driver was found for your delivery. The buyer's payment will be refunded.", nil, domain.NotificationDeliveryFailed)
@@ -1627,10 +1391,6 @@ func (s *DriverServiceImpl) GetStaleDepartures(ctx context.Context, hoursThresho
 	return s.tripRepo.GetStaleDepartures(ctx, hoursThreshold)
 }
 
-// ============================================
-// DRIVER OFFER/BID SYSTEM
-// ============================================
-
 func (s *DriverServiceImpl) MakeOffer(ctx context.Context, userID uuid.UUID, deliveryID uuid.UUID, req *MakeOfferRequest) (*domain.DriverOffer, error) {
 	profile, err := s.driverRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -1645,13 +1405,9 @@ func (s *DriverServiceImpl) MakeOffer(ctx context.Context, userID uuid.UUID, del
 	if err != nil {
 		return nil, err
 	}
-
-	// Check delivery is accepting offers
 	if !delivery.IsAcceptingOffers() {
 		return nil, domain.ErrDeliveryNotAcceptingOffers
 	}
-
-	// Check for existing pending offer from this driver
 	existingOffer, err := s.offerRepo.GetPendingByDeliveryAndDriver(ctx, deliveryID, profile.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing offer: %w", err)
@@ -1659,8 +1415,6 @@ func (s *DriverServiceImpl) MakeOffer(ctx context.Context, userID uuid.UUID, del
 	if existingOffer != nil {
 		return nil, domain.ErrDriverAlreadyOffered
 	}
-
-	// Check offer count limit (max 3 attempts)
 	offerCount, err := s.offerRepo.GetOfferCountByDeliveryAndDriver(ctx, deliveryID, profile.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get offer count: %w", err)
@@ -1668,8 +1422,6 @@ func (s *DriverServiceImpl) MakeOffer(ctx context.Context, userID uuid.UUID, del
 	if offerCount >= domain.MaxOfferAttempts {
 		return nil, domain.ErrMaxOfferAttemptsExceeded
 	}
-
-	// Create offer
 	expiresAt := time.Now().Add(domain.OfferExpiryHours * time.Hour)
 	var driverNote *string
 	if req.Note != "" {
@@ -1696,8 +1448,6 @@ func (s *DriverServiceImpl) MakeOffer(ctx context.Context, userID uuid.UUID, del
 		zap.Float64("amount", req.Amount),
 		zap.Int("attempt", offerCount+1),
 	)
-
-	// Notify seller
 	if s.notificationSvc != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -1771,14 +1521,10 @@ func (s *DriverServiceImpl) AcceptCounterOffer(ctx context.Context, userID uuid.
 		}
 		return nil, domain.ErrOfferCannotBeAccepted
 	}
-
-	// Get delivery
 	delivery, err := s.deliveryRepo.GetByID(ctx, offer.DeliveryID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Set agreed amount to counter amount
 	now := time.Now()
 	offer.Status = domain.DriverOfferStatusCounterAccepted
 	offer.RespondedAt = &now
@@ -1787,8 +1533,6 @@ func (s *DriverServiceImpl) AcceptCounterOffer(ctx context.Context, userID uuid.
 	if err := s.offerRepo.Update(ctx, offer); err != nil {
 		return nil, fmt.Errorf("failed to update offer: %w", err)
 	}
-
-	// Assign driver to delivery
 	return s.assignDriverFromOffer(ctx, delivery, profile, offer)
 }
 
@@ -1823,8 +1567,6 @@ func (s *DriverServiceImpl) RejectCounterOffer(ctx context.Context, userID uuid.
 		zap.String("offer_id", offerID.String()),
 		zap.String("driver_id", profile.ID.String()),
 	)
-
-	// Notify seller
 	delivery, _ := s.deliveryRepo.GetByID(ctx, offer.DeliveryID)
 	if s.notificationSvc != nil && delivery != nil {
 		go s.notificationSvc.SendToUser(
@@ -1848,10 +1590,6 @@ func (s *DriverServiceImpl) GetMyOffers(ctx context.Context, userID uuid.UUID, s
 
 	return s.offerRepo.GetByDriverID(ctx, profile.ID, status)
 }
-
-// ============================================
-// SELLER OFFER ACTIONS
-// ============================================
 
 func (s *DriverServiceImpl) GetOffersForDelivery(ctx context.Context, sellerID uuid.UUID, deliveryID uuid.UUID) ([]*domain.DriverOffer, error) {
 	delivery, err := s.deliveryRepo.GetByID(ctx, deliveryID)
@@ -1887,14 +1625,10 @@ func (s *DriverServiceImpl) AcceptOffer(ctx context.Context, sellerID uuid.UUID,
 		}
 		return nil, domain.ErrOfferCannotBeAccepted
 	}
-
-	// Get driver profile
 	driverProfile, err := s.driverRepo.GetByID(ctx, offer.DriverID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get driver profile: %w", err)
 	}
-
-	// Update offer status
 	now := time.Now()
 	offer.Status = domain.DriverOfferStatusAccepted
 	offer.RespondedAt = &now
@@ -1903,13 +1637,9 @@ func (s *DriverServiceImpl) AcceptOffer(ctx context.Context, sellerID uuid.UUID,
 	if err := s.offerRepo.Update(ctx, offer); err != nil {
 		return nil, fmt.Errorf("failed to update offer: %w", err)
 	}
-
-	// Reject all other pending offers
 	if err := s.offerRepo.RejectAllPendingExcept(ctx, offer.DeliveryID, offer.ID); err != nil {
 		s.logger.Error("failed to reject other offers", zap.Error(err))
 	}
-
-	// Assign driver to delivery
 	return s.assignDriverFromOffer(ctx, delivery, driverProfile, offer)
 }
 
@@ -1947,8 +1677,6 @@ func (s *DriverServiceImpl) RejectOffer(ctx context.Context, sellerID uuid.UUID,
 		zap.String("offer_id", offerID.String()),
 		zap.String("seller_id", sellerID.String()),
 	)
-
-	// Notify driver
 	driverProfile, _ := s.driverRepo.GetByID(ctx, offer.DriverID)
 	if s.notificationSvc != nil && driverProfile != nil {
 		canReOffer := offer.OfferCount < domain.MaxOfferAttempts
@@ -2010,8 +1738,6 @@ func (s *DriverServiceImpl) CounterOffer(ctx context.Context, sellerID uuid.UUID
 		zap.String("offer_id", offerID.String()),
 		zap.Float64("counter_amount", req.Amount),
 	)
-
-	// Notify driver
 	driverProfile, _ := s.driverRepo.GetByID(ctx, offer.DriverID)
 	if s.notificationSvc != nil && driverProfile != nil {
 		go s.notificationSvc.SendToUser(
@@ -2031,7 +1757,6 @@ func (s *DriverServiceImpl) CounterOffer(ctx context.Context, sellerID uuid.UUID
 }
 
 func (s *DriverServiceImpl) ExpireStaleOffers(ctx context.Context) error {
-	// Expire pending offers past 24h
 	expiredPending, err := s.offerRepo.ExpireStaleOffers(ctx)
 	if err != nil {
 		s.logger.Error("failed to expire stale offers", zap.Error(err))
@@ -2040,8 +1765,6 @@ func (s *DriverServiceImpl) ExpireStaleOffers(ctx context.Context) error {
 	if expiredPending > 0 {
 		s.logger.Info("expired stale driver offers", zap.Int64("count", expiredPending))
 	}
-
-	// Expire counter offers past deadline
 	expiredCounters, err := s.offerRepo.ExpireStaleCounterOffers(ctx)
 	if err != nil {
 		s.logger.Error("failed to expire stale counter offers", zap.Error(err))
@@ -2053,24 +1776,16 @@ func (s *DriverServiceImpl) ExpireStaleOffers(ctx context.Context) error {
 
 	return nil
 }
-
-// assignDriverFromOffer handles assigning a driver to a delivery after offer acceptance
 func (s *DriverServiceImpl) assignDriverFromOffer(ctx context.Context, delivery *domain.DriverDelivery, profile *domain.DriverProfile, offer *domain.DriverOffer) (*domain.DriverDelivery, error) {
 	now := time.Now()
-
-	// Set driver fee to agreed amount
 	agreedAmount := offer.OfferedAmount
 	if offer.AgreedAmount != nil {
 		agreedAmount = *offer.AgreedAmount
 	}
 	delivery.DriverFee = agreedAmount
-
-	// Assign driver
 	delivery.DriverID = &profile.ID
 	delivery.Status = domain.DDStatusDriverAssigned
 	delivery.DriverAssignedAt = &now
-
-	// Generate pickup code
 	pickupCode := generateDriverCode()
 	delivery.PickupCode = &pickupCode
 	delivery.PickupCodeGeneratedAt = &now
@@ -2078,8 +1793,6 @@ func (s *DriverServiceImpl) assignDriverFromOffer(ctx context.Context, delivery 
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return nil, fmt.Errorf("failed to update delivery: %w", err)
 	}
-
-	// Record event
 	s.recordDeliveryEvent(ctx, delivery.ID, nil, domain.DDStatusDriverAssigned, domain.DDActorSystem, nil,
 		fmt.Sprintf("Driver assigned via offer acceptance. Agreed fee: %.2f", agreedAmount), nil)
 
@@ -2088,8 +1801,6 @@ func (s *DriverServiceImpl) assignDriverFromOffer(ctx context.Context, delivery 
 		zap.String("delivery_id", delivery.ID.String()),
 		zap.Float64("agreed_amount", agreedAmount),
 	)
-
-	// Notify seller with pickup code
 	if s.notificationSvc != nil {
 		go s.notificationSvc.SendToUser(
 			context.Background(),
@@ -2102,8 +1813,6 @@ func (s *DriverServiceImpl) assignDriverFromOffer(ctx context.Context, delivery 
 			},
 			domain.NotificationRiderAssigned,
 		)
-
-		// Notify driver
 		go s.notificationSvc.SendToUser(
 			context.Background(),
 			profile.UserID,
@@ -2116,10 +1825,6 @@ func (s *DriverServiceImpl) assignDriverFromOffer(ctx context.Context, delivery 
 
 	return delivery, nil
 }
-
-// ============================================
-// HELPERS
-// ============================================
 
 func (s *DriverServiceImpl) recordDeliveryEvent(ctx context.Context, deliveryID uuid.UUID, fromStatus *domain.DriverDeliveryStatus, toStatus domain.DriverDeliveryStatus, actorType domain.DriverDeliveryActorType, actorID *uuid.UUID, reason string, metadata []byte) {
 	event := &domain.DriverDeliveryEvent{
@@ -2144,8 +1849,6 @@ func (s *DriverServiceImpl) notifyAdminLockout(ctx context.Context, delivery *do
 		zap.String("driver_id", driverID.String()),
 		zap.String("payment_request_id", delivery.PaymentRequestID.String()),
 	)
-
-	// Send admin notification
 	if s.notificationSvc != nil {
 		title := fmt.Sprintf("%s Code Lockout Alert", codeType)
 		body := fmt.Sprintf("Delivery %s: Driver exceeded max %s code attempts. Manual review required.",
@@ -2193,8 +1896,6 @@ func (s *DriverServiceImpl) checkTripCompletion(ctx context.Context, profile *do
 		if err := s.tripRepo.Update(ctx, trip); err != nil {
 			s.logger.Error("failed to complete trip", zap.Error(err))
 		}
-
-		// Reset driver
 		profile.Status = domain.DriverStatusIdle
 		profile.ResetCapacity()
 		profile.CurrentTripID = nil

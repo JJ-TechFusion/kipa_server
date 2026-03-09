@@ -236,8 +236,6 @@ func (r *RiderProfileRepo) RecordCommissionPayment(ctx context.Context, id uuid.
 	return err
 }
 
-// Admin methods
-
 func (r *RiderProfileRepo) GetByStatus(ctx context.Context, status domain.RiderStatus, limit, offset int) ([]*domain.RiderProfile, error) {
 	query := `
 		SELECT * FROM rider_profiles 

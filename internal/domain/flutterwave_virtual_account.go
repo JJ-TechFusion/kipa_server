@@ -5,8 +5,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// FlutterwaveVirtualAccount represents a static virtual account for receiving bank transfers
 type FlutterwaveVirtualAccount struct {
 	ID            uuid.UUID `db:"id" json:"id"`
 	UserID        uuid.UUID `db:"user_id" json:"user_id"`

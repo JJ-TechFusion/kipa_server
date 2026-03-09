@@ -24,8 +24,6 @@ type WalletService interface {
 	DeductLocked(ctx context.Context, userID uuid.UUID, amount float64, txType domain.WalletTransactionType, refType string, refID uuid.UUID, description, idempotencyKey string) (*domain.WalletTransaction, error)
 	GetTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.WalletTransaction, error)
 	GetBalance(ctx context.Context, userID uuid.UUID) (*WalletBalance, error)
-
-	// PIN management
 	CreatePin(ctx context.Context, userID uuid.UUID, pin string) error
 	VerifyPin(ctx context.Context, userID uuid.UUID, pin string) error
 	ChangePin(ctx context.Context, userID uuid.UUID, oldPin, newPin string) error
@@ -287,8 +285,6 @@ func (s *WalletServiceImpl) GetBalance(ctx context.Context, userID uuid.UUID) (*
 		TotalWithdrawn:   wallet.TotalWithdrawn,
 	}, nil
 }
-
-// validatePin checks if PIN meets requirements (4-6 digits)
 func validatePin(pin string) error {
 	if len(pin) < 4 {
 		return domain.ErrPinTooShort
@@ -315,8 +311,6 @@ func (s *WalletServiceImpl) CreatePin(ctx context.Context, userID uuid.UUID, pin
 	if wallet.HasPin() {
 		return domain.ErrPinAlreadySet
 	}
-
-	// Hash the PIN
 	hash, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash PIN: %w", err)
@@ -346,10 +340,7 @@ func (s *WalletServiceImpl) VerifyPin(ctx context.Context, userID uuid.UUID, pin
 	if wallet.IsPinLocked() {
 		return domain.ErrPinLocked
 	}
-
-	// Verify PIN
 	if err := bcrypt.CompareHashAndPassword([]byte(*wallet.PinHash), []byte(pin)); err != nil {
-		// Increment failed attempts
 		wallet.IncrementPinAttempts(maxPinAttempts, pinLockDuration)
 		if err := s.walletRepo.UpdatePinAttempts(ctx, wallet.ID, wallet.PinAttempts, wallet.PinLockedUntil); err != nil {
 			s.logger.Error("failed to update PIN attempts", zap.Error(err))
@@ -364,8 +355,6 @@ func (s *WalletServiceImpl) VerifyPin(ctx context.Context, userID uuid.UUID, pin
 
 		return domain.ErrInvalidPin
 	}
-
-	// Reset attempts on successful verification
 	if wallet.PinAttempts > 0 {
 		if err := s.walletRepo.ResetPinAttempts(ctx, wallet.ID); err != nil {
 			s.logger.Error("failed to reset PIN attempts", zap.Error(err))
@@ -376,12 +365,9 @@ func (s *WalletServiceImpl) VerifyPin(ctx context.Context, userID uuid.UUID, pin
 }
 
 func (s *WalletServiceImpl) ChangePin(ctx context.Context, userID uuid.UUID, oldPin, newPin string) error {
-	// First verify the old PIN
 	if err := s.VerifyPin(ctx, userID, oldPin); err != nil {
 		return err
 	}
-
-	// Validate new PIN
 	if err := validatePin(newPin); err != nil {
 		return err
 	}
@@ -390,8 +376,6 @@ func (s *WalletServiceImpl) ChangePin(ctx context.Context, userID uuid.UUID, old
 	if err != nil {
 		return err
 	}
-
-	// Hash the new PIN
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPin), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash PIN: %w", err)
@@ -439,13 +423,10 @@ func (s *WalletServiceImpl) GetPinStatus(ctx context.Context, userID uuid.UUID) 
 }
 
 func (s *WalletServiceImpl) RequestPinReset(ctx context.Context, userID uuid.UUID) (*PinResetResponse, error) {
-	// Get user to fetch phone number
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
-
-	// Check rate limit
 	count, err := s.sessionRepo.GetRateLimitCount(ctx, user.PhoneNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check rate limit: %w", err)
@@ -458,8 +439,6 @@ func (s *WalletServiceImpl) RequestPinReset(ctx context.Context, userID uuid.UUI
 		)
 		return nil, domain.ErrOTPRateLimitExceeded
 	}
-
-	// Check cooldown
 	lastSent, err := s.sessionRepo.GetLastOTPSentTime(ctx, user.PhoneNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check cooldown: %w", err)
@@ -471,8 +450,6 @@ func (s *WalletServiceImpl) RequestPinReset(ctx context.Context, userID uuid.UUI
 			return nil, domain.ErrOTPResendCooldown
 		}
 	}
-
-	// Send OTP via verify provider
 	result, err := s.verifyProvider.SendVerification(ctx, user.PhoneNumber, "sms")
 	if err != nil || !result.Success {
 		s.logger.Error("failed to send PIN reset verification",
@@ -481,18 +458,12 @@ func (s *WalletServiceImpl) RequestPinReset(ctx context.Context, userID uuid.UUI
 		)
 		return nil, domain.ErrSMSDeliveryFailed
 	}
-
-	// Set PIN reset pending flag
 	if err := s.sessionRepo.SetPinResetPending(ctx, userID, pinResetPendingTTL); err != nil {
 		s.logger.Error("failed to set PIN reset pending", zap.Error(err))
 	}
-
-	// Increment rate limit
 	if err := s.sessionRepo.IncrementRateLimitCount(ctx, user.PhoneNumber, s.config.OTP.RateLimitWindow); err != nil {
 		s.logger.Error("failed to increment rate limit", zap.Error(err))
 	}
-
-	// Set last OTP sent time
 	if err := s.sessionRepo.SetLastOTPSentTime(ctx, user.PhoneNumber, s.config.OTP.RateLimitWindow); err != nil {
 		s.logger.Error("failed to set last OTP sent time", zap.Error(err))
 	}
@@ -509,7 +480,6 @@ func (s *WalletServiceImpl) RequestPinReset(ctx context.Context, userID uuid.UUI
 }
 
 func (s *WalletServiceImpl) ConfirmPinReset(ctx context.Context, userID uuid.UUID, otpCode, newPin string) error {
-	// Check if PIN reset was requested
 	pending, err := s.sessionRepo.GetPinResetPending(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to check PIN reset pending: %w", err)
@@ -518,14 +488,10 @@ func (s *WalletServiceImpl) ConfirmPinReset(ctx context.Context, userID uuid.UUI
 	if !pending {
 		return domain.ErrPinResetNotRequested
 	}
-
-	// Get user to fetch phone number
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get user: %w", err)
 	}
-
-	// Verify OTP
 	result, err := s.verifyProvider.CheckVerification(ctx, user.PhoneNumber, otpCode)
 	if err != nil {
 		s.logger.Error("PIN reset verification check failed",
@@ -541,35 +507,23 @@ func (s *WalletServiceImpl) ConfirmPinReset(ctx context.Context, userID uuid.UUI
 		)
 		return domain.ErrInvalidOTP
 	}
-
-	// Validate new PIN
 	if err := validatePin(newPin); err != nil {
 		return err
 	}
-
-	// Get or create wallet
 	wallet, err := s.walletRepo.GetOrCreate(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get wallet: %w", err)
 	}
-
-	// Hash the new PIN
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPin), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash PIN: %w", err)
 	}
-
-	// Set the new PIN (this also clears lockout and resets attempts)
 	if err := s.walletRepo.SetPin(ctx, wallet.ID, string(hash)); err != nil {
 		return fmt.Errorf("failed to set PIN: %w", err)
 	}
-
-	// Delete PIN reset pending flag
 	if err := s.sessionRepo.DeletePinResetPending(ctx, userID); err != nil {
 		s.logger.Error("failed to delete PIN reset pending", zap.Error(err))
 	}
-
-	// Send push notification
 	if s.notificationService != nil {
 		if err := s.notificationService.SendToUser(
 			ctx,

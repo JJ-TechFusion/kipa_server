@@ -32,13 +32,9 @@ type WorkerConfig struct {
 	MaxBackoff        time.Duration // Maximum backoff between restarts
 	JitterPercent     int           // Percentage of jitter to add to intervals (0-100)
 	ReminderCooldownMins int // Minimum minutes between reminder notifications to same seller
-
-	// Logistics delivery jobs
 	LogisticsCheckInterval      time.Duration // Check for exceeded ship deadlines
 	LogisticsReminderInterval   time.Duration // Send confirmation reminders
 	LogisticsEscalationInterval time.Duration // Auto-escalate unresponsive buyers
-
-	// Rebook expiry job
 	RebookExpiryCheckInterval time.Duration // Check for expired rebook deadlines
 }
 func DefaultWorkerConfig() *WorkerConfig {
@@ -60,13 +56,9 @@ func DefaultWorkerConfig() *WorkerConfig {
 		JitterPercent:  20,              // Add up to 20% jitter
 
 		ReminderCooldownMins: 60, // 1 hour between reminders
-
-		// Logistics delivery jobs
 		LogisticsCheckInterval:      15 * time.Minute, // Check ship deadlines every 15 min
 		LogisticsReminderInterval:   1 * time.Hour,    // Send reminders hourly
 		LogisticsEscalationInterval: 30 * time.Minute, // Check for auto-escalation every 30 min
-
-		// Rebook expiry job
 		RebookExpiryCheckInterval: 5 * time.Minute, // Check expired rebook deadlines every 5 min
 	}
 }
@@ -91,8 +83,6 @@ type JobProcessor struct {
 	logger              *zap.Logger
 	stopCh              chan struct{}
 	wg                  sync.WaitGroup
-
-	// Nearby riders broadcasting
 	nearbyRidersFinder      NearbyRidersFinder
 	nearbyRidersBroadcaster NearbyRidersBroadcaster
 }
@@ -136,21 +126,13 @@ func (p *JobProcessor) Start(ctx context.Context) {
 	go p.runWithRecovery(ctx, "link_expiry", p.runLinkExpiryJob)
 	go p.runWithRecovery(ctx, "radius_expand", p.runRadiusExpandJob)
 	go p.runWithRecovery(ctx, "timer_expiry", p.runTimerExpiryJob)
-
-	// Logistics delivery jobs
 	go p.runWithRecovery(ctx, "logistics_ship_deadline", p.runLogisticsShipDeadlineJob)
 	go p.runWithRecovery(ctx, "logistics_reminder", p.runLogisticsReminderJob)
 	go p.runWithRecovery(ctx, "logistics_escalation", p.runLogisticsAutoEscalationJob)
-
-	// Rebook expiry job
 	go p.runWithRecovery(ctx, "rebook_expiry", p.runRebookExpiryJob)
-
-	// Driver delivery jobs (Phase 4 + 5)
 	go p.runWithRecovery(ctx, "driver_delivery_auto_confirm", p.runDriverDeliveryAutoConfirmJob)
 	go p.runWithRecovery(ctx, "driver_delivery_monitor", p.runDriverDeliveryMonitorJob)
 	go p.runWithRecovery(ctx, "driver_trip_monitor", p.runDriverTripMonitorJob)
-
-	// Nearby riders broadcast job
 	go p.runWithRecovery(ctx, "nearby_riders", p.runNearbyRidersJob)
 
 	p.logger.Info("all background jobs started")

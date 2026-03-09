@@ -12,19 +12,12 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
-
-// DisputeResolutionService handles dispute resolution for both intra-state and inter-state deliveries
 type DisputeResolutionService interface {
-	// Resolve a dispute with outcome
 	ResolveDispute(ctx context.Context, disputeID uuid.UUID, adminID uuid.UUID, req *ResolveDisputeRequest) error
-
-	// Intra-state return flow
 	CreateReturnDeliveryJob(ctx context.Context, paymentRequestID uuid.UUID) (*domain.DeliveryJob, error)
 	ConfirmReadyForReturn(ctx context.Context, paymentRequestID uuid.UUID, buyerID uuid.UUID) (*domain.DeliveryJob, error)
 	ConfirmReturnReceived(ctx context.Context, returnJobID uuid.UUID, sellerID uuid.UUID, req *ConfirmReturnRequest) error
 	ResolveDamageClaim(ctx context.Context, returnJobID uuid.UUID, adminID uuid.UUID, req *ResolveDamageClaimRequest) error
-
-	// Queries
 	GetReturnJob(ctx context.Context, paymentRequestID uuid.UUID) (*domain.DeliveryJob, error)
 	ListPendingDamageClaims(ctx context.Context, limit, offset int) ([]*domain.DeliveryJob, int, error)
 }
@@ -106,8 +99,6 @@ func (s *DisputeResolutionServiceImpl) ResolveDispute(ctx context.Context, dispu
 	if err != nil {
 		return err
 	}
-
-	// Handle based on delivery type
 	switch req.Outcome {
 	case "buyer_favor":
 		return s.handleBuyerWins(ctx, dispute, escrow, pr, adminID, req)
@@ -123,21 +114,15 @@ func (s *DisputeResolutionServiceImpl) ResolveDispute(ctx context.Context, dispu
 func (s *DisputeResolutionServiceImpl) handleBuyerWins(ctx context.Context, dispute *domain.Dispute, escrow *domain.Escrow, pr *domain.PaymentRequest, adminID uuid.UUID, req *ResolveDisputeRequest) error {
 	outcome := "buyer_favor"
 	pr.DisputeOutcome = &outcome
-
-	// For intra-state with rider delivery, require return and pre-create return job
 	if pr.IsIntraStateDelivery() && pr.DeliveryJobID != nil {
-		// Pre-create return delivery job in "created" state (not searching yet)
-		// Buyer must confirm they're ready before search starts
 		returnJob, err := s.createReturnJobInternal(ctx, pr, dispute)
 		if err != nil {
 			s.logger.Error("failed to create return job",
 				zap.Error(err),
 				zap.String("pr_id", pr.ID.String()),
 			)
-			// Still set status to return_required, job can be created later
 			pr.Status = domain.PRStatusReturnRequired
 		} else {
-			// Return job created, but status is still return_required (buyer must confirm ready)
 			pr.Status = domain.PRStatusReturnRequired
 			pr.ReturnDeliveryJobID = &returnJob.ID
 		}
@@ -145,14 +130,10 @@ func (s *DisputeResolutionServiceImpl) handleBuyerWins(ctx context.Context, disp
 		if err := s.prRepo.Update(ctx, pr); err != nil {
 			return err
 		}
-
-		// Resolve dispute with pending outcome (waiting for return)
 		dispute.Resolve(adminID, domain.DisputeOutcomePending, req.ResolutionNotes)
 		if err := s.disputeRepo.Update(ctx, dispute); err != nil {
 			return err
 		}
-
-		// Notify both parties - buyer must confirm when ready
 		s.sendNotification(ctx, *pr.BuyerID, "You Won the Dispute - Return Required",
 			"You won the dispute! When you're ready to return the item, tap 'Ready for Return Pickup' in the app. A rider will then be dispatched to collect it.",
 			domain.NotificationDisputeResolved)
@@ -167,15 +148,8 @@ func (s *DisputeResolutionServiceImpl) handleBuyerWins(ctx context.Context, disp
 		)
 		return nil
 	}
-
-	// For inter-state or no rider delivery, use logistics return flow
-	// (This is handled by LogisticsDeliveryService for inter-state)
-	// For pickup type or no delivery job, direct refund
 	return s.processFullRefund(ctx, dispute, escrow, pr, adminID, req.ResolutionNotes)
 }
-
-// createReturnJobInternal creates a return job in "created" state (not searching yet)
-// Buyer must confirm they're ready before search starts
 func (s *DisputeResolutionServiceImpl) createReturnJobInternal(ctx context.Context, pr *domain.PaymentRequest, dispute *domain.Dispute) (*domain.DeliveryJob, error) {
 	if pr.DeliveryJobID == nil {
 		return nil, fmt.Errorf("no original delivery job found")
@@ -185,8 +159,6 @@ func (s *DisputeResolutionServiceImpl) createReturnJobInternal(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-
-	// Get coordinates from original job
 	coords, err := s.deliveryJobRepo.GetJobCoordinates(ctx, *pr.DeliveryJobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get original job coordinates: %w", err)
@@ -196,9 +168,6 @@ func (s *DisputeResolutionServiceImpl) createReturnJobInternal(ctx context.Conte
 	if dispute != nil {
 		disputeID = &dispute.ID
 	}
-
-	// Calculate return delivery fee (same route, reversed)
-	// For return: pickup is buyer's location (was dropoff), dropoff is seller's location (was pickup)
 	var deliveryFee float64
 	if s.feeCalculator != nil {
 		feeEstimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(
@@ -212,18 +181,13 @@ func (s *DisputeResolutionServiceImpl) createReturnJobInternal(ctx context.Conte
 				zap.Error(err),
 				zap.String("pr_id", pr.ID.String()),
 			)
-			// Fallback to original delivery fee
 			deliveryFee = originalJob.DeliveryFee
 		} else {
 			deliveryFee = feeEstimate.TotalFee
 		}
 	} else {
-		// No fee calculator, use original fee
 		deliveryFee = originalJob.DeliveryFee
 	}
-
-	// Create return job in "created" state - NOT searching yet
-	// Buyer must confirm ready before search starts
 	returnJob := &domain.DeliveryJob{
 		ID:                  uuid.New(),
 		PaymentRequestID:    pr.ID,
@@ -258,16 +222,12 @@ func (s *DisputeResolutionServiceImpl) createReturnJobInternal(ctx context.Conte
 func (s *DisputeResolutionServiceImpl) handleSellerWins(ctx context.Context, dispute *domain.Dispute, escrow *domain.Escrow, pr *domain.PaymentRequest, adminID uuid.UUID, req *ResolveDisputeRequest) error {
 	outcome := "seller_favor"
 	pr.DisputeOutcome = &outcome
-
-	// Release funds to seller
 	idempotencyKey := fmt.Sprintf("dispute_seller_wins_%s", dispute.ID.String())
 	sellerPayout := escrow.ItemAmount
 	_, err := s.walletService.Credit(ctx, pr.SellerID, sellerPayout, domain.WalletTxEscrowRelease, "dispute", dispute.ID, req.ResolutionNotes, idempotencyKey)
 	if err != nil {
 		return err
 	}
-
-	// Update escrow
 	now := time.Now()
 	escrow.SellerPayout = &sellerPayout
 	escrow.ReleasedAt = &now
@@ -275,21 +235,15 @@ func (s *DisputeResolutionServiceImpl) handleSellerWins(ctx context.Context, dis
 	if err := s.escrowRepo.Update(ctx, escrow); err != nil {
 		return err
 	}
-
-	// Update payment request
 	pr.Status = domain.PRStatusCompleted
 	pr.CompletedAt = &now
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return err
 	}
-
-	// Resolve dispute
 	dispute.Resolve(adminID, domain.DisputeOutcomeSellerWins, req.ResolutionNotes)
 	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
 		return err
 	}
-
-	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Dispute Resolved", fmt.Sprintf("Admin ruled in favor of the seller: %s", req.ResolutionNotes), domain.NotificationDisputeResolved)
 	s.sendNotification(ctx, pr.SellerID, "Funds Released", fmt.Sprintf("You won the dispute. NGN %.2f has been credited to your wallet.", sellerPayout), domain.NotificationDisputeResolved)
 
@@ -309,15 +263,11 @@ func (s *DisputeResolutionServiceImpl) handlePartialRefund(ctx context.Context, 
 	pr.DisputeOutcome = &outcome
 	refundAmount := *req.RefundAmount
 	sellerAmount := escrow.TotalLocked - refundAmount
-
-	// Refund buyer
 	idempotencyKey := fmt.Sprintf("dispute_partial_buyer_%s", dispute.ID.String())
 	_, err := s.walletService.Credit(ctx, *pr.BuyerID, refundAmount, domain.WalletTxRefund, "dispute", dispute.ID, req.ResolutionNotes, idempotencyKey)
 	if err != nil {
 		return err
 	}
-
-	// Credit seller remaining
 	if sellerAmount > 0 {
 		idempotencyKey2 := fmt.Sprintf("dispute_partial_seller_%s", dispute.ID.String())
 		_, err = s.walletService.Credit(ctx, pr.SellerID, sellerAmount, domain.WalletTxEscrowRelease, "dispute", dispute.ID, req.ResolutionNotes, idempotencyKey2)
@@ -325,8 +275,6 @@ func (s *DisputeResolutionServiceImpl) handlePartialRefund(ctx context.Context, 
 			return err
 		}
 	}
-
-	// Update escrow
 	now := time.Now()
 	escrow.SellerPayout = &sellerAmount
 	escrow.ReleasedAt = &now
@@ -334,20 +282,14 @@ func (s *DisputeResolutionServiceImpl) handlePartialRefund(ctx context.Context, 
 	if err := s.escrowRepo.Update(ctx, escrow); err != nil {
 		return err
 	}
-
-	// Update payment request
 	pr.Status = domain.PRStatusRefunded
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return err
 	}
-
-	// Resolve dispute
 	dispute.Resolve(adminID, domain.DisputeOutcomePartialRefund, req.ResolutionNotes)
 	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
 		return err
 	}
-
-	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Partial Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", refundAmount), domain.NotificationRefundProcessed)
 	s.sendNotification(ctx, pr.SellerID, "Partial Payment Released", fmt.Sprintf("NGN %.2f has been credited to your wallet.", sellerAmount), domain.NotificationDisputeResolved)
 
@@ -360,81 +302,58 @@ func (s *DisputeResolutionServiceImpl) handlePartialRefund(ctx context.Context, 
 }
 
 func (s *DisputeResolutionServiceImpl) processFullRefund(ctx context.Context, dispute *domain.Dispute, escrow *domain.Escrow, pr *domain.PaymentRequest, adminID uuid.UUID, notes string) error {
-	// Full refund to buyer
 	idempotencyKey := fmt.Sprintf("dispute_refund_%s", dispute.ID.String())
 	_, err := s.walletService.Credit(ctx, *pr.BuyerID, escrow.TotalLocked, domain.WalletTxRefund, "dispute", dispute.ID, notes, idempotencyKey)
 	if err != nil {
 		return err
 	}
-
-	// Update escrow
 	now := time.Now()
 	escrow.ReleasedAt = &now
 	escrow.Status = domain.EscrowStatusRefunded
 	if err := s.escrowRepo.Update(ctx, escrow); err != nil {
 		return err
 	}
-
-	// Update payment request
 	pr.Status = domain.PRStatusRefunded
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return err
 	}
-
-	// Resolve dispute
 	dispute.Resolve(adminID, domain.DisputeOutcomeBuyerWins, notes)
 	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
 		return err
 	}
-
-	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked), domain.NotificationRefundProcessed)
 	s.sendNotification(ctx, pr.SellerID, "Dispute Resolved", notes, domain.NotificationDisputeResolved)
 
 	return nil
 }
-
-// ConfirmReadyForReturn is called when buyer confirms they're ready for return pickup
-// This starts the rider search
 func (s *DisputeResolutionServiceImpl) ConfirmReadyForReturn(ctx context.Context, paymentRequestID uuid.UUID, buyerID uuid.UUID) (*domain.DeliveryJob, error) {
 	pr, err := s.prRepo.GetByID(ctx, paymentRequestID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Verify buyer owns this
 	if pr.BuyerID == nil || *pr.BuyerID != buyerID {
 		return nil, domain.ErrUnauthorized
 	}
-
-	// Must be in return_required status
 	if pr.Status != domain.PRStatusReturnRequired {
 		return nil, fmt.Errorf("cannot confirm ready: status is %s, expected return_required", pr.Status)
 	}
 
 	var returnJob *domain.DeliveryJob
-
-	// Check if return job already exists
 	if pr.ReturnDeliveryJobID != nil {
 		returnJob, err = s.deliveryJobRepo.GetByID(ctx, *pr.ReturnDeliveryJobID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get return job: %w", err)
 		}
-
-		// Job must be in created status
 		if returnJob.Status != domain.DJStatusCreated {
 			return nil, fmt.Errorf("return job already in progress: %s", returnJob.Status)
 		}
 	} else {
-		// Create return job if it doesn't exist
 		returnJob, err = s.createReturnJobInternal(ctx, pr, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create return job: %w", err)
 		}
 		pr.ReturnDeliveryJobID = &returnJob.ID
 	}
-
-	// Start the search
 	now := time.Now()
 	returnJob.Status = domain.DJStatusSearching
 	returnJob.SearchStartedAt = &now
@@ -446,14 +365,10 @@ func (s *DisputeResolutionServiceImpl) ConfirmReadyForReturn(ctx context.Context
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastJobStatus(returnJob.ID.String(), string(domain.DJStatusSearching))
 	}
-
-	// Update PR status
 	pr.Status = domain.PRStatusReturnSearchingRider
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return nil, fmt.Errorf("failed to update payment request: %w", err)
 	}
-
-	// Notify buyer
 	s.sendNotification(ctx, buyerID, "Return Pickup Scheduled",
 		"We're searching for a rider to pick up your item. Please have it ready.",
 		domain.NotificationItemReturning)
@@ -469,8 +384,6 @@ func (s *DisputeResolutionServiceImpl) ConfirmReadyForReturn(ctx context.Context
 
 	return returnJob, nil
 }
-
-// CreateReturnDeliveryJob creates a return delivery job for intra-state returns
 func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Context, paymentRequestID uuid.UUID) (*domain.DeliveryJob, error) {
 	pr, err := s.prRepo.GetByID(ctx, paymentRequestID)
 	if err != nil {
@@ -482,13 +395,10 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 	}
 
 	if pr.ReturnDeliveryJobID != nil {
-		// Already has a return job - get it and start search if needed
 		existingJob, err := s.deliveryJobRepo.GetByID(ctx, *pr.ReturnDeliveryJobID)
 		if err != nil {
 			return nil, err
 		}
-
-		// If job is in created status, start the search
 		if existingJob.Status == domain.DJStatusCreated {
 			now := time.Now()
 			existingJob.Status = domain.DJStatusSearching
@@ -501,8 +411,6 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 			if s.broadcaster != nil {
 				s.broadcaster.BroadcastJobStatus(existingJob.ID.String(), string(domain.DJStatusSearching))
 			}
-
-			// Update PR status
 			pr.Status = domain.PRStatusReturnSearchingRider
 			if err := s.prRepo.Update(ctx, pr); err != nil {
 				return nil, fmt.Errorf("failed to update payment request: %w", err)
@@ -511,8 +419,6 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 
 		return existingJob, nil
 	}
-
-	// Get original delivery job
 	if pr.DeliveryJobID == nil {
 		return nil, fmt.Errorf("no original delivery job found")
 	}
@@ -520,14 +426,10 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-
-	// Get coordinates from original job for Google Maps routing
 	coords, err := s.deliveryJobRepo.GetJobCoordinates(ctx, *pr.DeliveryJobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get original job coordinates: %w", err)
 	}
-
-	// Get escrow for dispute reference
 	var disputeID *uuid.UUID
 	if pr.EscrowID != nil {
 		escrow, _ := s.escrowRepo.GetByID(ctx, *pr.EscrowID)
@@ -538,8 +440,6 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 			}
 		}
 	}
-
-	// Calculate return delivery fee
 	var deliveryFee float64
 	if s.feeCalculator != nil {
 		feeEstimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(
@@ -560,9 +460,6 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 	} else {
 		deliveryFee = originalJob.DeliveryFee
 	}
-
-	// Create return job with reversed addresses and coordinates
-	// For return: original dropoff (buyer) becomes pickup, original pickup (seller) becomes dropoff
 	now := time.Now()
 	returnJob := &domain.DeliveryJob{
 		ID:                  uuid.New(),
@@ -590,15 +487,11 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastJobStatus(returnJob.ID.String(), string(domain.DJStatusSearching))
 	}
-
-	// Update payment request
 	pr.ReturnDeliveryJobID = &returnJob.ID
 	pr.Status = domain.PRStatusReturnSearchingRider
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return nil, err
 	}
-
-	// Notify buyer
 	s.sendNotification(ctx, *pr.BuyerID, "Return Pickup Scheduled",
 		"A rider will be dispatched to pick up the item for return. Please have it ready.",
 		domain.NotificationItemReturning)
@@ -611,8 +504,6 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 
 	return returnJob, nil
 }
-
-// ConfirmReturnReceived handles seller confirming return receipt
 func (s *DisputeResolutionServiceImpl) ConfirmReturnReceived(ctx context.Context, returnJobID uuid.UUID, sellerID uuid.UUID, req *ConfirmReturnRequest) error {
 	job, err := s.deliveryJobRepo.GetByID(ctx, returnJobID)
 	if err != nil {
@@ -622,8 +513,6 @@ func (s *DisputeResolutionServiceImpl) ConfirmReturnReceived(ctx context.Context
 	if !job.IsReturn {
 		return fmt.Errorf("not a return job")
 	}
-
-	// Verify seller owns this
 	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 	if err != nil {
 		return err
@@ -642,7 +531,6 @@ func (s *DisputeResolutionServiceImpl) ConfirmReturnReceived(ctx context.Context
 
 	switch req.Condition {
 	case "good":
-		// Good condition → process refund
 		job.Status = domain.DJStatusReturnConfirmed
 		if err := s.deliveryJobRepo.Update(ctx, job); err != nil {
 			return err
@@ -651,18 +539,13 @@ func (s *DisputeResolutionServiceImpl) ConfirmReturnReceived(ctx context.Context
 		if s.broadcaster != nil {
 			s.broadcaster.BroadcastJobStatus(returnJobID.String(), string(domain.DJStatusReturnConfirmed))
 		}
-
-		// Update payment request
 		pr.Status = domain.PRStatusReturnConfirmed
 		if err := s.prRepo.Update(ctx, pr); err != nil {
 			return err
 		}
-
-		// Process refund
 		return s.processReturnRefund(ctx, job, pr)
 
 	case "damaged", "incomplete":
-		// Seller disputes return condition
 		if req.DamageReason == nil || *req.DamageReason == "" {
 			return fmt.Errorf("damage reason required when condition is damaged or incomplete")
 		}
@@ -675,14 +558,10 @@ func (s *DisputeResolutionServiceImpl) ConfirmReturnReceived(ctx context.Context
 		if s.broadcaster != nil {
 			s.broadcaster.BroadcastJobStatus(returnJobID.String(), string(domain.DJStatusReturnDamageDisputed))
 		}
-
-		// Update payment request
 		pr.Status = domain.PRStatusReturnDamageDisputed
 		if err := s.prRepo.Update(ctx, pr); err != nil {
 			return err
 		}
-
-		// Notify
 		s.sendNotification(ctx, *pr.BuyerID, "Return Condition Disputed",
 			fmt.Sprintf("Seller claims the returned item is %s. Admin will review and decide.", req.Condition),
 			domain.NotificationDisputeOpened)
@@ -710,15 +589,11 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-
-	// Full refund
 	idempotencyKey := fmt.Sprintf("return_refund_%s", job.ID.String())
 	_, err = s.walletService.Credit(ctx, *pr.BuyerID, escrow.TotalLocked, domain.WalletTxRefund, "delivery_job", job.ID, "Refund after return confirmed", idempotencyKey)
 	if err != nil {
 		return err
 	}
-
-	// Update job status
 	job.Status = domain.DJStatusReturnRefunded
 	if err := s.deliveryJobRepo.Update(ctx, job); err != nil {
 		return err
@@ -727,22 +602,16 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusReturnRefunded))
 	}
-
-	// Update escrow
 	now := time.Now()
 	escrow.ReleasedAt = &now
 	escrow.Status = domain.EscrowStatusRefunded
 	if err := s.escrowRepo.Update(ctx, escrow); err != nil {
 		return err
 	}
-
-	// Update payment request
 	pr.Status = domain.PRStatusRefunded
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return err
 	}
-
-	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed",
 		fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked),
 		domain.NotificationRefundProcessed)
@@ -757,8 +626,6 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 
 	return nil
 }
-
-// ResolveDamageClaim handles admin resolving a return damage claim
 func (s *DisputeResolutionServiceImpl) ResolveDamageClaim(ctx context.Context, returnJobID uuid.UUID, adminID uuid.UUID, req *ResolveDamageClaimRequest) error {
 	job, err := s.deliveryJobRepo.GetByID(ctx, returnJobID)
 	if err != nil {
@@ -785,7 +652,6 @@ func (s *DisputeResolutionServiceImpl) ResolveDamageClaim(ctx context.Context, r
 
 	switch req.Decision {
 	case "full_refund":
-		// Admin decides damage claim invalid → full refund
 		return s.processReturnRefund(ctx, job, pr)
 
 	case "partial_refund":
@@ -795,7 +661,6 @@ func (s *DisputeResolutionServiceImpl) ResolveDamageClaim(ctx context.Context, r
 		return s.processPartialReturnRefund(ctx, job, pr, escrow, *req.RefundAmount, req.ResolutionNotes)
 
 	case "release_to_seller":
-		// Severe damage → release to seller
 		return s.releaseToSeller(ctx, job, pr, escrow, req.ResolutionNotes)
 
 	default:
@@ -805,15 +670,11 @@ func (s *DisputeResolutionServiceImpl) ResolveDamageClaim(ctx context.Context, r
 
 func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Context, job *domain.DeliveryJob, pr *domain.PaymentRequest, escrow *domain.Escrow, refundAmount float64, notes string) error {
 	sellerAmount := escrow.TotalLocked - refundAmount
-
-	// Refund buyer
 	idempotencyKey := fmt.Sprintf("return_partial_buyer_%s", job.ID.String())
 	_, err := s.walletService.Credit(ctx, *pr.BuyerID, refundAmount, domain.WalletTxRefund, "delivery_job", job.ID, notes, idempotencyKey)
 	if err != nil {
 		return err
 	}
-
-	// Credit seller
 	if sellerAmount > 0 {
 		idempotencyKey2 := fmt.Sprintf("return_partial_seller_%s", job.ID.String())
 		_, err = s.walletService.Credit(ctx, pr.SellerID, sellerAmount, domain.WalletTxEscrowRelease, "delivery_job", job.ID, notes, idempotencyKey2)
@@ -821,8 +682,6 @@ func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Co
 			return err
 		}
 	}
-
-	// Update job
 	job.Status = domain.DJStatusReturnRefunded
 	if err := s.deliveryJobRepo.Update(ctx, job); err != nil {
 		return err
@@ -831,8 +690,6 @@ func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Co
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusReturnRefunded))
 	}
-
-	// Update escrow
 	now := time.Now()
 	escrow.SellerPayout = &sellerAmount
 	escrow.ReleasedAt = &now
@@ -840,14 +697,10 @@ func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Co
 	if err := s.escrowRepo.Update(ctx, escrow); err != nil {
 		return err
 	}
-
-	// Update payment request
 	pr.Status = domain.PRStatusRefunded
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return err
 	}
-
-	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Partial Refund Processed",
 		fmt.Sprintf("NGN %.2f has been refunded due to item damage.", refundAmount),
 		domain.NotificationRefundProcessed)
@@ -859,14 +712,11 @@ func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Co
 }
 
 func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job *domain.DeliveryJob, pr *domain.PaymentRequest, escrow *domain.Escrow, notes string) error {
-	// Release full amount to seller
 	idempotencyKey := fmt.Sprintf("return_damage_seller_%s", job.ID.String())
 	_, err := s.walletService.Credit(ctx, pr.SellerID, escrow.TotalLocked, domain.WalletTxEscrowRelease, "delivery_job", job.ID, notes, idempotencyKey)
 	if err != nil {
 		return err
 	}
-
-	// Update job
 	job.Status = domain.DJStatusReturnConfirmed
 	if err := s.deliveryJobRepo.Update(ctx, job); err != nil {
 		return err
@@ -875,8 +725,6 @@ func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job 
 	if s.broadcaster != nil {
 		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusReturnConfirmed))
 	}
-
-	// Update escrow
 	now := time.Now()
 	escrow.SellerPayout = &escrow.TotalLocked
 	escrow.ReleasedAt = &now
@@ -884,15 +732,11 @@ func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job 
 	if err := s.escrowRepo.Update(ctx, escrow); err != nil {
 		return err
 	}
-
-	// Update payment request
 	pr.Status = domain.PRStatusCompleted
 	pr.CompletedAt = &now
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		return err
 	}
-
-	// Notify
 	s.sendNotification(ctx, *pr.BuyerID, "Damage Claim Resolved",
 		"Admin determined the return damage was severe. Funds released to seller.",
 		domain.NotificationDisputeResolved)
@@ -902,8 +746,6 @@ func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job 
 
 	return nil
 }
-
-// GetReturnJob retrieves return job for a payment request
 func (s *DisputeResolutionServiceImpl) GetReturnJob(ctx context.Context, paymentRequestID uuid.UUID) (*domain.DeliveryJob, error) {
 	pr, err := s.prRepo.GetByID(ctx, paymentRequestID)
 	if err != nil {
@@ -916,8 +758,6 @@ func (s *DisputeResolutionServiceImpl) GetReturnJob(ctx context.Context, payment
 
 	return s.deliveryJobRepo.GetByID(ctx, *pr.ReturnDeliveryJobID)
 }
-
-// ListPendingDamageClaims returns delivery jobs with damage claims pending admin review
 func (s *DisputeResolutionServiceImpl) ListPendingDamageClaims(ctx context.Context, limit, offset int) ([]*domain.DeliveryJob, int, error) {
 	return s.deliveryJobRepo.GetByStatus(ctx, domain.DJStatusReturnDamageDisputed, limit, offset)
 }

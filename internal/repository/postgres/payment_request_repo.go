@@ -384,8 +384,6 @@ func (r *PaymentRequestRepo) GetAll(ctx context.Context, limit, offset int) ([]*
 
 	return requests, nil
 }
-
-// GetExpiredRebookRequests finds payment requests in pending_rebook with expired deadline
 func (r *PaymentRequestRepo) GetExpiredRebookRequests(ctx context.Context) ([]*domain.PaymentRequest, error) {
 	var requests []*domain.PaymentRequest
 	query := `
@@ -403,8 +401,6 @@ func (r *PaymentRequestRepo) GetExpiredRebookRequests(ctx context.Context) ([]*d
 
 	return requests, nil
 }
-
-// SetUnavailabilityFee sets the unavailability fee for a payment request
 func (r *PaymentRequestRepo) SetUnavailabilityFee(ctx context.Context, id uuid.UUID, fee float64) error {
 	query := `UPDATE payment_requests SET unavailability_fee = $1, updated_at = NOW() WHERE id = $2`
 	result, err := r.db.ExecContext(ctx, query, fee, id)

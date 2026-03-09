@@ -32,8 +32,6 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *mi
 		auth.GET("/me", authMiddleware.RequireAuth(), h.Me)
 		auth.PATCH("/profile", authMiddleware.RequireAuth(), h.UpdateProfile)
 		auth.DELETE("/account", authMiddleware.RequireAuth(), h.DeleteAccount)
-
-		// Development only endpoint
 		auth.POST("/dev/token", h.DevGenerateToken)
 	}
 }

@@ -60,8 +60,6 @@ func (m *AdminMiddleware) RequireAdmin() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-
-		// User is admin, continue
 		c.Next()
 	}
 }

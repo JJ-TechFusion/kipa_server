@@ -81,11 +81,8 @@ func (r *DisputeRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Disput
 	}
 
 	if len(evidenceJSON) > 0 {
-		// Try to unmarshal as []string first
 		var evidence []string
 		if err := json.Unmarshal(evidenceJSON, &evidence); err != nil {
-			// If that fails, evidence might be stored differently or empty object
-			// Just set to empty slice to avoid blocking
 			dispute.Evidence = []string{}
 		} else {
 			dispute.Evidence = evidence

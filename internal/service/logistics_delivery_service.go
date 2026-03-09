@@ -31,22 +31,14 @@ type LogisticsDeliveryService interface {
 	ListForSeller(ctx context.Context, sellerID uuid.UUID, status *domain.LogisticsDeliveryStatus, limit, offset int) (*dto.LogisticsDeliveryListResponse, error)
 	ListForBuyer(ctx context.Context, buyerID uuid.UUID, status *domain.LogisticsDeliveryStatus, limit, offset int) (*dto.LogisticsDeliveryListResponse, error)
 	ListPendingAdminApproval(ctx context.Context, limit, offset int) (*dto.LogisticsDeliveryListResponse, error)
-
-	// Seller actions
 	MarkShipped(ctx context.Context, id uuid.UUID, sellerID uuid.UUID, req *dto.MarkShippedRequest) error
 	UpdateTracking(ctx context.Context, id uuid.UUID, sellerID uuid.UUID, req *dto.UpdateTrackingRequest) error
 	ClaimDelivery(ctx context.Context, id uuid.UUID, sellerID uuid.UUID, req *dto.ClaimDeliveryRequest) error
 	ConfirmReturnReceived(ctx context.Context, id uuid.UUID, sellerID uuid.UUID, req *dto.ConfirmReturnReceivedRequest) error
-
-	// Buyer actions
 	ConfirmDelivery(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.ConfirmDeliveryRequest) error
 	CancelDelivery(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.CancelDeliveryRequest) error
 	MarkReturnShipped(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.MarkReturnShippedRequest) error
-
-	// Dispute actions
 	OpenDispute(ctx context.Context, id uuid.UUID, openerID uuid.UUID, openerType string, req *dto.OpenDisputeRequest) error
-
-	// Admin actions
 	ResolveDispute(ctx context.Context, id uuid.UUID, adminID uuid.UUID, req *dto.AdminResolveDisputeRequest) error
 	ApproveRelease(ctx context.Context, id uuid.UUID, adminID uuid.UUID, req *dto.AdminApproveReleaseRequest) error
 	ResolveDamageClaim(ctx context.Context, id uuid.UUID, adminID uuid.UUID, req *dto.AdminResolveDamageClaimRequest) error
@@ -120,10 +112,6 @@ func NewLogisticsDeliveryService(
 	}
 }
 
-// ============================================
-// CREATION
-// ============================================
-
 func (s *LogisticsDeliveryServiceImpl) Create(ctx context.Context, req *CreateLogisticsDeliveryRequest) (*domain.LogisticsDelivery, error) {
 	delivery := &domain.LogisticsDelivery{
 		ID:                    uuid.New(),
@@ -156,10 +144,6 @@ func (s *LogisticsDeliveryServiceImpl) Create(ctx context.Context, req *CreateLo
 
 	return delivery, nil
 }
-
-// ============================================
-// QUERIES
-// ============================================
 
 func (s *LogisticsDeliveryServiceImpl) GetByID(ctx context.Context, id uuid.UUID) (*domain.LogisticsDelivery, error) {
 	return s.deliveryRepo.GetByID(ctx, id)
@@ -281,10 +265,6 @@ func (s *LogisticsDeliveryServiceImpl) ListPendingAdminApproval(ctx context.Cont
 	}, nil
 }
 
-// ============================================
-// SELLER ACTIONS
-// ============================================
-
 func (s *LogisticsDeliveryServiceImpl) MarkShipped(ctx context.Context, id uuid.UUID, sellerID uuid.UUID, req *dto.MarkShippedRequest) error {
 	delivery, err := s.deliveryRepo.GetByID(ctx, id)
 	if err != nil {
@@ -329,8 +309,6 @@ func (s *LogisticsDeliveryServiceImpl) MarkShipped(ctx context.Context, id uuid.
 	})
 
 	s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusDeliveryInProgress)
-
-	// Update payment request status to in_delivery
 	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusInDelivery); err != nil {
 		s.logger.Warn("failed to update payment request status", zap.Error(err))
 	}
@@ -410,8 +388,6 @@ func (s *LogisticsDeliveryServiceImpl) ClaimDelivery(ctx context.Context, id uui
 
 	fromStatus := delivery.Status
 	s.recordEvent(ctx, id, &fromStatus, domain.LDStatusDeliveryClaimed, &sellerID, "seller", "Seller claims item delivered", nil)
-
-	// Update payment request status to confirmation_window
 	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusConfirmationWindow); err != nil {
 		s.logger.Warn("failed to update payment request status", zap.Error(err))
 	}
@@ -459,7 +435,6 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 			zap.String("escrow_id", delivery.EscrowID.String()),
 			zap.Float64("total_locked", escrow.TotalLocked))
 		if escrow != nil && escrow.TotalLocked >= HighValueThreshold {
-			// High value → needs admin approval
 			newStatus = domain.LDStatusPendingRefundApproval
 			s.sendNotification(ctx, delivery.BuyerID, "Return Received",
 				"Seller confirmed receipt in good condition. Your refund is pending admin approval.")
@@ -480,14 +455,11 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 		}
 
 	case "damaged", "incomplete":
-		// Damaged/incomplete → seller disputes return condition
 		if req.DamageReason == nil || *req.DamageReason == "" {
 			return fmt.Errorf("damage reason required when condition is damaged or incomplete")
 		}
 		newStatus = domain.LDStatusReturnDamageDisputed
 		delivery.DamageClaimReason = req.DamageReason
-
-		// Upload damage evidence
 		for _, url := range req.DamageEvidenceURLs {
 			s.uploadEvidenceInternal(ctx, id, sellerID, "seller", "return_damage_photo", url, req.DamageReason)
 		}
@@ -524,10 +496,6 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 	return nil
 }
 
-// ============================================
-// BUYER ACTIONS
-// ============================================
-
 func (s *LogisticsDeliveryServiceImpl) ConfirmDelivery(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.ConfirmDeliveryRequest) error {
 	delivery, err := s.deliveryRepo.GetByID(ctx, id)
 	if err != nil {
@@ -558,8 +526,6 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmDelivery(ctx context.Context, id u
 	} else {
 		newStatus = domain.LDStatusConfirmed
 		s.recordEvent(ctx, id, &fromStatus, newStatus, &buyerID, "buyer", "Buyer confirmed delivery", nil)
-
-		// Auto-release for non-high-value orders
 		s.releaseEscrow(ctx, delivery, buyerID)
 	}
 
@@ -579,8 +545,6 @@ func (s *LogisticsDeliveryServiceImpl) CancelDelivery(ctx context.Context, id uu
 	if !delivery.CanBeCancelled() {
 		return domain.ErrCannotCancelAfterShipment
 	}
-
-	// Check if ship deadline exceeded
 	if !delivery.IsShipDeadlineExceeded() {
 		return domain.ErrShipDeadlineExceeded
 	}
@@ -591,20 +555,14 @@ func (s *LogisticsDeliveryServiceImpl) CancelDelivery(ctx context.Context, id uu
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return err
 	}
-
-	// Record event
 	fromStatus := domain.LDStatusAwaitingShipment
 	s.recordEvent(ctx, id, &fromStatus, domain.LDStatusCancelled, &buyerID, "buyer", req.Reason, nil)
-
-	// Refund buyer
 	escrow, _ := s.escrowRepo.GetByID(ctx, delivery.EscrowID)
 	if escrow != nil {
 		idempotencyKey := fmt.Sprintf("logistics_cancel_refund_%s", id.String())
 		s.walletService.Credit(ctx, buyerID, escrow.TotalLocked, domain.WalletTxRefund, "logistics_delivery", id, "Order cancelled - seller did not ship on time", idempotencyKey)
 		s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusRefunded)
 	}
-
-	// Update payment request status to cancelled
 	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusCancelled); err != nil {
 		s.logger.Warn("failed to update payment request status", zap.Error(err))
 	}
@@ -649,44 +607,30 @@ func (s *LogisticsDeliveryServiceImpl) MarkReturnShipped(ctx context.Context, id
 	return nil
 }
 
-// ============================================
-// DISPUTE ACTIONS
-// ============================================
-
 func (s *LogisticsDeliveryServiceImpl) OpenDispute(ctx context.Context, id uuid.UUID, openerID uuid.UUID, openerType string, req *dto.OpenDisputeRequest) error {
 	delivery, err := s.deliveryRepo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-
-	// Validate opener
 	if openerType == "buyer" && delivery.BuyerID != openerID {
 		return domain.ErrUnauthorized
 	}
 	if openerType == "seller" && delivery.SellerID != openerID {
 		return domain.ErrUnauthorized
 	}
-
-	// Check if dispute can be opened
 	if openerType == "buyer" && !delivery.CanOpenDispute() {
 		return domain.ErrCannotOpenDisputeInState
 	}
 	if openerType == "seller" && !delivery.CanSellerOpenDispute() {
 		return domain.ErrSellerCannotDisputeYet
 	}
-
-	// Check if dispute already exists
 	if delivery.DisputeID != nil {
 		return domain.ErrDisputeAlreadyOpen
 	}
-
-	// Create dispute
 	dispute := domain.NewDispute(delivery.EscrowID, openerID, req.Reason, req.EvidenceURLs)
 	if err := s.disputeRepo.Create(ctx, dispute); err != nil {
 		return fmt.Errorf("failed to create dispute: %w", err)
 	}
-
-	// Link dispute to delivery
 	err = s.deliveryRepo.SetDispute(ctx, id, dispute.ID)
 	if err != nil {
 		return err
@@ -694,13 +638,9 @@ func (s *LogisticsDeliveryServiceImpl) OpenDispute(ctx context.Context, id uuid.
 
 
 	s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusDisputed)
-
-	// Update payment request status to disputed
 	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusDisputed); err != nil {
 		s.logger.Warn("failed to update payment request status", zap.Error(err))
 	}
-
-	// Record event
 	fromStatus := delivery.Status
 	s.recordEvent(ctx, id, &fromStatus, domain.LDStatusDisputed, &openerID, openerType, req.Reason, nil)
 
@@ -720,10 +660,6 @@ func (s *LogisticsDeliveryServiceImpl) OpenDispute(ctx context.Context, id uuid.
 
 	return nil
 }
-
-// ============================================
-// ADMIN ACTIONS
-// ============================================
 
 func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uuid.UUID, adminID uuid.UUID, req *dto.AdminResolveDisputeRequest) error {
 	delivery, err := s.deliveryRepo.GetByID(ctx, id)
@@ -754,10 +690,8 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 
 	switch req.Outcome {
 	case "buyer_wins":
-		// Buyer wins → must return package first before refund
 		outcome = domain.DisputeOutcomeBuyerWins
 		newStatus = domain.LDStatusReturnRequired
-		// Set return cost shares (default: buyer pays return shipping)
 		buyerShare := 100.0
 		sellerShare := 0.0
 		if req.ReturnCostBuyerShare != nil {
@@ -770,7 +704,6 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 		if err != nil {
 			return err
 		}
-		// Notify buyer to ship return
 		s.sendNotification(ctx, delivery.BuyerID, "Return Required",
 			"You won the dispute. Please ship the item back to the seller to receive your refund.")
 		s.sendNotification(ctx, delivery.SellerID, "Dispute Resolved - Return Required",
@@ -790,7 +723,6 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 		s.processPartialRefund(ctx, delivery, escrow, *req.RefundAmount)
 
 	case "return_required":
-		// Explicit return required (neither party clearly wins yet)
 		outcome = domain.DisputeOutcomePending
 		newStatus = domain.LDStatusReturnRequired
 		if req.ReturnCostBuyerShare == nil || req.ReturnCostSellerShare == nil {
@@ -804,8 +736,6 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 	default:
 		return fmt.Errorf("invalid outcome: %s", req.Outcome)
 	}
-
-	// Store the dispute outcome on the delivery (use domain constant value for consistency)
 	outcomeStr := string(outcome)
 	delivery.DisputeOutcome = &outcomeStr
 
@@ -822,8 +752,6 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
 		return err
 	}
-
-	// Update payment request status based on outcome
 	var prStatus domain.PaymentRequestStatus
 	switch newStatus {
 	case domain.LDStatusReturnRequired:
@@ -908,7 +836,6 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDamageClaim(ctx context.Context, i
 
 	switch req.Decision {
 	case "full_refund":
-		// Admin decides damage claim is invalid or minor → full refund to buyer
 		newStatus = domain.LDStatusRefunded
 		s.processReturnRefund(ctx, delivery, escrow)
 		s.sendNotification(ctx, delivery.BuyerID, "Refund Processed",
@@ -917,7 +844,6 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDamageClaim(ctx context.Context, i
 			"Admin reviewed and determined a full refund is appropriate.")
 
 	case "partial_refund":
-		// Admin decides damage is valid → partial refund
 		if req.RefundAmount == nil {
 			return fmt.Errorf("refund amount required for partial refund")
 		}
@@ -929,7 +855,6 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDamageClaim(ctx context.Context, i
 			fmt.Sprintf("Admin processed a partial refund. You received NGN %.2f for the damage.", escrow.TotalLocked-*req.RefundAmount))
 
 	case "release_to_seller":
-		// Severe damage → release to seller (buyer at fault)
 		newStatus = domain.LDStatusReleasedByAdmin
 		s.releaseEscrowToSeller(ctx, delivery, escrow, adminID)
 		s.sendNotification(ctx, delivery.BuyerID, "Damage Claim Resolved",
@@ -976,8 +901,6 @@ func (s *LogisticsDeliveryServiceImpl) ApproveRefund(ctx context.Context, id uui
 	if err != nil {
 		return err
 	}
-
-	// Process refund
 	s.processReturnRefund(ctx, delivery, escrow)
 
 	notes := "Admin approved refund after return confirmation"
@@ -1069,17 +992,11 @@ func (s *LogisticsDeliveryServiceImpl) GetTimeline(ctx context.Context, id uuid.
 	return dto.BuildTimeline(delivery, events), nil
 }
 
-// ============================================
-// EVIDENCE
-// ============================================
-
 func (s *LogisticsDeliveryServiceImpl) UploadEvidence(ctx context.Context, id uuid.UUID, uploaderID uuid.UUID, uploaderType string, req *dto.UploadEvidenceRequest) error {
 	delivery, err := s.deliveryRepo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-
-	// Validate uploader
 	if uploaderType == "buyer" && delivery.BuyerID != uploaderID {
 		return domain.ErrUnauthorized
 	}
@@ -1104,10 +1021,6 @@ func (s *LogisticsDeliveryServiceImpl) uploadEvidenceInternal(ctx context.Contex
 	return s.evidenceRepo.Create(ctx, evidence)
 }
 
-// ============================================
-// BACKGROUND JOBS
-// ============================================
-
 func (s *LogisticsDeliveryServiceImpl) ProcessExceededShipDeadlines(ctx context.Context) error {
 	deliveries, err := s.deliveryRepo.GetExceededShipDeadlines(ctx)
 	if err != nil {
@@ -1115,10 +1028,8 @@ func (s *LogisticsDeliveryServiceImpl) ProcessExceededShipDeadlines(ctx context.
 	}
 
 	for _, d := range deliveries {
-		// Notify buyer they can now cancel
 		s.sendNotification(ctx, d.BuyerID, "Ship Deadline Exceeded",
 			"The seller has not shipped your order. You may now cancel for a full refund.")
-		// Notify seller
 		s.sendNotification(ctx, d.SellerID, "Shipping Deadline Missed",
 			"You missed the shipping deadline. The buyer can now cancel the order.")
 	}
@@ -1131,14 +1042,12 @@ func (s *LogisticsDeliveryServiceImpl) ProcessExceededShipDeadlines(ctx context.
 }
 
 func (s *LogisticsDeliveryServiceImpl) ProcessConfirmationReminders(ctx context.Context) error {
-	// Send reminders at 24h intervals
 	deliveries, err := s.deliveryRepo.GetPendingConfirmationReminders(ctx, 24)
 	if err != nil {
 		return err
 	}
 
 	for _, d := range deliveries {
-		// Determine which reminder this is
 		reminderNum := d.ReminderCount + 1
 		daysRemaining := ConfirmationWindowDays - reminderNum
 
@@ -1190,10 +1099,6 @@ func (s *LogisticsDeliveryServiceImpl) ProcessAutoEscalations(ctx context.Contex
 	return nil
 }
 
-// ============================================
-// HELPER METHODS
-// ============================================
-
 func (s *LogisticsDeliveryServiceImpl) recordEvent(ctx context.Context, deliveryID uuid.UUID, fromStatus *domain.LogisticsDeliveryStatus, toStatus domain.LogisticsDeliveryStatus, actorID *uuid.UUID, actorType, reason string, metadata map[string]interface{}) {
 	var metadataBytes []byte
 	if metadata != nil {
@@ -1222,7 +1127,6 @@ func (s *LogisticsDeliveryServiceImpl) sendNotification(_ context.Context, userI
 	if s.notificationService == nil {
 		return
 	}
-	// Fire and forget
 	go func() {
 		if err := s.notificationService.SendToUser(context.Background(), userID, title, message, nil, domain.NotificationLogisticsConfirmReminder); err != nil {
 			s.logger.Debug("failed to send notification", zap.Error(err))
@@ -1260,8 +1164,6 @@ func (s *LogisticsDeliveryServiceImpl) releaseEscrowToSeller(ctx context.Context
 	delivery.Status = domain.LDStatusFundsReleased
 	delivery.ReleasedAt = &now
 	s.deliveryRepo.Update(ctx, delivery)
-
-	// Update payment request status to completed
 	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusCompleted); err != nil {
 		s.logger.Warn("failed to update payment request status", zap.Error(err))
 	}
@@ -1271,20 +1173,14 @@ func (s *LogisticsDeliveryServiceImpl) releaseEscrowToSeller(ctx context.Context
 		fromStatus = domain.LDStatusPendingAdminApproval
 	}
 	s.recordEvent(ctx, delivery.ID, &fromStatus, domain.LDStatusFundsReleased, &releaserID, "system", "Funds released to seller", nil)
-
-	// Notify
 	s.sendNotification(ctx, delivery.SellerID, "Payment Released", fmt.Sprintf("NGN %.2f has been credited to your wallet", sellerPayout))
 }
 
 func (s *LogisticsDeliveryServiceImpl) processReturnRefund(ctx context.Context, delivery *domain.LogisticsDelivery, escrow *domain.Escrow) {
-	// Calculate refund based on cost shares
-	// For simplicity, full refund minus any deductions
 	refundAmount := escrow.TotalLocked
 
 	idempotencyKey := fmt.Sprintf("return_refund_%s", delivery.ID.String())
 	s.walletService.Credit(ctx, delivery.BuyerID, refundAmount, domain.WalletTxRefund, "logistics_delivery", delivery.ID, "Refund after return confirmed", idempotencyKey)
-
-	// Update statuses
 	now := time.Now()
 	delivery.Status = domain.LDStatusRefunded
 	delivery.ReleasedAt = &now
@@ -1292,8 +1188,6 @@ func (s *LogisticsDeliveryServiceImpl) processReturnRefund(ctx context.Context, 
 
 	escrow.Status = domain.EscrowStatusRefunded
 	s.escrowRepo.Update(ctx, escrow)
-
-	// Update payment request status to refunded
 	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusRefunded); err != nil {
 		s.logger.Warn("failed to update payment request status", zap.Error(err))
 	}
@@ -1306,18 +1200,12 @@ func (s *LogisticsDeliveryServiceImpl) processReturnRefund(ctx context.Context, 
 
 func (s *LogisticsDeliveryServiceImpl) processPartialRefund(ctx context.Context, delivery *domain.LogisticsDelivery, escrow *domain.Escrow, refundAmount float64) {
 	sellerAmount := escrow.TotalLocked - refundAmount
-
-	// Refund buyer
 	idempotencyKey := fmt.Sprintf("partial_refund_buyer_%s", delivery.ID.String())
 	s.walletService.Credit(ctx, delivery.BuyerID, refundAmount, domain.WalletTxRefund, "logistics_delivery", delivery.ID, "Partial refund from dispute resolution", idempotencyKey)
-
-	// Credit seller remaining
 	if sellerAmount > 0 {
 		idempotencyKey2 := fmt.Sprintf("partial_refund_seller_%s", delivery.ID.String())
 		s.walletService.Credit(ctx, delivery.SellerID, sellerAmount, domain.WalletTxEscrowRelease, "logistics_delivery", delivery.ID, "Partial payment from dispute resolution", idempotencyKey2)
 	}
-
-	// Update escrow
 	now := time.Now()
 	escrow.SellerPayout = &sellerAmount
 	escrow.ReleasedAt = &now

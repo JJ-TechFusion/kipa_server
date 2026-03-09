@@ -156,16 +156,12 @@ type BankData struct {
 	Code string `json:"code"`
 	Name string `json:"name"`
 }
-
-// StaticAccountData is the response from fetching a virtual account for wallet funding
 type StaticAccountData struct {
 	StaticAccount string `json:"static_account"`
 	BankName      string `json:"bank_name"`
 	BankCode      string `json:"bank_code"`
 	Currency      string `json:"currency"`
 }
-
-// WalletTransferRequest is for wallet-to-wallet transfers using barter_id
 type WalletTransferRequest struct {
 	AccountBank   string  `json:"account_bank"`   // "flutterwave" for wallet transfers
 	AccountNumber string  `json:"account_number"` // Destination wallet's barter_id
@@ -174,16 +170,12 @@ type WalletTransferRequest struct {
 	Reference     string  `json:"reference,omitempty"`
 	Narration     string  `json:"narration,omitempty"`
 }
-
-// UpdateWalletRequest is for updating wallet details
 type UpdateWalletRequest struct {
 	AccountName  string `json:"account_name,omitempty"`
 	Email        string `json:"email,omitempty"`
 	MobileNumber string `json:"mobilenumber,omitempty"`
 	Country      string `json:"country,omitempty"`
 }
-
-// WalletTransaction represents a single transaction in wallet history
 type WalletTransaction struct {
 	ID        int64   `json:"id"`
 	Type      string  `json:"type"`
@@ -194,13 +186,9 @@ type WalletTransaction struct {
 	Narration string  `json:"narration"`
 	CreatedAt string  `json:"created_at"`
 }
-
-// WalletTransactionsData is the response from fetching wallet transactions
 type WalletTransactionsData struct {
 	Transactions []WalletTransaction `json:"transactions"`
 }
-
-// ListWalletsData is the response from listing wallets with pagination
 type ListWalletsData struct {
 	PayoutSubaccounts []SubaccountData `json:"payout_subaccounts"`
 	Cursor            struct {
@@ -209,8 +197,6 @@ type ListWalletsData struct {
 		HasMoreItems bool `json:"has_more_items"`
 	} `json:"cursor"`
 }
-
-// CreateVirtualAccountRequest is for creating a static virtual account for bank transfer funding
 type CreateVirtualAccountRequest struct {
 	Email       string `json:"email"`
 	IsPermanent bool   `json:"is_permanent"`
@@ -221,8 +207,6 @@ type CreateVirtualAccountRequest struct {
 	Narration   string `json:"narration,omitempty"`
 	BVN         string `json:"bvn,omitempty"`
 }
-
-// VirtualAccountData is the response from creating a virtual account
 type VirtualAccountData struct {
 	ResponseCode    string      `json:"response_code"`
 	ResponseMessage string      `json:"response_message"`

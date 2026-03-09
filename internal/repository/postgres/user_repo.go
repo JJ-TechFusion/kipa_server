@@ -124,8 +124,6 @@ func (r *UserRepo) SetIsRider(ctx context.Context, userID uuid.UUID) error {
 	return err
 }
 
-// Admin methods
-
 func (r *UserRepo) Suspend(ctx context.Context, userID uuid.UUID, reason string) error {
 	query := `UPDATE users SET is_suspended = true, suspension_reason = $2, updated_at = NOW() WHERE id = $1`
 	_, err := r.db.ExecContext(ctx, query, userID, reason)

@@ -44,29 +44,20 @@ func (h *TransactionHandler) RegisterRoutes(router *gin.RouterGroup, authMiddlew
 		tx.GET("/:id", h.GetTransactionStatus)
 	}
 }
-
-// ListTransactions returns all transactions for the user (as buyer or seller)
 func (h *TransactionHandler) ListTransactions(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
 		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
 		return
 	}
-
-	// Get status filter from query param (optional)
 	statusFilter := c.Query("status") // "active", "completed", "all" (default)
 
 	var transactions []TransactionListItem
-
-	// Get payment requests where user is seller (that have been paid)
 	sellerPRs, _ := h.prService.GetBySellerID(c.Request.Context(), userID, 100, 0)
 	for _, pr := range sellerPRs {
-		// Skip drafts and link_active (not yet paid)
 		if pr.Status == domain.PRStatusDraft || pr.Status == domain.PRStatusLinkActive {
 			continue
 		}
-
-		// Apply status filter
 		if !h.matchesStatusFilter(pr.Status, statusFilter) {
 			continue
 		}
@@ -74,11 +65,8 @@ func (h *TransactionHandler) ListTransactions(c *gin.Context) {
 		item := h.buildTransactionListItem(c, pr, "seller")
 		transactions = append(transactions, item)
 	}
-
-	// Get payment requests where user is buyer
 	buyerPRs, _ := h.prService.GetByBuyerID(c.Request.Context(), userID, 100, 0)
 	for _, pr := range buyerPRs {
-		// Apply status filter
 		if !h.matchesStatusFilter(pr.Status, statusFilter) {
 			continue
 		}
@@ -86,8 +74,6 @@ func (h *TransactionHandler) ListTransactions(c *gin.Context) {
 		item := h.buildTransactionListItem(c, pr, "buyer")
 		transactions = append(transactions, item)
 	}
-
-	// Sort by created_at descending (most recent first)
 	for i := 0; i < len(transactions)-1; i++ {
 		for j := i + 1; j < len(transactions); j++ {
 			if transactions[i].CreatedAt < transactions[j].CreatedAt {
@@ -144,19 +130,13 @@ func (h *TransactionHandler) buildTransactionListItem(c *gin.Context, pr *domain
 		DeliveryType:     string(pr.DeliveryType),
 		CreatedAt:        pr.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-
-	// Add total amount
 	if pr.EstimatedTotal != nil {
 		item.TotalAmount = pr.EstimatedTotal
 	}
-
-	// Add paid timestamp
 	if pr.PaidAt != nil {
 		paidAt := pr.PaidAt.Format("2006-01-02T15:04:05Z07:00")
 		item.PaidAt = &paidAt
 	}
-
-	// Get counterparty info
 	if role == "seller" && pr.BuyerID != nil {
 		buyer, err := h.userRepo.GetByID(c.Request.Context(), *pr.BuyerID)
 		if err == nil {
@@ -170,8 +150,6 @@ func (h *TransactionHandler) buildTransactionListItem(c *gin.Context, pr *domain
 			item.CounterpartyRole = "Seller"
 		}
 	}
-
-	// For intra-state: get delivery job info if available
 	if pr.DeliveryJobID != nil {
 		item.DeliveryJobID = pr.DeliveryJobID
 		job, err := h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
@@ -184,14 +162,9 @@ func (h *TransactionHandler) buildTransactionListItem(c *gin.Context, pr *domain
 			item.DropoffLng = &job.DropoffLng
 		}
 	}
-
-	// For inter-state: include logistics delivery ID and addresses from payment request
 	if pr.LogisticsDeliveryID != nil {
 		item.LogisticsDeliveryID = pr.LogisticsDeliveryID
 	}
-
-	// Include addresses and coordinates from payment request if not already set
-	// (for inter-state or before delivery job created)
 	if item.PickupAddress == nil && pr.PickupAddress != nil {
 		item.PickupAddress = pr.PickupAddress
 	}
@@ -257,8 +230,6 @@ func (h *TransactionHandler) getStatusText(status domain.PaymentRequestStatus, r
 		return string(status)
 	}
 }
-
-// GetTransactionStatus returns transaction details based on viewer role (buyer or seller)
 func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -281,8 +252,6 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 		util.Error(c, http.StatusInternalServerError, domain.CodeInternalError, "Failed to get transaction")
 		return
 	}
-
-	// Determine viewer role
 	var viewerRole string
 	if pr.SellerID == userID {
 		viewerRole = "seller"
@@ -292,8 +261,6 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this transaction")
 		return
 	}
-
-	// Build response
 	resp := TransactionStatusResponse{
 		ID:                  pr.ID,
 		Status:              string(pr.Status),
@@ -306,32 +273,25 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 		DeliveryJobID:       pr.DeliveryJobID,
 		CreatedAt:           pr.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-
-	// Fee info based on viewer role
 	if viewerRole == "seller" {
 		resp.FeeInfo = &TransactionFeeInfo{
 			EstimatedDeliveryFee: pr.EstimatedDeliveryFee,
 			PlatformFee:          pr.SellerPlatformFee,
 		}
-		// Calculate what seller receives
 		if pr.SellerPlatformFee != nil {
 			youReceive := pr.ItemPrice - *pr.SellerPlatformFee
 			resp.FeeInfo.YouReceive = &youReceive
 		} else {
 			resp.FeeInfo.YouReceive = &pr.ItemPrice
 		}
-		// Show buyer total for seller's reference
 		resp.FeeInfo.BuyerPaysTotal = pr.EstimatedTotal
 	} else {
-		// Buyer view
 		resp.FeeInfo = &TransactionFeeInfo{
 			EstimatedDeliveryFee: pr.EstimatedDeliveryFee,
 			ServiceFee:           pr.BuyerServiceFee,
 			BuyerPaysTotal:       pr.EstimatedTotal,
 		}
 	}
-
-	// Get seller info
 	seller, err := h.userRepo.GetByID(c.Request.Context(), pr.SellerID)
 	if err == nil {
 		resp.Seller = &TransactionPartyInfo{
@@ -340,8 +300,6 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 			PhoneNumber: seller.PhoneNumber,
 		}
 	}
-
-	// Get buyer info (if payment made)
 	if pr.BuyerID != nil {
 		buyer, err := h.userRepo.GetByID(c.Request.Context(), *pr.BuyerID)
 		if err == nil {
@@ -352,16 +310,12 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 			}
 		}
 	}
-
-	// Payment info (if paid)
 	if pr.PaidAt != nil {
 		paidAt := pr.PaidAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.Payment = &TransactionPaymentInfo{
 			IsPaid: true,
 			PaidAt: &paidAt,
 		}
-
-		// Get order for payment details
 		if pr.BuyerID != nil {
 			orders, err := h.orderService.GetOrdersByBuyerID(c.Request.Context(), *pr.BuyerID, 10, 0)
 			if err == nil {
@@ -379,8 +333,6 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 			IsPaid: false,
 		}
 	}
-
-	// Delivery info
 	if pr.DeliveryJobID != nil {
 		job, err := h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 		if err == nil {
@@ -409,8 +361,6 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 			}
 		}
 	}
-
-	// Build timeline
 	var order *domain.Order
 	if pr.BuyerID != nil {
 		orders, _ := h.orderService.GetOrdersByBuyerID(c.Request.Context(), *pr.BuyerID, 10, 0)
@@ -426,9 +376,6 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 	if pr.DeliveryJobID != nil {
 		job, _ = h.deliveryJobRepo.GetByID(c.Request.Context(), *pr.DeliveryJobID)
 	}
-
-	// Only build timeline if order exists (buyer has paid)
-	// Otherwise show awaiting payment timeline
 	if order != nil {
 		var timelineView TimelineViewType
 		if viewerRole == "seller" {
@@ -439,7 +386,6 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 		timeline := BuildTimeline(timelineView, pr, order, job)
 		resp.Timeline = &timeline
 	} else {
-		// Pre-payment timeline for seller
 		resp.Timeline = &TimelineResponse{
 			Steps: []TimelineStep{
 				{
@@ -462,8 +408,6 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 
 	util.Success(c, http.StatusOK, resp)
 }
-
-// Response types
 
 type TransactionStatusResponse struct {
 	ID                  uuid.UUID                `json:"id"`
@@ -519,8 +463,6 @@ type TransactionDeliveryInfo struct {
 	PickedUpAt     *string   `json:"picked_up_at,omitempty"`
 	DeliveredAt    *string   `json:"delivered_at,omitempty"`
 }
-
-// GetActiveDeliveries returns active deliveries for the authenticated user (as buyer or seller)
 func (h *TransactionHandler) GetActiveDeliveries(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -529,8 +471,6 @@ func (h *TransactionHandler) GetActiveDeliveries(c *gin.Context) {
 	}
 
 	var activeDeliveries []ActiveDeliveryResponse
-
-	// Get payment requests where user is seller
 	sellerPRs, _ := h.prService.GetBySellerID(c.Request.Context(), userID, 50, 0)
 	for _, pr := range sellerPRs {
 		if pr.DeliveryJobID == nil {
@@ -544,8 +484,6 @@ func (h *TransactionHandler) GetActiveDeliveries(c *gin.Context) {
 		delivery := h.buildActiveDeliveryResponse(c, pr, job, "seller")
 		activeDeliveries = append(activeDeliveries, delivery)
 	}
-
-	// Get payment requests where user is buyer
 	buyerPRs, _ := h.prService.GetByBuyerID(c.Request.Context(), userID, 50, 0)
 	for _, pr := range buyerPRs {
 		if pr.DeliveryJobID == nil {
@@ -583,8 +521,6 @@ func (h *TransactionHandler) buildActiveDeliveryResponse(
 		RiderAssigned:    job.RiderID != nil,
 		CreatedAt:        job.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-
-	// Determine rider status text
 	switch job.Status {
 	case domain.DJStatusSearching:
 		resp.RiderStatusText = "Searching for rider"
@@ -599,8 +535,6 @@ func (h *TransactionHandler) buildActiveDeliveryResponse(
 	default:
 		resp.RiderStatusText = string(job.Status)
 	}
-
-	// Get counterparty info
 	if role == "seller" && pr.BuyerID != nil {
 		buyer, err := h.userRepo.GetByID(c.Request.Context(), *pr.BuyerID)
 		if err == nil {
@@ -622,8 +556,6 @@ func (h *TransactionHandler) buildActiveDeliveryResponse(
 			}
 		}
 	}
-
-	// Add timestamps
 	if job.AcceptedAt != nil {
 		t := job.AcceptedAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.AcceptedAt = &t
@@ -658,8 +590,6 @@ type ActiveDeliveryPartyInfo struct {
 	PhoneNumber string  `json:"phone_number"`
 	ImageURL    *string `json:"image_url,omitempty"`
 }
-
-// TransactionListItem represents a transaction in the list view
 type TransactionListItem struct {
 	PaymentRequestID    uuid.UUID  `json:"payment_request_id"` // Use for intra-state rider search
 	Role                string     `json:"role"`               // "buyer" or "seller"

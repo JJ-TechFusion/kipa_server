@@ -31,16 +31,12 @@ const (
 	PRStatusCancelled               PaymentRequestStatus = "cancelled"
 	PRStatusDisputed                PaymentRequestStatus = "disputed"
 	PRStatusRefunded                PaymentRequestStatus = "refunded"
-
-	// Return flow statuses (after dispute buyer_wins)
 	PRStatusReturnRequired       PaymentRequestStatus = "return_required"        // Buyer must return item
 	PRStatusReturnSearchingRider PaymentRequestStatus = "return_searching_rider" // Finding rider for return
 	PRStatusReturnInProgress     PaymentRequestStatus = "return_in_progress"     // Return delivery in progress
 	PRStatusReturnDelivered      PaymentRequestStatus = "return_delivered"       // Rider delivered to seller
 	PRStatusReturnConfirmed      PaymentRequestStatus = "return_confirmed"       // Seller confirmed receipt
 	PRStatusReturnDamageDisputed PaymentRequestStatus = "return_damage_disputed" // Seller claims damage
-
-	// Unavailability statuses
 	PRStatusCancelledSellerUnavailable PaymentRequestStatus = "cancelled_seller_unavailable" // Seller not at pickup
 	PRStatusPendingRebook              PaymentRequestStatus = "pending_rebook"               // Buyer unavailable, can rebook within 24h
 	PRStatusRebookExpired              PaymentRequestStatus = "rebook_expired"               // Rebook window expired
@@ -86,8 +82,6 @@ type PaymentRequest struct {
 	DriverDeliveryID      *uuid.UUID `db:"driver_delivery_id" json:"driver_delivery_id,omitempty"`
 	ReturnDeliveryJobID   *uuid.UUID `db:"return_delivery_job_id" json:"return_delivery_job_id,omitempty"`
 	DisputeOutcome        *string    `db:"dispute_outcome" json:"dispute_outcome,omitempty"` // buyer_wins, seller_wins, partial_refund
-
-	// Forced return fields (buyer unavailable scenario)
 	ForcedReturnJobID *uuid.UUID `db:"forced_return_job_id" json:"forced_return_job_id,omitempty"`
 	RebookDeadline    *time.Time `db:"rebook_deadline" json:"rebook_deadline,omitempty"`
 	RebookAttempts    int        `db:"rebook_attempts" json:"rebook_attempts"`
@@ -128,16 +122,12 @@ func (s PaymentRequestStatus) CanTransitionTo(next PaymentRequestStatus) bool {
 		PRStatusDelivered:               {PRStatusConfirmationWindow},
 		PRStatusConfirmationWindow:      {PRStatusCompleted, PRStatusDisputed},
 		PRStatusDisputed:                {PRStatusCompleted, PRStatusRefunded, PRStatusReturnRequired},
-
-		// Return flow (after dispute buyer_wins for intra-state)
 		PRStatusReturnRequired:       {PRStatusReturnSearchingRider, PRStatusRefunded},
 		PRStatusReturnSearchingRider: {PRStatusReturnInProgress, PRStatusNoRiderFound},
 		PRStatusReturnInProgress:     {PRStatusReturnDelivered},
 		PRStatusReturnDelivered:      {PRStatusReturnConfirmed, PRStatusReturnDamageDisputed},
 		PRStatusReturnConfirmed:      {PRStatusRefunded},
 		PRStatusReturnDamageDisputed: {PRStatusRefunded, PRStatusCompleted},
-
-		// Unavailability flow
 		PRStatusPendingRebook: {PRStatusSearchingRider, PRStatusRebookExpired},
 		PRStatusRebookExpired: {PRStatusRefunded},
 	}

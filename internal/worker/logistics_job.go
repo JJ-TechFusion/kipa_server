@@ -6,20 +6,14 @@ import (
 
 	"go.uber.org/zap"
 )
-
-// LogisticsServiceInterface defines the methods needed for logistics background jobs
 type LogisticsServiceInterface interface {
 	ProcessExceededShipDeadlines(ctx context.Context) error
 	ProcessConfirmationReminders(ctx context.Context) error
 	ProcessAutoEscalations(ctx context.Context) error
 }
-
-// runLogisticsShipDeadlineJob checks for exceeded ship deadlines
 func (p *JobProcessor) runLogisticsShipDeadlineJob(ctx context.Context) {
 	ticker := time.NewTicker(p.config.LogisticsCheckInterval)
 	defer ticker.Stop()
-
-	// Run immediately on start
 	p.processLogisticsShipDeadlines(ctx)
 
 	for {
@@ -60,13 +54,9 @@ func (p *JobProcessor) processLogisticsShipDeadlines(ctx context.Context) {
 
 	p.logger.Debug("logistics ship deadline job: completed successfully")
 }
-
-// runLogisticsReminderJob sends reminders to buyers to confirm delivery
 func (p *JobProcessor) runLogisticsReminderJob(ctx context.Context) {
 	ticker := time.NewTicker(p.config.LogisticsReminderInterval)
 	defer ticker.Stop()
-
-	// Run immediately on start
 	p.processLogisticsReminders(ctx)
 
 	for {
@@ -107,13 +97,9 @@ func (p *JobProcessor) processLogisticsReminders(ctx context.Context) {
 
 	p.logger.Debug("logistics reminder job: completed successfully")
 }
-
-// runLogisticsAutoEscalationJob auto-escalates unresponsive buyers to admin
 func (p *JobProcessor) runLogisticsAutoEscalationJob(ctx context.Context) {
 	ticker := time.NewTicker(p.config.LogisticsEscalationInterval)
 	defer ticker.Stop()
-
-	// Run immediately on start
 	p.processLogisticsAutoEscalations(ctx)
 
 	for {

@@ -19,8 +19,6 @@ type UserRepository interface {
 	SetIsSeller(ctx context.Context, userID uuid.UUID) error
 	SetIsBuyer(ctx context.Context, userID uuid.UUID) error
 	SetIsRider(ctx context.Context, userID uuid.UUID) error
-	
-	// Admin methods
 	Suspend(ctx context.Context, userID uuid.UUID, reason string) error
 	Unsuspend(ctx context.Context, userID uuid.UUID) error
 	VerifySeller(ctx context.Context, userID uuid.UUID) error
@@ -84,8 +82,6 @@ type PaymentRequestRepository interface {
 	SetDeliveryJobID(ctx context.Context, id uuid.UUID, jobID uuid.UUID) error
 	PaymentCodeExists(ctx context.Context, code string) (bool, error)
 	IncrementCurrentUses(ctx context.Context, id uuid.UUID) error
-
-	// Unavailability handling
 	GetExpiredRebookRequests(ctx context.Context) ([]*domain.PaymentRequest, error)
 	SetUnavailabilityFee(ctx context.Context, id uuid.UUID, fee float64) error
 }
@@ -108,13 +104,9 @@ type DeliveryJobRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DeliveryJobStatus) error
 	UpdateSearchRadius(ctx context.Context, id uuid.UUID, radiusKM int) error
 	AssignRider(ctx context.Context, jobID, riderID uuid.UUID) error
-
-	// Return delivery queries
 	GetByStatus(ctx context.Context, status domain.DeliveryJobStatus, limit, offset int) ([]*domain.DeliveryJob, int, error)
 	GetReturnJobByOriginalID(ctx context.Context, originalJobID uuid.UUID) (*domain.DeliveryJob, error)
 	GetJobCoordinates(ctx context.Context, jobID uuid.UUID) (*JobCoordinates, error)
-
-	// Forced return updates (swaps pickup/dropoff, sets is_forced_return)
 	UpdateForcedReturn(ctx context.Context, job *domain.DeliveryJob) error
 	HasActiveByRiderUserID(ctx context.Context, userID uuid.UUID) (bool, error)
 }
@@ -145,27 +137,18 @@ type EscrowRepository interface {
 	GetPendingForUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*PendingEscrowDetails, error)
 	HasActiveByUserID(ctx context.Context, userID uuid.UUID) (bool, error)
 }
-
-// PendingEscrowDetails contains escrow with related user and payment request info
 type PendingEscrowDetails struct {
-	// Escrow fields
 	EscrowID     uuid.UUID           `db:"escrow_id"`
 	EscrowStatus domain.EscrowStatus `db:"escrow_status"`
 	ItemAmount   float64             `db:"item_amount"`
 	TotalLocked  float64             `db:"total_locked"`
 	FundedAt     *time.Time          `db:"funded_at"`
 	CreatedAt    time.Time           `db:"created_at"`
-
-	// Payment request fields
 	PaymentRequestID    uuid.UUID `db:"payment_request_id"`
 	ItemName            string    `db:"item_name"`
 	ItemDescription     *string   `db:"item_description"`
 	ProcessingTimeHours *int      `db:"processing_time_hours"`
-
-	// User perspective: is the current user buyer or seller?
 	IsBuyer bool `db:"is_buyer"`
-
-	// Counter-party info (seller if user is buyer, buyer if user is seller)
 	CounterPartyID       uuid.UUID `db:"counter_party_id"`
 	CounterPartyName     string    `db:"counter_party_name"`
 	CounterPartyPhotoURL *string   `db:"counter_party_photo_url"`
@@ -178,8 +161,6 @@ type WalletRepository interface {
 	Update(ctx context.Context, wallet *domain.Wallet) error
 	Credit(ctx context.Context, walletID uuid.UUID, amount float64) error
 	Debit(ctx context.Context, walletID uuid.UUID, amount float64) error
-
-	// PIN management
 	SetPin(ctx context.Context, walletID uuid.UUID, pinHash string) error
 	UpdatePinAttempts(ctx context.Context, walletID uuid.UUID, attempts int, lockedUntil *time.Time) error
 	ResetPinAttempts(ctx context.Context, walletID uuid.UUID) error
@@ -215,8 +196,6 @@ type RiderProfileRepository interface {
 	SetCommissionBlocked(ctx context.Context, id uuid.UUID, blocked bool) error
 	ClearCommissionDebt(ctx context.Context, id uuid.UUID) error
 	RecordCommissionPayment(ctx context.Context, id uuid.UUID) error
-	
-	// Admin methods
 	GetByStatus(ctx context.Context, status domain.RiderStatus, limit, offset int) ([]*domain.RiderProfile, error)
 	GetStatistics(ctx context.Context) (*RiderStatistics, error)
 }
@@ -348,14 +327,10 @@ type LogisticsDeliveryRepository interface {
 	GetByStatus(ctx context.Context, status domain.LogisticsDeliveryStatus, limit, offset int) ([]*domain.LogisticsDelivery, int, error)
 	Update(ctx context.Context, delivery *domain.LogisticsDelivery) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.LogisticsDeliveryStatus) error
-
-	// Deadline queries
 	GetExceededShipDeadlines(ctx context.Context) ([]*domain.LogisticsDelivery, error)
 	GetPendingConfirmationReminders(ctx context.Context, reminderIntervalHours int) ([]*domain.LogisticsDelivery, error)
 	GetReadyForAutoEscalation(ctx context.Context) ([]*domain.LogisticsDelivery, error)
 	GetPendingAdminApproval(ctx context.Context, limit, offset int) ([]*domain.LogisticsDelivery, int, error)
-
-	// Update specific fields
 	SetShipped(ctx context.Context, id uuid.UUID, carrier *domain.LogisticsCarrier, carrierOtherName, trackingNumber *string, trackingURL, shipmentReceiptURL *string, estimatedDeliveryAt *time.Time) error
 	SetDeliveryClaimed(ctx context.Context, id uuid.UUID, confirmationDeadline, autoEscalationAt time.Time) error
 	SetConfirmed(ctx context.Context, id uuid.UUID, requiresAdminApproval bool) error
@@ -376,29 +351,17 @@ type LogisticsEvidenceRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.LogisticsEvidence, error)
 }
 
-// ============================================
-// INTER-STATE DRIVER DELIVERY REPOSITORIES
-// ============================================
-
 type DriverProfileRepository interface {
 	Create(ctx context.Context, profile *domain.DriverProfile) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.DriverProfile, error)
 	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.DriverProfile, error)
 	Update(ctx context.Context, profile *domain.DriverProfile) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DriverStatus) error
-
-	// Capacity management
 	UpdateCapacity(ctx context.Context, id uuid.UUID, carryValue float64, packageCount int) error
 	ResetCapacity(ctx context.Context, id uuid.UUID) error
-
-	// Trip management
 	SetCurrentTrip(ctx context.Context, id uuid.UUID, tripID *uuid.UUID, origin, destination *string) error
-
-	// Stats
 	IncrementDeliveries(ctx context.Context, id uuid.UUID) error
 	AddEarnings(ctx context.Context, id uuid.UUID, amount float64) error
-
-	// Queries
 	GetAvailableForRoute(ctx context.Context, originCity, destCity string) ([]*domain.DriverProfile, error)
 	GetByStatus(ctx context.Context, status domain.DriverStatus, limit, offset int) ([]*domain.DriverProfile, error)
 	GetPending(ctx context.Context, limit, offset int) ([]*domain.DriverProfile, error)
@@ -424,18 +387,12 @@ type DriverTripRepository interface {
 	GetCompletedByDriverID(ctx context.Context, driverID uuid.UUID, limit, offset int) ([]*domain.DriverTrip, error)
 	Update(ctx context.Context, trip *domain.DriverTrip) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DriverTripStatus) error
-
-	// Aggregates
 	UpdateAggregates(ctx context.Context, id uuid.UUID, totalPackages int, totalValue, totalDriverFee float64) error
 	AddDelivery(ctx context.Context, id uuid.UUID, itemValue, driverFee float64) error
 	RemoveDelivery(ctx context.Context, id uuid.UUID, itemValue, driverFee float64) error
-
-	// Timeline
 	MarkDeparted(ctx context.Context, id uuid.UUID) error
 	MarkArrived(ctx context.Context, id uuid.UUID) error
 	MarkCompleted(ctx context.Context, id uuid.UUID) error
-
-	// Monitor queries
 	GetStaleDepartures(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error)
 	GetAbandonedTrips(ctx context.Context, hoursThreshold int) ([]*domain.DriverTrip, error)
 }
@@ -450,36 +407,22 @@ type DriverDeliveryRepository interface {
 	GetByBuyerID(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.DriverDelivery, error)
 	Update(ctx context.Context, delivery *domain.DriverDelivery) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DriverDeliveryStatus) error
-
-	// Queries for matching
 	GetAwaitingDriver(ctx context.Context, originCity, destCity string, limit int) ([]*domain.DriverDelivery, error)
 	GetAvailableForRoute(ctx context.Context, originCity, destCity string, maxValue float64, limit int) ([]*domain.DriverDelivery, error)
-
-	// Assignment
 	AssignDriver(ctx context.Context, id uuid.UUID, driverID, tripID uuid.UUID) error
-
-	// Code management
 	SetPickupCode(ctx context.Context, id uuid.UUID, code string) error
 	SetDropoffCode(ctx context.Context, id uuid.UUID, code string) error
 	IncrementPickupAttempts(ctx context.Context, id uuid.UUID) error
 	IncrementDropoffAttempts(ctx context.Context, id uuid.UUID) error
-
-	// Timeline updates
 	MarkAtPickup(ctx context.Context, id uuid.UUID) error
 	MarkPickedUp(ctx context.Context, id uuid.UUID) error
 	MarkDeparted(ctx context.Context, id uuid.UUID) error
 	MarkArrived(ctx context.Context, id uuid.UUID) error
 	MarkDelivered(ctx context.Context, id uuid.UUID) error
 	MarkCompleted(ctx context.Context, id uuid.UUID) error
-
-	// Buyer unreachable
 	MarkBuyerUnreachable(ctx context.Context, id uuid.UUID, deadline time.Time) error
 	GetExpiredUnreachable(ctx context.Context) ([]*domain.DriverDelivery, error)
-
-	// Bulk operations for trip status changes
 	UpdateStatusByTripID(ctx context.Context, tripID uuid.UUID, fromStatuses []domain.DriverDeliveryStatus, toStatus domain.DriverDeliveryStatus) error
-
-	// Monitor queries
 	GetExpiredAwaiting(ctx context.Context, hoursThreshold int) ([]*domain.DriverDelivery, error)
 	GetStaleInTransit(ctx context.Context, hoursThreshold int) ([]*domain.DriverDelivery, error)
 	GetExpiredConfirmationWindow(ctx context.Context) ([]*domain.DriverDelivery, error)
@@ -494,14 +437,10 @@ type DriverOfferRepository interface {
 	Create(ctx context.Context, offer *domain.DriverOffer) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.DriverOffer, error)
 	Update(ctx context.Context, offer *domain.DriverOffer) error
-
-	// Query methods
 	GetByDeliveryID(ctx context.Context, deliveryID uuid.UUID) ([]*domain.DriverOffer, error)
 	GetByDriverID(ctx context.Context, driverID uuid.UUID, status *domain.DriverOfferStatus) ([]*domain.DriverOffer, error)
 	GetPendingByDeliveryAndDriver(ctx context.Context, deliveryID, driverID uuid.UUID) (*domain.DriverOffer, error)
 	GetOfferCountByDeliveryAndDriver(ctx context.Context, deliveryID, driverID uuid.UUID) (int, error)
-
-	// Bulk operations
 	RejectAllPendingExcept(ctx context.Context, deliveryID uuid.UUID, exceptOfferID uuid.UUID) error
 	ExpireStaleOffers(ctx context.Context) (int64, error)
 	ExpireStaleCounterOffers(ctx context.Context) (int64, error)

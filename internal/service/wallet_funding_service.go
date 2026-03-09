@@ -14,50 +14,33 @@ import (
 	"kipa/internal/repository"
 )
 type WalletFundingService interface {
-	// Bank account methods (Paystack)
 	AddBankAccount(ctx context.Context, userID uuid.UUID, bankCode, accountNumber string) (*domain.BankAccount, error)
 	GetBankAccounts(ctx context.Context, userID uuid.UUID) ([]*domain.BankAccount, error)
 	GetBankAccountByID(ctx context.Context, userID, accountID uuid.UUID) (*domain.BankAccount, error)
 	SetDefaultBankAccount(ctx context.Context, userID, accountID uuid.UUID) error
 	DeleteBankAccount(ctx context.Context, userID, accountID uuid.UUID) error
 	ListBanks(ctx context.Context) ([]paystack.BankData, error)
-
-	// Virtual account methods (Paystack)
 	GetOrCreateVirtualAccount(ctx context.Context, userID uuid.UUID, user *domain.User) (*domain.VirtualAccount, error)
 	GetVirtualAccount(ctx context.Context, userID uuid.UUID) (*domain.VirtualAccount, error)
-
-	// Top-up methods (Paystack)
 	InitializeTopUp(ctx context.Context, userID uuid.UUID, amount float64, email, callbackURL string) (*TopUpInitResult, error)
 	ProcessTopUp(ctx context.Context, reference string) error
 	GetTopUpHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.TopUp, error)
-
-	// Withdrawal methods (Paystack)
 	RequestWithdrawal(ctx context.Context, userID, bankAccountID uuid.UUID, amount float64) (*domain.Withdrawal, error)
 	ProcessWithdrawalWebhook(ctx context.Context, reference string, status domain.WithdrawalStatus, failureReason string) error
 	GetWithdrawalHistory(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Withdrawal, error)
 	GetWithdrawalByID(ctx context.Context, userID, withdrawalID uuid.UUID) (*domain.Withdrawal, error)
-
-	// Flutterwave top-up methods
 	InitializeFlutterwaveTopUp(ctx context.Context, userID uuid.UUID, amount float64, email, callbackURL string) (*TopUpInitResult, error)
 	ProcessFlutterwaveTopUp(ctx context.Context, txRef string) error
-
-	// Flutterwave withdrawal methods
 	RequestFlutterwaveWithdrawal(ctx context.Context, userID, bankAccountID uuid.UUID, amount float64) (*domain.Withdrawal, error)
 	ProcessFlutterwaveWithdrawalWebhook(ctx context.Context, reference string, status domain.WithdrawalStatus, failureReason string) error
-
-	// Flutterwave banks
 	ListFlutterwaveBanks(ctx context.Context) ([]flutterwave.BankData, error)
 	ResolveFlutterwaveAccount(ctx context.Context, accountNumber, bankCode string) (*flutterwave.ResolveAccountData, error)
-
-	// Flutterwave Virtual Account (for bank transfer funding)
 	CreateFlutterwaveVirtualAccount(ctx context.Context, userID uuid.UUID, bvn string) (*domain.FlutterwaveVirtualAccount, error)
 	GetFlutterwaveVirtualAccount(ctx context.Context, userID uuid.UUID) (*domain.FlutterwaveVirtualAccount, error)
 	GetFlutterwaveVirtualAccountStatus(ctx context.Context, userID uuid.UUID) (*FlutterwaveVAStatus, error)
 	DeclineFlutterwaveVirtualAccount(ctx context.Context, userID uuid.UUID) error
 	ProcessVirtualAccountPayment(ctx context.Context, txRef string, amount float64, reference string) error
 }
-
-// FlutterwaveVAStatus represents the user's virtual account status
 type FlutterwaveVAStatus struct {
 	HasAccount bool                               `json:"has_account"`
 	Declined   bool                               `json:"declined"`
@@ -107,7 +90,6 @@ func NewWalletFundingService(
 	config WalletFundingConfig,
 	logger *zap.Logger,
 ) WalletFundingService {
-	// Set defaults if not provided
 	if config.MinTopUpAmount == 0 {
 		config.MinTopUpAmount = 100 // ₦100 minimum
 	}
@@ -623,10 +605,6 @@ func (s *WalletFundingServiceImpl) GetWithdrawalByID(ctx context.Context, userID
 	return withdrawal, nil
 }
 
-// ============================================
-// FLUTTERWAVE TOP-UP METHODS
-// ============================================
-
 func (s *WalletFundingServiceImpl) InitializeFlutterwaveTopUp(ctx context.Context, userID uuid.UUID, amount float64, email, callbackURL string) (*TopUpInitResult, error) {
 	if amount < s.config.MinTopUpAmount {
 		return nil, domain.ErrTopUpMinimum
@@ -638,14 +616,10 @@ func (s *WalletFundingServiceImpl) InitializeFlutterwaveTopUp(ctx context.Contex
 	}
 
 	reference := fmt.Sprintf("fw_topup_%s_%d", uuid.New().String()[:8], time.Now().Unix())
-
-	// Set default redirect URL if not provided
 	redirectURL := callbackURL
 	if redirectURL == "" {
 		redirectURL = fmt.Sprintf("https://getkipa.com/wallet/topup/verify?tx_ref=%s", reference)
 	}
-
-	// Initialize payment with Flutterwave
 	resp, err := s.flutterwaveClient.InitializePayment(ctx, &flutterwave.InitializePaymentRequest{
 		TxRef:       reference,
 		Amount:      amount,
@@ -663,8 +637,6 @@ func (s *WalletFundingServiceImpl) InitializeFlutterwaveTopUp(ctx context.Contex
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize payment: %w", err)
 	}
-
-	// Create top-up record
 	topUp := &domain.TopUp{
 		UserID:          userID,
 		WalletID:        wallet.ID,
@@ -694,13 +666,9 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 	if topUp == nil {
 		return domain.ErrTopUpNotFound
 	}
-
-	// Already processed
 	if topUp.Status == domain.TopUpStatusSuccess {
 		return nil
 	}
-
-	// Verify transaction with Flutterwave
 	verifyResp, err := s.flutterwaveClient.VerifyTransaction(ctx, txRef)
 	if err != nil {
 		s.logger.Error("failed to verify Flutterwave transaction",
@@ -715,8 +683,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 		s.topUpRepo.Update(ctx, topUp)
 		return domain.ErrPaymentNotSuccessful
 	}
-
-	// Verify amount
 	if verifyResp.Data.Amount != topUp.Amount {
 		s.logger.Error("Flutterwave top-up amount mismatch",
 			zap.Float64("expected", topUp.Amount),
@@ -724,8 +690,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 		)
 		return domain.ErrPaymentAmountMismatch
 	}
-
-	// Credit wallet
 	wallet, err := s.walletRepo.GetByID(ctx, topUp.WalletID)
 	if err != nil {
 		return fmt.Errorf("failed to get wallet: %w", err)
@@ -734,8 +698,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 	if err := s.walletRepo.Credit(ctx, wallet.ID, topUp.Amount); err != nil {
 		return fmt.Errorf("failed to credit wallet: %w", err)
 	}
-
-	// Create transaction record
 	wallet, _ = s.walletRepo.GetByID(ctx, wallet.ID)
 	idempotencyKey := fmt.Sprintf("fw_topup_%s", txRef)
 	refType := "top_up"
@@ -751,8 +713,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 		IdempotencyKey: &idempotencyKey,
 	}
 	s.walletTxRepo.Create(ctx, tx)
-
-	// Update top-up status
 	now := time.Now()
 	topUp.Status = domain.TopUpStatusSuccess
 	topUp.PaidAt = &now
@@ -765,8 +725,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 		zap.Float64("amount", topUp.Amount),
 		zap.String("reference", txRef),
 	)
-
-	// Send push notification
 	if s.notificationService != nil {
 		go func() {
 			_ = s.notificationService.SendToUser(
@@ -786,16 +744,10 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveTopUp(ctx context.Context, 
 	return nil
 }
 
-// ============================================
-// FLUTTERWAVE WITHDRAWAL METHODS
-// ============================================
-
 func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Context, userID, bankAccountID uuid.UUID, amount float64) (*domain.Withdrawal, error) {
 	if amount < s.config.MinWithdrawalAmount {
 		return nil, domain.ErrWithdrawalMinimum
 	}
-
-	// Check for pending withdrawal
 	pendingWithdrawal, err := s.withdrawalRepo.GetPendingByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check pending withdrawals: %w", err)
@@ -803,8 +755,6 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 	if pendingWithdrawal != nil {
 		return nil, domain.ErrWithdrawalPending
 	}
-
-	// Get bank account
 	bankAccount, err := s.bankAccountRepo.GetByID(ctx, bankAccountID)
 	if err != nil {
 		return nil, err
@@ -812,8 +762,6 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 	if bankAccount.UserID != userID {
 		return nil, domain.ErrBankAccountNotFound
 	}
-
-	// Calculate fee
 	var fee float64
 	if s.config.WithdrawalFeeType == "percentage" {
 		fee = amount * (s.config.WithdrawalFee / 100)
@@ -821,8 +769,6 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 		fee = s.config.WithdrawalFee
 	}
 	netAmount := amount - fee
-
-	// Check wallet balance
 	wallet, err := s.walletRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get wallet: %w", err)
@@ -832,13 +778,9 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 	}
 
 	transferRef := fmt.Sprintf("fw_wd_%s_%d", uuid.New().String()[:8], time.Now().Unix())
-
-	// Debit wallet first
 	if err := s.walletRepo.Debit(ctx, wallet.ID, amount); err != nil {
 		return nil, fmt.Errorf("failed to debit wallet: %w", err)
 	}
-
-	// Create withdrawal record
 	withdrawal := &domain.Withdrawal{
 		UserID:          userID,
 		WalletID:        wallet.ID,
@@ -852,12 +794,9 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 	}
 
 	if err := s.withdrawalRepo.Create(ctx, withdrawal); err != nil {
-		// Refund wallet on failure
 		s.walletRepo.Credit(ctx, wallet.ID, amount)
 		return nil, fmt.Errorf("failed to create withdrawal: %w", err)
 	}
-
-	// Record transaction
 	wallet, _ = s.walletRepo.GetByID(ctx, wallet.ID)
 	idempotencyKey := fmt.Sprintf("fw_withdrawal_%s", transferRef)
 	refType := "withdrawal"
@@ -873,8 +812,6 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 		IdempotencyKey: &idempotencyKey,
 	}
 	s.walletTxRepo.Create(ctx, tx)
-
-	// Initiate transfer via Flutterwave (from platform's balance to user's bank)
 	transferResp, err := s.flutterwaveClient.InitiateTransfer(ctx, &flutterwave.InitiateTransferRequest{
 		AccountBank:     bankAccount.BankCode,
 		AccountNumber:   bankAccount.AccountNumber,
@@ -896,8 +833,6 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 		s.walletRepo.Credit(ctx, wallet.ID, amount)
 		return nil, domain.ErrTransferFailed
 	}
-
-	// Update withdrawal with transfer code
 	transferCode := fmt.Sprintf("%d", transferResp.Data.ID)
 	withdrawal.TransferCode = &transferCode
 	withdrawal.Status = domain.WithdrawalStatusProcessing
@@ -909,8 +844,6 @@ func (s *WalletFundingServiceImpl) RequestFlutterwaveWithdrawal(ctx context.Cont
 		zap.Float64("net_amount", netAmount),
 		zap.String("reference", transferRef),
 	)
-
-	// Send push notification
 	if s.notificationService != nil {
 		go func() {
 			_ = s.notificationService.SendToUser(
@@ -937,8 +870,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveWithdrawalWebhook(ctx conte
 	if err != nil {
 		return fmt.Errorf("failed to get withdrawal: %w", err)
 	}
-
-	// Already processed
 	if withdrawal.Status == domain.WithdrawalStatusSuccess ||
 		withdrawal.Status == domain.WithdrawalStatusFailed ||
 		withdrawal.Status == domain.WithdrawalStatusReversed {
@@ -952,8 +883,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveWithdrawalWebhook(ctx conte
 	if failureReason != "" {
 		withdrawal.FailureReason = &failureReason
 	}
-
-	// Refund wallet on failure
 	if status == domain.WithdrawalStatusFailed || status == domain.WithdrawalStatusReversed {
 		if err := s.walletRepo.Credit(ctx, withdrawal.WalletID, withdrawal.Amount); err != nil {
 			s.logger.Error("failed to refund wallet after failed Flutterwave transfer",
@@ -978,8 +907,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveWithdrawalWebhook(ctx conte
 		}
 		s.walletTxRepo.Create(ctx, tx)
 	}
-
-	// Update total withdrawn on success
 	if status == domain.WithdrawalStatusSuccess {
 		wallet, _ := s.walletRepo.GetByID(ctx, withdrawal.WalletID)
 		wallet.TotalWithdrawn += withdrawal.NetAmount
@@ -994,8 +921,6 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveWithdrawalWebhook(ctx conte
 		zap.String("reference", reference),
 		zap.String("status", string(status)),
 	)
-
-	// Send push notification
 	if s.notificationService != nil {
 		go func() {
 			switch status {
@@ -1031,10 +956,6 @@ case domain.WithdrawalStatusSuccess:
 	return nil
 }
 
-// ============================================
-// FLUTTERWAVE BANK METHODS
-// ============================================
-
 func (s *WalletFundingServiceImpl) ListFlutterwaveBanks(ctx context.Context) ([]flutterwave.BankData, error) {
 	resp, err := s.flutterwaveClient.ListBanks(ctx, "NG")
 	if err != nil {
@@ -1050,15 +971,7 @@ func (s *WalletFundingServiceImpl) ResolveFlutterwaveAccount(ctx context.Context
 	}
 	return &resp.Data, nil
 }
-
-// ============================================
-// FLUTTERWAVE VIRTUAL ACCOUNT METHODS
-// ============================================
-
-// CreateFlutterwaveVirtualAccount creates a static virtual account for a user
-// BVN is required by CBN regulations for Nigerian virtual accounts
 func (s *WalletFundingServiceImpl) CreateFlutterwaveVirtualAccount(ctx context.Context, userID uuid.UUID, bvn string) (*domain.FlutterwaveVirtualAccount, error) {
-	// Check if user already has a virtual account
 	existing, err := s.flwVirtualAcctRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing virtual account: %w", err)
@@ -1066,14 +979,10 @@ func (s *WalletFundingServiceImpl) CreateFlutterwaveVirtualAccount(ctx context.C
 	if existing != nil {
 		return existing, nil
 	}
-
-	// Get user details
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
-
-	// Validate required fields
 	if user.Email == nil || *user.Email == "" {
 		return nil, domain.ErrProfileIncomplete
 	}
@@ -1087,11 +996,7 @@ func (s *WalletFundingServiceImpl) CreateFlutterwaveVirtualAccount(ctx context.C
 	email := *user.Email
 	firstName := *user.FirstName
 	lastName := *user.LastName
-
-	// Generate unique tx_ref for this user's virtual account
 	txRef := fmt.Sprintf("va-%s", userID.String())
-
-	// Create static virtual account via Flutterwave
 	resp, err := s.flutterwaveClient.CreateStaticVirtualAccount(ctx, &flutterwave.CreateVirtualAccountRequest{
 		Email:       email,
 		IsPermanent: true,
@@ -1109,8 +1014,6 @@ func (s *WalletFundingServiceImpl) CreateFlutterwaveVirtualAccount(ctx context.C
 		)
 		return nil, fmt.Errorf("failed to create virtual account: %w", err)
 	}
-
-	// Save virtual account to database
 	va := &domain.FlutterwaveVirtualAccount{
 		UserID:        userID,
 		AccountNumber: resp.Data.AccountNumber,
@@ -1134,16 +1037,10 @@ func (s *WalletFundingServiceImpl) CreateFlutterwaveVirtualAccount(ctx context.C
 
 	return va, nil
 }
-
-// GetFlutterwaveVirtualAccount retrieves the user's virtual account details
 func (s *WalletFundingServiceImpl) GetFlutterwaveVirtualAccount(ctx context.Context, userID uuid.UUID) (*domain.FlutterwaveVirtualAccount, error) {
 	return s.flwVirtualAcctRepo.GetByUserID(ctx, userID)
 }
-
-// GetFlutterwaveVirtualAccountStatus returns the user's virtual account status
-// Used by frontend to determine whether to show the VA prompt
 func (s *WalletFundingServiceImpl) GetFlutterwaveVirtualAccountStatus(ctx context.Context, userID uuid.UUID) (*FlutterwaveVAStatus, error) {
-	// Check if user has an existing virtual account
 	va, err := s.flwVirtualAcctRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check virtual account: %w", err)
@@ -1156,8 +1053,6 @@ func (s *WalletFundingServiceImpl) GetFlutterwaveVirtualAccountStatus(ctx contex
 			Account:    va,
 		}, nil
 	}
-
-	// Check if user has declined
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
@@ -1169,8 +1064,6 @@ func (s *WalletFundingServiceImpl) GetFlutterwaveVirtualAccountStatus(ctx contex
 		Account:    nil,
 	}, nil
 }
-
-// DeclineFlutterwaveVirtualAccount marks the user as having declined the VA prompt
 func (s *WalletFundingServiceImpl) DeclineFlutterwaveVirtualAccount(ctx context.Context, userID uuid.UUID) error {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -1190,11 +1083,7 @@ func (s *WalletFundingServiceImpl) DeclineFlutterwaveVirtualAccount(ctx context.
 
 	return nil
 }
-
-// ProcessVirtualAccountPayment handles incoming bank transfers to a virtual account
-// This is called from the webhook handler when a charge.completed event is received
 func (s *WalletFundingServiceImpl) ProcessVirtualAccountPayment(ctx context.Context, txRef string, amount float64, reference string) error {
-	// Idempotency check
 	idempotencyKey := fmt.Sprintf("va_payment_%s", reference)
 	existingTx, err := s.walletTxRepo.GetByIdempotencyKey(ctx, idempotencyKey)
 	if err != nil {
@@ -1206,8 +1095,6 @@ func (s *WalletFundingServiceImpl) ProcessVirtualAccountPayment(ctx context.Cont
 		)
 		return nil
 	}
-
-	// Find virtual account by tx_ref
 	va, err := s.flwVirtualAcctRepo.GetByTxRef(ctx, txRef)
 	if err != nil {
 		return fmt.Errorf("failed to find virtual account: %w", err)
@@ -1219,19 +1106,13 @@ func (s *WalletFundingServiceImpl) ProcessVirtualAccountPayment(ctx context.Cont
 		)
 		return fmt.Errorf("virtual account not found for tx_ref: %s", txRef)
 	}
-
-	// Get or create wallet for user
 	wallet, err := s.walletRepo.GetOrCreate(ctx, va.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to get wallet: %w", err)
 	}
-
-	// Credit the wallet
 	if err := s.walletRepo.Credit(ctx, wallet.ID, amount); err != nil {
 		return fmt.Errorf("failed to credit wallet: %w", err)
 	}
-
-	// Create transaction record
 	wallet, _ = s.walletRepo.GetByID(ctx, wallet.ID)
 	refType := "virtual_account_funding"
 	description := fmt.Sprintf("Bank transfer to %s", va.AccountNumber)
@@ -1252,8 +1133,6 @@ func (s *WalletFundingServiceImpl) ProcessVirtualAccountPayment(ctx context.Cont
 		zap.String("reference", reference),
 		zap.String("account_number", va.AccountNumber),
 	)
-
-	// Send push notification
 	if s.notificationService != nil {
 		go func() {
 			_ = s.notificationService.SendToUser(

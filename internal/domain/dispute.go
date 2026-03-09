@@ -5,8 +5,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// DisputeStatus represents the state of a dispute
 type DisputeStatus string
 
 const (
@@ -15,8 +13,6 @@ const (
 	DisputeStatusResolved   DisputeStatus = "resolved"
 	DisputeStatusClosed     DisputeStatus = "closed"
 )
-
-// DisputeOutcome represents the resolution outcome
 type DisputeOutcome string
 
 const (
@@ -26,8 +22,6 @@ const (
 	DisputeOutcomePartialRefund DisputeOutcome = "partial_refund"
 	DisputeOutcomeMutual       DisputeOutcome = "mutual"
 )
-
-// Dispute represents a buyer-seller dispute
 type Dispute struct {
 	ID              uuid.UUID       `db:"id" json:"id"`
 	EscrowID        uuid.UUID       `db:"escrow_id" json:"escrow_id"`
@@ -41,8 +35,6 @@ type Dispute struct {
 	ResolvedAt      *time.Time      `db:"resolved_at" json:"resolved_at,omitempty"`
 	CreatedAt       time.Time       `db:"created_at" json:"created_at"`
 }
-
-// NewDispute creates a new dispute
 func NewDispute(escrowID, openedBy uuid.UUID, reason string, evidence []string) *Dispute {
 	return &Dispute{
 		ID:        uuid.New(),
@@ -55,13 +47,9 @@ func NewDispute(escrowID, openedBy uuid.UUID, reason string, evidence []string) 
 		CreatedAt: time.Now(),
 	}
 }
-
-// CanResolve checks if the dispute can be resolved
 func (d *Dispute) CanResolve() bool {
 	return d.Status == DisputeStatusOpen || d.Status == DisputeStatusInReview
 }
-
-// Resolve resolves the dispute with the given outcome
 func (d *Dispute) Resolve(adminID uuid.UUID, outcome DisputeOutcome, notes string) {
 	now := time.Now()
 	d.Status = DisputeStatusResolved
@@ -70,8 +58,6 @@ func (d *Dispute) Resolve(adminID uuid.UUID, outcome DisputeOutcome, notes strin
 	d.ResolvedAt = &now
 	d.ResolutionNotes = &notes
 }
-
-// DisputeDetails includes related entities for display
 type DisputeDetails struct {
 	Dispute        *Dispute        `json:"dispute"`
 	Escrow         *Escrow         `json:"escrow"`
@@ -79,8 +65,6 @@ type DisputeDetails struct {
 	Buyer          *User           `json:"buyer"`
 	Seller         *User           `json:"seller"`
 }
-
-// RefundRequest represents a refund action
 type RefundRequest struct {
 	DisputeID     uuid.UUID `json:"dispute_id"`
 	Amount        float64   `json:"amount"`

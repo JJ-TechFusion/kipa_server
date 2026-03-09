@@ -50,7 +50,6 @@ func (h *WalletFundingHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware
 	wallet := r.Group("/wallet")
 	wallet.Use(authMiddleware.RequireAuth())
 	{
-		// Paystack routes
 		wallet.POST("/top-up", h.InitializeTopUp)
 		wallet.GET("/top-up/history", h.GetTopUpHistory)
 		wallet.POST("/top-up/verify", h.VerifyTopUp)
@@ -63,11 +62,8 @@ func (h *WalletFundingHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware
 		wallet.POST("/bank-accounts", h.AddBankAccount)
 		wallet.PUT("/bank-accounts/:id/default", h.SetDefaultBankAccount)
 		wallet.DELETE("/bank-accounts/:id", h.DeleteBankAccount)
-
-		// Flutterwave routes
 		fw := wallet.Group("/flutterwave")
 		{
-			// Virtual account for bank transfer funding
 			fw.GET("/virtual-account/status", h.GetFlutterwaveVirtualAccountStatus)
 			fw.GET("/virtual-account", h.GetFlutterwaveVirtualAccount)
 			fw.POST("/virtual-account", h.CreateFlutterwaveVirtualAccount)
@@ -504,13 +500,6 @@ func getIntQuery(c *gin.Context, key string, defaultValue int) int {
 	}
 	return defaultValue
 }
-
-// ============================================
-// FLUTTERWAVE HANDLERS
-// ============================================
-
-// GetFlutterwaveVirtualAccountStatus returns the user's virtual account status
-// Frontend uses this to determine whether to show the VA creation prompt
 func (h *WalletFundingHandler) GetFlutterwaveVirtualAccountStatus(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -527,8 +516,6 @@ func (h *WalletFundingHandler) GetFlutterwaveVirtualAccountStatus(c *gin.Context
 
 	util.Success(c, http.StatusOK, status)
 }
-
-// GetFlutterwaveVirtualAccount returns the user's existing virtual account details
 func (h *WalletFundingHandler) GetFlutterwaveVirtualAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -563,9 +550,6 @@ func (h *WalletFundingHandler) GetFlutterwaveVirtualAccount(c *gin.Context) {
 type CreateFlutterwaveVARequest struct {
 	BVN string `json:"bvn" binding:"required,len=11"`
 }
-
-// CreateFlutterwaveVirtualAccount creates a static virtual account for the user
-// Requires BVN for CBN compliance
 func (h *WalletFundingHandler) CreateFlutterwaveVirtualAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {
@@ -601,8 +585,6 @@ func (h *WalletFundingHandler) CreateFlutterwaveVirtualAccount(c *gin.Context) {
 		"message": "Virtual account created successfully. Transfer any amount to fund your wallet.",
 	})
 }
-
-// DeclineFlutterwaveVirtualAccount marks the user as having declined the VA prompt
 func (h *WalletFundingHandler) DeclineFlutterwaveVirtualAccount(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {

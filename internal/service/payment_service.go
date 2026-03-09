@@ -127,8 +127,6 @@ func (s *OrderServiceImpl) InitializePayment(ctx context.Context, buyerID uuid.U
 		TotalAmount:         totalAmount,
 		Status:              domain.OrderStatusPending,
 	}
-
-	// Generate Flutterwave transaction reference
 	reference := fmt.Sprintf("kipa_ord_%s_%d", order.ID.String()[:8], time.Now().Unix())
 	order.PaystackReference = &reference // Reusing field for Flutterwave tx_ref
 
@@ -212,8 +210,6 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 		s.orderRepo.UpdatePaymentStatus(ctx, order.ID, domain.OrderPaymentFailed)
 		return nil, domain.ErrPaymentNotSuccessful
 	}
-
-	// Flutterwave returns amount in the actual currency (not kobo)
 	if verification.Data.Amount != order.TotalAmount {
 		s.logger.Error("payment amount mismatch",
 			zap.Float64("expected", order.TotalAmount),
@@ -251,8 +247,6 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 		if pr.DropoffAddress != nil {
 			dropoffAddress = *pr.DropoffAddress
 		}
-
-		// Default ship deadline is 72 hours from now
 		shipDeadline := time.Now().Add(72 * time.Hour)
 
 		pickupState := ""
@@ -324,8 +318,6 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 		zap.String("escrow_id", escrow.ID.String()),
 		zap.String("reference", reference),
 	)
-
-	// Notify seller
 	go func() {
 		err := s.notificationService.SendToUser(
 			context.Background(),
@@ -397,8 +389,6 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
 	idempotencyKey := fmt.Sprintf("order_%s", order.ID.String())
-
-	// Debit buyer's wallet
 	_, err = s.walletService.Debit(
 		ctx,
 		buyerID,
@@ -428,8 +418,6 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 	if err != nil {
 		return nil, fmt.Errorf("failed to create escrow: %w", err)
 	}
-
-	// Create logistics delivery for inter-state orders
 	var logisticsDeliveryID *uuid.UUID
 	if pr.IsInterStateDelivery() && s.logisticsDeliveryService != nil {
 		pickupAddress := ""
@@ -448,8 +436,6 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 		if pr.DropoffState != nil {
 			dropoffState = *pr.DropoffState
 		}
-
-		// Default ship deadline is 72 hours from now
 		shipDeadline := time.Now().Add(72 * time.Hour)
 
 		logisticsReq := &CreateLogisticsDeliveryRequest{
@@ -511,8 +497,6 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 		zap.String("order_id", order.ID.String()),
 		zap.String("escrow_id", escrow.ID.String()),
 	)
-
-	// Notify seller
 	go func() {
 		err := s.notificationService.SendToUser(
 			context.Background(),
