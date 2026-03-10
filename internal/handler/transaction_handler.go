@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"kipa/internal/domain"
+	"kipa/internal/dto"
 	"kipa/internal/handler/middleware"
 	"kipa/internal/repository"
 	"kipa/internal/service"
@@ -15,23 +16,26 @@ import (
 )
 
 type TransactionHandler struct {
-	prService       service.PaymentRequestService
-	orderService    service.OrderService
-	userRepo        repository.UserRepository
-	deliveryJobRepo repository.DeliveryJobRepository
+	prService               service.PaymentRequestService
+	orderService            service.OrderService
+	logisticsService        service.LogisticsDeliveryService
+	userRepo                repository.UserRepository
+	deliveryJobRepo         repository.DeliveryJobRepository
 }
 
 func NewTransactionHandler(
 	prService service.PaymentRequestService,
 	orderService service.OrderService,
+	logisticsService service.LogisticsDeliveryService,
 	userRepo repository.UserRepository,
 	deliveryJobRepo repository.DeliveryJobRepository,
 ) *TransactionHandler {
 	return &TransactionHandler{
-		prService:       prService,
-		orderService:    orderService,
-		userRepo:        userRepo,
-		deliveryJobRepo: deliveryJobRepo,
+		prService:        prService,
+		orderService:     orderService,
+		logisticsService: logisticsService,
+		userRepo:         userRepo,
+		deliveryJobRepo:  deliveryJobRepo,
 	}
 }
 
@@ -361,6 +365,53 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 			}
 		}
 	}
+	// Handle interstate logistics delivery
+	var logisticsDelivery *domain.LogisticsDelivery
+	if pr.LogisticsDeliveryID != nil && h.logisticsService != nil {
+		logisticsDelivery, _ = h.logisticsService.GetByID(c.Request.Context(), *pr.LogisticsDeliveryID)
+		if logisticsDelivery != nil {
+			resp.LogisticsDeliveryID = pr.LogisticsDeliveryID
+			resp.Logistics = &TransactionLogisticsInfo{
+				ID:                   logisticsDelivery.ID,
+				Status:               string(logisticsDelivery.Status),
+				StatusDisplay:        dto.GetStatusDisplay(logisticsDelivery.Status),
+				PickupAddress:        logisticsDelivery.PickupAddress,
+				PickupState:          logisticsDelivery.PickupState,
+				DropoffAddress:       logisticsDelivery.DropoffAddress,
+				DropoffState:         logisticsDelivery.DropoffState,
+				Carrier:              logisticsDelivery.Carrier,
+				CarrierOtherName:     logisticsDelivery.CarrierOtherName,
+				TrackingNumber:       logisticsDelivery.TrackingNumber,
+				TrackingURL:          logisticsDelivery.TrackingURL,
+				ShipDeadline:         logisticsDelivery.ShipDeadline.Format("2006-01-02T15:04:05Z07:00"),
+				AvailableActions:     dto.GetAvailableActions(logisticsDelivery, userID),
+			}
+			if logisticsDelivery.ShippedAt != nil {
+				t := logisticsDelivery.ShippedAt.Format("2006-01-02T15:04:05Z07:00")
+				resp.Logistics.ShippedAt = &t
+			}
+			if logisticsDelivery.DeliveryClaimedAt != nil {
+				t := logisticsDelivery.DeliveryClaimedAt.Format("2006-01-02T15:04:05Z07:00")
+				resp.Logistics.DeliveryClaimedAt = &t
+			}
+			if logisticsDelivery.ConfirmedAt != nil {
+				t := logisticsDelivery.ConfirmedAt.Format("2006-01-02T15:04:05Z07:00")
+				resp.Logistics.ConfirmedAt = &t
+			}
+			if logisticsDelivery.ReleasedAt != nil {
+				t := logisticsDelivery.ReleasedAt.Format("2006-01-02T15:04:05Z07:00")
+				resp.Logistics.ReleasedAt = &t
+			}
+			if logisticsDelivery.ConfirmationDeadline != nil {
+				t := logisticsDelivery.ConfirmationDeadline.Format("2006-01-02T15:04:05Z07:00")
+				resp.Logistics.ConfirmationDeadline = &t
+			}
+			if logisticsDelivery.EstimatedDeliveryAt != nil {
+				t := logisticsDelivery.EstimatedDeliveryAt.Format("2006-01-02T15:04:05Z07:00")
+				resp.Logistics.EstimatedDeliveryAt = &t
+			}
+		}
+	}
 	var order *domain.Order
 	if pr.BuyerID != nil {
 		orders, _ := h.orderService.GetOrdersByBuyerID(c.Request.Context(), *pr.BuyerID, 10, 0)
@@ -383,6 +434,14 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 		} else {
 			timelineView = TimelineViewBuyer
 		}
+		// For interstate with logistics delivery, build logistics timeline
+		if pr.DeliveryType == domain.DeliveryTypeInterState && logisticsDelivery != nil && h.logisticsService != nil {
+			logisticsTimeline, err := h.logisticsService.GetTimeline(c.Request.Context(), logisticsDelivery.ID)
+			if err == nil && logisticsTimeline != nil {
+				resp.LogisticsTimeline = logisticsTimeline
+			}
+		}
+		// Still build standard timeline for consistency
 		timeline := BuildTimeline(timelineView, pr, order, job)
 		resp.Timeline = &timeline
 	} else {
@@ -410,22 +469,25 @@ func (h *TransactionHandler) GetTransactionStatus(c *gin.Context) {
 }
 
 type TransactionStatusResponse struct {
-	ID                  uuid.UUID                `json:"id"`
-	Status              string                   `json:"status"`
-	ViewerRole          string                   `json:"viewer_role"` // "buyer" or "seller"
-	ItemName            string                   `json:"item_name"`
-	ItemDescription     *string                  `json:"item_description,omitempty"`
-	ItemPrice           float64                  `json:"item_price"`
-	DeliveryType        string                   `json:"delivery_type"`
-	ProcessingTimeHours *int                     `json:"processing_time_hours,omitempty"`
-	DeliveryJobID       *uuid.UUID               `json:"delivery_job_id,omitempty"`
-	CreatedAt           string                   `json:"created_at"`
-	FeeInfo             *TransactionFeeInfo      `json:"fee_info"`
-	Payment             *TransactionPaymentInfo  `json:"payment"`
-	Seller              *TransactionPartyInfo    `json:"seller"`
-	Buyer               *TransactionPartyInfo    `json:"buyer,omitempty"`
-	Delivery            *TransactionDeliveryInfo `json:"delivery,omitempty"`
-	Timeline            *TimelineResponse        `json:"timeline"`
+	ID                    uuid.UUID                      `json:"id"`
+	Status                string                         `json:"status"`
+	ViewerRole            string                         `json:"viewer_role"` // "buyer" or "seller"
+	ItemName              string                         `json:"item_name"`
+	ItemDescription       *string                        `json:"item_description,omitempty"`
+	ItemPrice             float64                        `json:"item_price"`
+	DeliveryType          string                         `json:"delivery_type"`
+	ProcessingTimeHours   *int                           `json:"processing_time_hours,omitempty"`
+	DeliveryJobID         *uuid.UUID                     `json:"delivery_job_id,omitempty"`
+	LogisticsDeliveryID   *uuid.UUID                     `json:"logistics_delivery_id,omitempty"`
+	CreatedAt             string                         `json:"created_at"`
+	FeeInfo               *TransactionFeeInfo            `json:"fee_info"`
+	Payment               *TransactionPaymentInfo        `json:"payment"`
+	Seller                *TransactionPartyInfo          `json:"seller"`
+	Buyer                 *TransactionPartyInfo          `json:"buyer,omitempty"`
+	Delivery              *TransactionDeliveryInfo       `json:"delivery,omitempty"`
+	Logistics             *TransactionLogisticsInfo      `json:"logistics,omitempty"`
+	Timeline              *TimelineResponse              `json:"timeline"`
+	LogisticsTimeline     *dto.DeliveryTimelineResponse  `json:"logistics_timeline,omitempty"`
 }
 
 type TransactionFeeInfo struct {
@@ -463,6 +525,29 @@ type TransactionDeliveryInfo struct {
 	PickedUpAt     *string   `json:"picked_up_at,omitempty"`
 	DeliveredAt    *string   `json:"delivered_at,omitempty"`
 }
+
+type TransactionLogisticsInfo struct {
+	ID                   uuid.UUID              `json:"id"`
+	Status               string                 `json:"status"`
+	StatusDisplay        string                 `json:"status_display"`
+	PickupAddress        string                 `json:"pickup_address"`
+	PickupState          string                 `json:"pickup_state"`
+	DropoffAddress       string                 `json:"dropoff_address"`
+	DropoffState         string                 `json:"dropoff_state"`
+	Carrier              *domain.LogisticsCarrier `json:"carrier,omitempty"`
+	CarrierOtherName     *string                `json:"carrier_other_name,omitempty"`
+	TrackingNumber       *string                `json:"tracking_number,omitempty"`
+	TrackingURL          *string                `json:"tracking_url,omitempty"`
+	ShipDeadline         string                 `json:"ship_deadline"`
+	EstimatedDeliveryAt  *string                `json:"estimated_delivery_at,omitempty"`
+	ShippedAt            *string                `json:"shipped_at,omitempty"`
+	DeliveryClaimedAt    *string                `json:"delivery_claimed_at,omitempty"`
+	ConfirmedAt          *string                `json:"confirmed_at,omitempty"`
+	ReleasedAt           *string                `json:"released_at,omitempty"`
+	ConfirmationDeadline *string                `json:"confirmation_deadline,omitempty"`
+	AvailableActions     []string               `json:"available_actions"`
+}
+
 func (h *TransactionHandler) GetActiveDeliveries(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {

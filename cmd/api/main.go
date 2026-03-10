@@ -327,7 +327,7 @@ func main() {
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	adminMiddleware := middleware.NewAdminMiddleware(userRepo)
 	prHandler := handler.NewPaymentRequestHandler(prService)
-	transactionHandler := handler.NewTransactionHandler(prService, orderService, userRepo, deliveryJobRepo)
+	transactionHandler := handler.NewTransactionHandler(prService, orderService, logisticsService, userRepo, deliveryJobRepo)
 	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeRepo, disputeResolutionService, driverService)
 	riderHandler := handler.NewRiderHandler(riderService)
 	commissionHandler := handler.NewRiderCommissionHandler(commissionService)
