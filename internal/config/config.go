@@ -38,11 +38,11 @@ type WorkerConfig struct {
 	RadiusExpandSteps        []int
 	RadiusExpandIntervalMins int
 	RiderOfferTimeoutMins    int
-	MaxJobRestarts   int
-	InitialBackoff   time.Duration
-	MaxBackoff       time.Duration
-	JitterPercent        int
-	ReminderCooldownMins int
+	MaxJobRestarts           int
+	InitialBackoff           time.Duration
+	MaxBackoff               time.Duration
+	JitterPercent            int
+	ReminderCooldownMins     int
 }
 
 type ServerConfig struct {
@@ -51,6 +51,7 @@ type ServerConfig struct {
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
 	AdminSignupSecret string
+	AllowedOrigins    []string
 }
 
 type DatabaseConfig struct {
@@ -146,6 +147,7 @@ func Load() (*Config, error) {
 			ReadTimeout:       viper.GetDuration("server.read_timeout"),
 			WriteTimeout:      viper.GetDuration("server.write_timeout"),
 			AdminSignupSecret: viper.GetString("server.admin_signup_secret"),
+			AllowedOrigins:    parseCSV(viper.GetString("server.allowed_origins")),
 		},
 		Database: DatabaseConfig{
 			Host:            viper.GetString("database.host"),
@@ -239,6 +241,7 @@ func setDefaults() {
 	viper.SetDefault("server.read_timeout", "30s")
 	viper.SetDefault("server.write_timeout", "30s")
 	viper.SetDefault("server.admin_signup_secret", "")
+	viper.SetDefault("server.allowed_origins", "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173,https://www.klyvyorax.online")
 	viper.SetDefault("database.host", "localhost")
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "postgres")
@@ -254,7 +257,7 @@ func setDefaults() {
 	viper.SetDefault("redis.db", 0)
 	viper.SetDefault("redis.pool_size", 10)
 	viper.SetDefault("redis.min_idle_conns", 2)
-	viper.SetDefault("jwt.access_token_expiry", "168h") // 1 week for development
+	viper.SetDefault("jwt.access_token_expiry", "168h")  // 1 week for development
 	viper.SetDefault("jwt.refresh_token_expiry", "168h") // 7 days
 	viper.SetDefault("jwt.issuer", "kipa")
 	viper.SetDefault("otp.length", 6)
@@ -285,6 +288,24 @@ func setDefaults() {
 	viper.SetDefault("aws.region", "us-east-1")
 	viper.SetDefault("aws.max_file_size_mb", 5)
 	viper.SetDefault("firebase.credentials_path", "./firebase-service-account.json")
+}
+
+func parseCSV(value string) []string {
+	if value == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		result = append(result, trimmed)
+	}
+
+	return result
 }
 
 func (c *DatabaseConfig) GetDSN() string {
