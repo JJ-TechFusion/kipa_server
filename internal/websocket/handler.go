@@ -26,6 +26,8 @@ var upgrader = websocket.Upgrader{
 			"https://api.kipa.ng",
 			"https://staging.getkipa.com",
 			"https://getkipa.com",
+			"https://www.klyvyorax.online",
+			"https://klyvyorax.online",
 		}
 		for _, allowed := range allowedOrigins {
 			if origin == allowed || (len(origin) > len(allowed) && origin[:len(allowed)+1] == allowed+":") {
