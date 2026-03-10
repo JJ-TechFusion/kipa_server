@@ -96,6 +96,7 @@ type AdminServiceImpl struct {
 	auditLogRepo        repository.AuditLogRepository
 	disputeRepo         repository.DisputeRepository
 	escrowRepo          repository.EscrowRepository
+	notificationLogRepo repository.NotificationLogRepository
 	redisClient         RedisHealthChecker
 	notificationService NotificationService
 	logger              *zap.Logger
@@ -154,6 +155,7 @@ func NewAdminService(
 	auditLogRepo repository.AuditLogRepository,
 	disputeRepo repository.DisputeRepository,
 	escrowRepo repository.EscrowRepository,
+	notificationLogRepo repository.NotificationLogRepository,
 	notificationService NotificationService,
 	logger *zap.Logger,
 ) AdminService {
@@ -169,6 +171,7 @@ func NewAdminService(
 		auditLogRepo:        auditLogRepo,
 		disputeRepo:         disputeRepo,
 		escrowRepo:          escrowRepo,
+		notificationLogRepo: notificationLogRepo,
 		notificationService: notificationService,
 		logger:              logger,
 	}
@@ -938,27 +941,50 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 }
 
 func (s *AdminServiceImpl) SendBroadcast(ctx context.Context, title, body, topic string, adminID uuid.UUID) error {
-	if s.notificationService == nil {
-		return fmt.Errorf("notification service not configured")
+	if s.notificationLogRepo == nil {
+		return fmt.Errorf("notification log repository not configured")
 	}
 
-	if topic == "" {
-		topic = "all_users" // Default topic
+	// Get all active user IDs
+	userIDs, err := s.userRepo.GetAllActiveUserIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get active users: %w", err)
 	}
 
-	if err := s.notificationService.SendBroadcast(ctx, topic, title, body, nil); err != nil {
-		return fmt.Errorf("failed to send broadcast: %w", err)
+	if len(userIDs) == 0 {
+		s.logger.Info("no active users to send broadcast to")
+		return nil
+	}
+
+	// Create notification logs for all users
+	logs := make([]*domain.NotificationLog, 0, len(userIDs))
+	for _, userID := range userIDs {
+		uid := userID // Create a copy to avoid pointer issues
+		logs = append(logs, &domain.NotificationLog{
+			UserID:           &uid,
+			Title:            title,
+			Body:             body,
+			NotificationType: domain.NotificationBroadcast,
+			Delivered:        true,
+		})
+	}
+
+	// Bulk insert notifications
+	if err := s.notificationLogRepo.CreateBulk(ctx, logs); err != nil {
+		return fmt.Errorf("failed to create broadcast notifications: %w", err)
 	}
 
 	s.logAdminAction(ctx, adminID, domain.AuditActionBroadcastNotification, domain.AuditTargetPlatform, nil, map[string]any{
-		"action": "broadcast_notification",
-		"title":  title,
-		"topic":  topic,
+		"action":      "broadcast_notification",
+		"title":       title,
+		"topic":       topic,
+		"user_count":  len(userIDs),
 	})
 
 	s.logger.Info("admin sent broadcast notification",
 		zap.String("admin_id", adminID.String()),
 		zap.String("topic", topic),
+		zap.Int("user_count", len(userIDs)),
 	)
 
 	return nil

@@ -499,6 +499,37 @@ func (r *DeliveryJobRepo) HasActiveByRiderUserID(ctx context.Context, userID uui
 	return exists, err
 }
 
+func (r *DeliveryJobRepo) GetExpiredErrandUnavailableJobs(ctx context.Context, waitMinutes int) ([]*domain.DeliveryJob, error) {
+	var jobs []*domain.DeliveryJob
+	query := `
+		SELECT
+			id, payment_request_id, errand_id, source_type, rider_id,
+			is_return, original_job_id, is_forced_return, unavailable_marked_at,
+			pickup_address,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			dropoff_address,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng,
+			distance_km, delivery_fee, rider_payout, platform_delivery_fee,
+			required_vehicle_type, pickup_code, dropoff_code,
+			search_radius_km, search_started_at, search_timeout_at, last_radius_expand_at,
+			status, current_eta_minutes, eta_updated_at,
+			accepted_at, picked_up_at, delivered_at, created_at, updated_at
+		FROM delivery_jobs
+		WHERE source_type = 'errand'
+		AND status = 'buyer_unavailable'
+		AND unavailable_marked_at IS NOT NULL
+		AND unavailable_marked_at + ($1 * INTERVAL '1 minute') < NOW()`
+
+	err := r.db.SelectContext(ctx, &jobs, query, waitMinutes)
+	if err != nil {
+		return nil, err
+	}
+
+	return jobs, nil
+}
+
 type RiderJobOfferRepo struct {
 	db *sqlx.DB
 }

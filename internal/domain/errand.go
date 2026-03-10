@@ -8,14 +8,15 @@ import (
 type ErrandStatus string
 
 const (
-	ErrandStatusDraft     ErrandStatus = "draft"
-	ErrandStatusSearching ErrandStatus = "searching"
-	ErrandStatusAccepted  ErrandStatus = "accepted"
-	ErrandStatusPickedUp  ErrandStatus = "picked_up"
-	ErrandStatusInTransit ErrandStatus = "in_transit"
-	ErrandStatusDelivered ErrandStatus = "delivered"
-	ErrandStatusCompleted ErrandStatus = "completed"
-	ErrandStatusCancelled ErrandStatus = "cancelled"
+	ErrandStatusDraft               ErrandStatus = "draft"
+	ErrandStatusSearching           ErrandStatus = "searching"
+	ErrandStatusAccepted            ErrandStatus = "accepted"
+	ErrandStatusPickedUp            ErrandStatus = "picked_up"
+	ErrandStatusInTransit           ErrandStatus = "in_transit"
+	ErrandStatusDelivered           ErrandStatus = "delivered"
+	ErrandStatusCompleted           ErrandStatus = "completed"
+	ErrandStatusCancelled           ErrandStatus = "cancelled"
+	ErrandStatusReceiverUnavailable ErrandStatus = "receiver_unavailable" // Receiver unavailable, settled outside app
 )
 type Errand struct {
 	ID     uuid.UUID `db:"id" json:"id"`

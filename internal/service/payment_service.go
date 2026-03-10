@@ -294,20 +294,13 @@ func (s *OrderServiceImpl) VerifyPayment(ctx context.Context, reference string) 
 	}
 	pr.EscrowID = &escrow.ID
 	pr.Status = domain.PRStatusPaidAwaitingFulfillment
+	pr.BuyerID = &order.BuyerID
+	pr.PaidAt = &now
 	if err := s.prRepo.Update(ctx, pr); err != nil {
-		s.logger.Error("failed to link escrow to payment request", zap.Error(err))
+		s.logger.Error("failed to update payment request", zap.Error(err))
 	}
 	if err := s.prRepo.IncrementCurrentUses(ctx, pr.ID); err != nil {
 		s.logger.Error("failed to increment current uses", zap.Error(err))
-	}
-	if !pr.IsReusable {
-		pr.Status = domain.PRStatusPaidAwaitingFulfillment
-		pr.BuyerID = &order.BuyerID
-		pr.EscrowID = &escrow.ID
-		pr.PaidAt = &now
-		if err := s.prRepo.Update(ctx, pr); err != nil {
-			s.logger.Error("failed to update payment request", zap.Error(err))
-		}
 	}
 	if err := s.userRepo.SetIsBuyer(ctx, order.BuyerID); err != nil {
 		s.logger.Warn("failed to set user as buyer", zap.Error(err))
@@ -474,20 +467,13 @@ func (s *OrderServiceImpl) ProcessWalletPayment(ctx context.Context, buyerID uui
 	}
 	pr.EscrowID = &escrow.ID
 	pr.Status = domain.PRStatusPaidAwaitingFulfillment
+	pr.BuyerID = &buyerID
+	pr.PaidAt = &now
 	if err := s.prRepo.Update(ctx, pr); err != nil {
-		s.logger.Error("failed to link escrow to payment request", zap.Error(err))
+		s.logger.Error("failed to update payment request", zap.Error(err))
 	}
 	if err := s.prRepo.IncrementCurrentUses(ctx, pr.ID); err != nil {
 		s.logger.Error("failed to increment current uses", zap.Error(err))
-	}
-	if !pr.IsReusable {
-		pr.Status = domain.PRStatusPaidAwaitingFulfillment
-		pr.BuyerID = &buyerID
-		pr.EscrowID = &escrow.ID
-		pr.PaidAt = &now
-		if err := s.prRepo.Update(ctx, pr); err != nil {
-			s.logger.Error("failed to update payment request", zap.Error(err))
-		}
 	}
 	if err := s.userRepo.SetIsBuyer(ctx, buyerID); err != nil {
 		s.logger.Warn("failed to set user as buyer", zap.Error(err))

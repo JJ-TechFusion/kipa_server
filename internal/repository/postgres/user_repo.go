@@ -187,6 +187,16 @@ func (r *UserRepo) SoftDelete(ctx context.Context, userID uuid.UUID) error {
 	return err
 }
 
+func (r *UserRepo) GetAllActiveUserIDs(ctx context.Context) ([]uuid.UUID, error) {
+	var userIDs []uuid.UUID
+	query := `SELECT id FROM users WHERE is_suspended = false`
+	err := r.db.SelectContext(ctx, &userIDs, query)
+	if err != nil {
+		return nil, err
+	}
+	return userIDs, nil
+}
+
 type OTPRepo struct {
 	db *sqlx.DB
 }

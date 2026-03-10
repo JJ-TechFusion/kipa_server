@@ -887,11 +887,40 @@ func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid
 
 	s.broadcastJobStatus(jobID, domain.DJStatusBuyerUnavailable)
 
+	rebookDeadline := now.Add(45 * time.Minute)
+
+	// Handle errand jobs differently - no payment request, no forced return
+	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
+		errand, err := s.errandService.GetByErrandID(ctx, *job.ErrandID)
+		if err != nil {
+			s.logger.Error("failed to get errand for unavailable marking", zap.Error(err))
+		} else if s.notificationService != nil {
+			data := map[string]string{
+				"job_id":          jobID.String(),
+				"errand_id":       job.ErrandID.String(),
+				"rebook_deadline": rebookDeadline.Format(time.RFC3339),
+			}
+			go s.notificationService.SendToUser(context.Background(), errand.UserID, "Receiver Unavailable",
+				"The receiver was unavailable for delivery. Please wait 45 minutes. If unresolved, the ride will end and you can settle with the rider directly.",
+				data, domain.NotificationDeliveryFailed)
+		}
+
+		s.logger.Info("errand receiver marked unavailable, 45-min wait window started",
+			zap.String("job_id", jobID.String()),
+			zap.String("errand_id", job.ErrandID.String()),
+			zap.Time("rebook_deadline", rebookDeadline),
+		)
+
+		return &ForcedReturnInfo{
+			RebookDeadline: rebookDeadline.Format("2006-01-02T15:04:05Z07:00"),
+		}, nil
+	}
+
+	// Standard payment request flow
 	pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get payment request: %w", err)
 	}
-	rebookDeadline := now.Add(45 * time.Minute)
 	pr.RebookDeadline = &rebookDeadline
 	pr.Status = domain.PRStatusPendingRebook
 

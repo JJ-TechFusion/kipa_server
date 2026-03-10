@@ -77,6 +77,7 @@ type JobProcessor struct {
 	deliveryJobRepo     repository.DeliveryJobRepository
 	paymentRequestRepo  repository.PaymentRequestRepository
 	riderOfferRepo      repository.RiderJobOfferRepository
+	errandRepo          repository.ErrandRepository
 	broadcaster         JobStatusBroadcaster
 	lock                DistributedLock
 	config              *WorkerConfig
@@ -236,6 +237,10 @@ func (p *JobProcessor) SetDriverService(svc DriverServiceInterface) {
 
 func (p *JobProcessor) SetNotificationService(svc NotificationServiceInterface) {
 	p.notificationService = svc
+}
+
+func (p *JobProcessor) SetErrandRepo(repo repository.ErrandRepository) {
+	p.errandRepo = repo
 }
 
 func (p *JobProcessor) SetDistributedLock(lock DistributedLock) {

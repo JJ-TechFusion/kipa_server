@@ -106,6 +106,48 @@ func (r *NotificationLogRepo) Create(ctx context.Context, log *domain.Notificati
 	return err
 }
 
+func (r *NotificationLogRepo) CreateBulk(ctx context.Context, logs []*domain.NotificationLog) error {
+	if len(logs) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	query := `
+		INSERT INTO notification_logs (id, user_id, title, body, notification_type, sent_at, delivered)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+
+	// Use a transaction for bulk insert
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, log := range logs {
+		if log.ID == uuid.Nil {
+			log.ID = uuid.New()
+		}
+		log.SentAt = now
+		log.Delivered = true // Stored in DB = delivered
+
+		_, err := tx.ExecContext(ctx, query,
+			log.ID,
+			log.UserID,
+			log.Title,
+			log.Body,
+			log.NotificationType,
+			log.SentAt,
+			log.Delivered,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *NotificationLogRepo) GetByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.NotificationLog, error) {
 	var logs []*domain.NotificationLog
 	query := `SELECT * FROM notification_logs WHERE user_id = $1 ORDER BY sent_at DESC LIMIT $2 OFFSET $3`

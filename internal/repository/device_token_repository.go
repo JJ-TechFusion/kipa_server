@@ -19,5 +19,6 @@ type DeviceTokenRepository interface {
 
 type NotificationLogRepository interface {
 	Create(ctx context.Context, log *domain.NotificationLog) error
+	CreateBulk(ctx context.Context, logs []*domain.NotificationLog) error
 	GetByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.NotificationLog, error)
 }

@@ -287,6 +287,7 @@ func main() {
 		auditLogRepo,
 		disputeRepo,
 		escrowRepo,
+		notificationLogRepo,
 		notificationService,
 		logger,
 	)

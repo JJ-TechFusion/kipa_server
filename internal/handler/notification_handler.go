@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ func NewNotificationHandler(
 }
 
 func (h *NotificationHandler) RegisterRoutes(router *gin.RouterGroup) {
+	router.GET("/notifications", h.GetNotifications)
 	router.POST("/device-token", h.RegisterToken)
 	router.DELETE("/device-token", h.RemoveToken)
 }
@@ -79,4 +81,40 @@ func (h *NotificationHandler) RemoveToken(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "token removed successfully"})
+}
+
+func (h *NotificationHandler) GetNotifications(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	limit := 20
+	offset := 0
+
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	if o := c.Query("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	notifications, err := h.notificationService.GetUserNotifications(c.Request.Context(), userID.(uuid.UUID), limit, offset)
+	if err != nil {
+		h.logger.Error("failed to get notifications", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get notifications"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"notifications": notifications,
+		"limit":         limit,
+		"offset":        offset,
+	})
 }

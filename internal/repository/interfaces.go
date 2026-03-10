@@ -25,6 +25,7 @@ type UserRepository interface {
 	List(ctx context.Context, filters interface{}, limit, offset int) ([]*domain.User, error)
 	GetStatistics(ctx context.Context) (*UserStatistics, error)
 	SoftDelete(ctx context.Context, userID uuid.UUID) error
+	GetAllActiveUserIDs(ctx context.Context) ([]uuid.UUID, error)
 }
 
 type UserStatistics struct {
@@ -109,6 +110,7 @@ type DeliveryJobRepository interface {
 	GetJobCoordinates(ctx context.Context, jobID uuid.UUID) (*JobCoordinates, error)
 	UpdateForcedReturn(ctx context.Context, job *domain.DeliveryJob) error
 	HasActiveByRiderUserID(ctx context.Context, userID uuid.UUID) (bool, error)
+	GetExpiredErrandUnavailableJobs(ctx context.Context, waitMinutes int) ([]*domain.DeliveryJob, error)
 }
 
 type JobCoordinates struct {
@@ -178,6 +180,7 @@ type RevenueAnalytics struct {
 	BuyerFees         float64 `db:"buyer_fees" json:"buyer_fees"`
 	SellerFees        float64 `db:"seller_fees" json:"seller_fees"`
 	DeliveryFees      float64 `db:"delivery_fees" json:"delivery_fees"`
+	RiderCommission   float64 `db:"rider_commission" json:"rider_commission"`
 	TotalTransactions int     `db:"total_transactions" json:"total_transactions"`
 }
 

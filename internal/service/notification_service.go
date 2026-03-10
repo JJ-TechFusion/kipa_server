@@ -22,6 +22,8 @@ type NotificationService interface {
 	RegisterToken(ctx context.Context, userID uuid.UUID, token string, platform domain.DevicePlatform) error
 
 	RemoveToken(ctx context.Context, token string) error
+
+	GetUserNotifications(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.NotificationLog, error)
 }
 
 type NotificationServiceImpl struct {
@@ -129,6 +131,10 @@ func (s *NotificationServiceImpl) RegisterToken(ctx context.Context, userID uuid
 
 func (s *NotificationServiceImpl) RemoveToken(ctx context.Context, token string) error {
 	return s.tokenRepo.Delete(ctx, token)
+}
+
+func (s *NotificationServiceImpl) GetUserNotifications(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.NotificationLog, error) {
+	return s.logRepo.GetByUserID(ctx, userID, limit, offset)
 }
 
 var _ NotificationService = (*NotificationServiceImpl)(nil)

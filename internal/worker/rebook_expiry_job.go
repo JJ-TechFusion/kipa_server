@@ -40,41 +40,65 @@ func (p *JobProcessor) processRebookExpiries(ctx context.Context) {
 
 	p.logger.Debug("rebook expiry job: processing expired rebook windows")
 
-	if p.paymentRequestRepo == nil {
-		return
-	}
-	expiredRequests, err := p.paymentRequestRepo.GetExpiredRebookRequests(ctx)
-	if err != nil {
-		p.logger.Error("rebook expiry job: failed to get expired rebook requests",
-			zap.Error(err),
-		)
-		return
-	}
-
-	if len(expiredRequests) == 0 {
-		p.logger.Debug("rebook expiry job: no expired rebook requests found")
-		return
-	}
-
-	p.logger.Info("rebook expiry job: found expired rebook requests",
-		zap.Int("count", len(expiredRequests)),
-	)
-
-	processedCount := 0
-	for _, pr := range expiredRequests {
-		if err := p.processRebookExpiry(ctx, pr); err != nil {
-			p.logger.Error("rebook expiry job: failed to process expired rebook",
-				zap.String("payment_request_id", pr.ID.String()),
+	// Process expired payment request rebooks (intrastate/interstate)
+	if p.paymentRequestRepo != nil {
+		expiredRequests, err := p.paymentRequestRepo.GetExpiredRebookRequests(ctx)
+		if err != nil {
+			p.logger.Error("rebook expiry job: failed to get expired rebook requests",
 				zap.Error(err),
 			)
-			continue
+		} else if len(expiredRequests) > 0 {
+			p.logger.Info("rebook expiry job: found expired rebook requests",
+				zap.Int("count", len(expiredRequests)),
+			)
+
+			processedCount := 0
+			for _, pr := range expiredRequests {
+				if err := p.processRebookExpiry(ctx, pr); err != nil {
+					p.logger.Error("rebook expiry job: failed to process expired rebook",
+						zap.String("payment_request_id", pr.ID.String()),
+						zap.Error(err),
+					)
+					continue
+				}
+				processedCount++
+			}
+
+			p.logger.Info("rebook expiry job: payment requests completed",
+				zap.Int("processed", processedCount),
+			)
 		}
-		processedCount++
 	}
 
-	p.logger.Info("rebook expiry job: completed",
-		zap.Int("processed", processedCount),
-	)
+	// Process expired errand unavailability windows (45 min wait)
+	if p.deliveryJobRepo != nil {
+		expiredErrandJobs, err := p.deliveryJobRepo.GetExpiredErrandUnavailableJobs(ctx, 45)
+		if err != nil {
+			p.logger.Error("rebook expiry job: failed to get expired errand jobs",
+				zap.Error(err),
+			)
+		} else if len(expiredErrandJobs) > 0 {
+			p.logger.Info("rebook expiry job: found expired errand unavailable jobs",
+				zap.Int("count", len(expiredErrandJobs)),
+			)
+
+			processedCount := 0
+			for _, job := range expiredErrandJobs {
+				if err := p.processErrandUnavailableExpiry(ctx, job); err != nil {
+					p.logger.Error("rebook expiry job: failed to process expired errand job",
+						zap.String("job_id", job.ID.String()),
+						zap.Error(err),
+					)
+					continue
+				}
+				processedCount++
+			}
+
+			p.logger.Info("rebook expiry job: errand jobs completed",
+				zap.Int("processed", processedCount),
+			)
+		}
+	}
 }
 
 func (p *JobProcessor) processRebookExpiry(ctx context.Context, pr *domain.PaymentRequest) error {
@@ -160,6 +184,62 @@ func (p *JobProcessor) processRebookExpiry(ctx context.Context, pr *domain.Payme
 		zap.String("job_id", job.ID.String()),
 		zap.String("dropoff_code", dropoffCode),
 		zap.Float64("unavailability_fee", unavailabilityFee),
+	)
+
+	return nil
+}
+
+// processErrandUnavailableExpiry ends an errand job after the 45-min wait window expires.
+// For errands, there's no forced return - the ride just ends and parties settle outside the app.
+func (p *JobProcessor) processErrandUnavailableExpiry(ctx context.Context, job *domain.DeliveryJob) error {
+	if job.ErrandID == nil {
+		p.logger.Error("rebook expiry job: errand job has no errand_id",
+			zap.String("job_id", job.ID.String()),
+		)
+		return nil
+	}
+
+	// End the delivery job
+	job.Status = domain.DJStatusFailed
+	if err := p.deliveryJobRepo.UpdateStatus(ctx, job.ID, domain.DJStatusFailed); err != nil {
+		p.logger.Error("rebook expiry job: failed to update errand job status",
+			zap.String("job_id", job.ID.String()),
+			zap.Error(err),
+		)
+		return err
+	}
+
+	if p.broadcaster != nil {
+		p.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusFailed))
+	}
+
+	// Update errand status
+	if p.errandRepo != nil {
+		if err := p.errandRepo.UpdateStatus(ctx, *job.ErrandID, domain.ErrandStatusReceiverUnavailable); err != nil {
+			p.logger.Error("rebook expiry job: failed to update errand status",
+				zap.String("errand_id", job.ErrandID.String()),
+				zap.Error(err),
+			)
+		}
+	}
+
+	// Notify the errand requester
+	if p.notificationService != nil && p.errandRepo != nil {
+		errand, err := p.errandRepo.GetByID(ctx, *job.ErrandID)
+		if err == nil && errand != nil {
+			data := map[string]string{
+				"job_id":    job.ID.String(),
+				"errand_id": job.ErrandID.String(),
+			}
+			go p.notificationService.SendToUser(ctx, errand.UserID, "Errand Ended",
+				"The receiver was unavailable and the wait time has expired. The ride has ended. Please settle with the rider directly.",
+				data, domain.NotificationErrandCompleted)
+		}
+	}
+
+	p.logger.Info("rebook expiry job: errand job ended due to receiver unavailable",
+		zap.String("job_id", job.ID.String()),
+		zap.String("errand_id", job.ErrandID.String()),
 	)
 
 	return nil

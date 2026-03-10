@@ -311,15 +311,18 @@ func (r *WalletTransactionRepo) IdempotencyKeyExists(ctx context.Context, key st
 }
 
 func (r *WalletTransactionRepo) GetRevenueAnalytics(ctx context.Context, startDate, endDate *time.Time) (*repository.RevenueAnalytics, error) {
+	// Query from escrows table where platform revenue is actually stored
+	// Include funded+ statuses as they represent successful payments
 	query := `
-		SELECT 
-			COALESCE(SUM(CASE WHEN type = 'platform_fee' THEN amount ELSE 0 END), 0) as total_revenue,
-			COALESCE(SUM(CASE WHEN type = 'platform_fee' AND reference_type = 'buyer_fee' THEN amount ELSE 0 END), 0) as buyer_fees,
-			COALESCE(SUM(CASE WHEN type = 'platform_fee' AND reference_type = 'seller_fee' THEN amount ELSE 0 END), 0) as seller_fees,
-			COALESCE(SUM(CASE WHEN type = 'delivery_payout' THEN amount ELSE 0 END), 0) as delivery_fees,
-			COUNT(CASE WHEN type = 'platform_fee' THEN 1 END) as total_transactions
-		FROM wallet_transactions
-		WHERE 1=1`
+		SELECT
+			COALESCE(SUM(COALESCE(platform_revenue, buyer_fee)), 0) as total_revenue,
+			COALESCE(SUM(buyer_fee), 0) as buyer_fees,
+			COALESCE(SUM(CASE WHEN seller_payout IS NOT NULL THEN (item_amount - seller_payout) ELSE 0 END), 0) as seller_fees,
+			COALESCE(SUM(COALESCE(actual_delivery_fee, delivery_fee_estimate)), 0) as delivery_fees,
+			COALESCE(SUM(CASE WHEN rider_payout IS NOT NULL THEN (COALESCE(actual_delivery_fee, delivery_fee_estimate) - rider_payout) ELSE 0 END), 0) as rider_commission,
+			COUNT(*) as total_transactions
+		FROM escrows
+		WHERE status IN ('funded', 'delivery_in_progress', 'delivered', 'confirmation_window', 'released')`
 
 	args := []interface{}{}
 	argNum := 1
