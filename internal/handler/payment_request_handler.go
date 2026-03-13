@@ -290,6 +290,7 @@ func mapPaymentRequestErrorToResponse(err error) (int, string, string) {
 		return http.StatusInternalServerError, domain.CodeInternalError, "An unexpected error occurred"
 	}
 }
+
 type PaymentRequestResponse struct {
 	ID                   uuid.UUID  `json:"id"`
 	SellerID             uuid.UUID  `json:"seller_id"`
@@ -298,9 +299,11 @@ type PaymentRequestResponse struct {
 	ItemPrice            float64    `json:"item_price"`
 	DeliveryType         string     `json:"delivery_type"`
 	PickupAddress        *string    `json:"pickup_address,omitempty"`
+	PickupState          *string    `json:"pickup_state,omitempty"`
 	PickupLat            float64    `json:"pickup_lat,omitempty"`
 	PickupLng            float64    `json:"pickup_lng,omitempty"`
 	DropoffAddress       *string    `json:"dropoff_address,omitempty"`
+	DropoffState         *string    `json:"dropoff_state,omitempty"`
 	DropoffLat           float64    `json:"dropoff_lat,omitempty"`
 	DropoffLng           float64    `json:"dropoff_lng,omitempty"`
 	EstimatedDeliveryFee *float64   `json:"estimated_delivery_fee,omitempty"`
@@ -325,9 +328,11 @@ func paymentRequestToResponse(pr *domain.PaymentRequest) PaymentRequestResponse 
 		ItemPrice:            pr.ItemPrice,
 		DeliveryType:         string(pr.DeliveryType),
 		PickupAddress:        pr.PickupAddress,
+		PickupState:          pr.PickupState,
 		PickupLat:            pr.PickupLat,
 		PickupLng:            pr.PickupLng,
 		DropoffAddress:       pr.DropoffAddress,
+		DropoffState:         pr.DropoffState,
 		DropoffLat:           pr.DropoffLat,
 		DropoffLng:           pr.DropoffLng,
 		EstimatedDeliveryFee: pr.EstimatedDeliveryFee,

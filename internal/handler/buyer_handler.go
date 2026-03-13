@@ -514,7 +514,6 @@ func (h *BuyerHandler) GetOrder(c *gin.Context) {
 		return
 	}
 
-	
 	if order.BuyerID != userID {
 		util.Error(c, http.StatusForbidden, domain.CodeUnauthorized, "You don't have access to this order")
 		return
@@ -563,12 +562,10 @@ func mapBuyerErrorToResponse(err error) (int, string, string) {
 	}
 }
 
-
-
 type InitializePaymentRequest struct {
-	PaymentMethod string `json:"payment_method" binding:"required,oneof=card wallet"` 
-	CallbackURL   string `json:"callback_url"`                                        
-	Email         string `json:"email"`                                               
+	PaymentMethod string `json:"payment_method" binding:"required,oneof=card wallet"`
+	CallbackURL   string `json:"callback_url"`
+	Email         string `json:"email"`
 }
 
 type DisputeRequest struct {
@@ -577,18 +574,22 @@ type DisputeRequest struct {
 }
 
 type PaymentPageResponse struct {
-	ItemName             string   `json:"item_name"`
-	ItemDescription      *string  `json:"item_description,omitempty"`
-	ItemPrice            float64  `json:"item_price"`
-	ProcessingTimeHours  *int     `json:"processing_time_hours,omitempty"`
-	DeliveryType         string   `json:"delivery_type"`
-	EstimatedDeliveryFee *float64 `json:"estimated_delivery_fee,omitempty"`
-	BuyerServiceFee      *float64 `json:"buyer_service_fee,omitempty"`
-	EstimatedTotal       *float64 `json:"estimated_total,omitempty"`
+	ItemName             string    `json:"item_name"`
+	ItemDescription      *string   `json:"item_description,omitempty"`
+	ItemPrice            float64   `json:"item_price"`
+	ProcessingTimeHours  *int      `json:"processing_time_hours,omitempty"`
+	DeliveryType         string    `json:"delivery_type"`
+	PickupAddress        *string   `json:"pickup_address,omitempty"`
+	PickupState          *string   `json:"pickup_state,omitempty"`
+	DropoffAddress       *string   `json:"dropoff_address,omitempty"`
+	DropoffState         *string   `json:"dropoff_state,omitempty"`
+	EstimatedDeliveryFee *float64  `json:"estimated_delivery_fee,omitempty"`
+	BuyerServiceFee      *float64  `json:"buyer_service_fee,omitempty"`
+	EstimatedTotal       *float64  `json:"estimated_total,omitempty"`
 	SellerID             uuid.UUID `json:"seller_id"`
-	SellerName           string   `json:"seller_name"`
-	SellerEmail          *string  `json:"seller_email,omitempty"`
-	SellerPhone          string   `json:"seller_phone"`
+	SellerName           string    `json:"seller_name"`
+	SellerEmail          *string   `json:"seller_email,omitempty"`
+	SellerPhone          string    `json:"seller_phone"`
 }
 
 func paymentPageToResponse(pr *domain.PaymentRequest, seller *domain.User) PaymentPageResponse {
@@ -598,6 +599,10 @@ func paymentPageToResponse(pr *domain.PaymentRequest, seller *domain.User) Payme
 		ItemPrice:            pr.ItemPrice,
 		ProcessingTimeHours:  pr.ProcessingTimeHours,
 		DeliveryType:         string(pr.DeliveryType),
+		PickupAddress:        pr.PickupAddress,
+		PickupState:          pr.PickupState,
+		DropoffAddress:       pr.DropoffAddress,
+		DropoffState:         pr.DropoffState,
 		EstimatedDeliveryFee: pr.EstimatedDeliveryFee,
 		BuyerServiceFee:      pr.BuyerServiceFee,
 		EstimatedTotal:       pr.EstimatedTotal,
@@ -636,19 +641,19 @@ type PurchaseResponse struct {
 }
 
 type PurchaseDeliveryInfo struct {
-	JobID         *uuid.UUID `json:"job_id,omitempty"`
-	ReturnJobID   *uuid.UUID `json:"return_job_id,omitempty"`
-	Status        string     `json:"status"`
-	Phase         string     `json:"phase"` // "delivery" or "return"
-	PickupCode    *string    `json:"pickup_code,omitempty"`  // For buyer in return phase
-	DropoffCode   *string    `json:"dropoff_code,omitempty"` // For buyer in delivery phase
-	RiderAssigned bool       `json:"rider_assigned"`
-	PickedUpAt    *string    `json:"picked_up_at,omitempty"`
-	DeliveredAt   *string    `json:"delivered_at,omitempty"`
-	ReturnStatus      *string `json:"return_status,omitempty"`
-	ReturnRiderAssigned bool  `json:"return_rider_assigned,omitempty"`
-	ReturnPickedUpAt  *string `json:"return_picked_up_at,omitempty"`
-	ReturnDeliveredAt *string `json:"return_delivered_at,omitempty"`
+	JobID               *uuid.UUID `json:"job_id,omitempty"`
+	ReturnJobID         *uuid.UUID `json:"return_job_id,omitempty"`
+	Status              string     `json:"status"`
+	Phase               string     `json:"phase"`                  // "delivery" or "return"
+	PickupCode          *string    `json:"pickup_code,omitempty"`  // For buyer in return phase
+	DropoffCode         *string    `json:"dropoff_code,omitempty"` // For buyer in delivery phase
+	RiderAssigned       bool       `json:"rider_assigned"`
+	PickedUpAt          *string    `json:"picked_up_at,omitempty"`
+	DeliveredAt         *string    `json:"delivered_at,omitempty"`
+	ReturnStatus        *string    `json:"return_status,omitempty"`
+	ReturnRiderAssigned bool       `json:"return_rider_assigned,omitempty"`
+	ReturnPickedUpAt    *string    `json:"return_picked_up_at,omitempty"`
+	ReturnDeliveredAt   *string    `json:"return_delivered_at,omitempty"`
 }
 
 func orderToPurchaseResponse(order *domain.Order, pr *domain.PaymentRequest, job *domain.DeliveryJob) PurchaseResponse {
@@ -922,10 +927,10 @@ func (h *BuyerHandler) InitiateReturn(c *gin.Context) {
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
-		"message":       "Return initiated successfully. A rider will be dispatched to pick up the item.",
-		"return_job_id": returnJob.ID,
-		"status":        string(returnJob.Status),
-		"pickup_address": returnJob.PickupAddress,
+		"message":         "Return initiated successfully. A rider will be dispatched to pick up the item.",
+		"return_job_id":   returnJob.ID,
+		"status":          string(returnJob.Status),
+		"pickup_address":  returnJob.PickupAddress,
 		"dropoff_address": returnJob.DropoffAddress,
 	})
 }
@@ -982,6 +987,7 @@ func (h *BuyerHandler) ReadyForReturn(c *gin.Context) {
 		"pickup_code":     returnJob.PickupCode, // Note: Generated when rider accepts
 	})
 }
+
 type BuyerReturnStatusResponse struct {
 	PaymentRequestID uuid.UUID           `json:"payment_request_id"`
 	Status           string              `json:"status"`
@@ -1003,6 +1009,7 @@ type BuyerReturnJobInfo struct {
 	PickedUpAt     *string   `json:"picked_up_at,omitempty"`
 	DeliveredAt    *string   `json:"delivered_at,omitempty"`
 }
+
 func (h *BuyerHandler) GetRebookStatus(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {

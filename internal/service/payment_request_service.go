@@ -17,16 +17,12 @@ import (
 	"kipa/internal/repository"
 )
 
-
 type PaymentRequestService interface {
-
 	CreateDraft(ctx context.Context, sellerID uuid.UUID, req *CreateDraftRequest) (*domain.PaymentRequest, error)
 
 	ConfigureFulfillment(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID, req *ConfigureFulfillmentRequest) (*domain.PaymentRequest, error)
 
-
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentRequest, error)
-
 
 	GetByPaymentCode(ctx context.Context, code string) (*domain.PaymentRequest, error)
 
@@ -43,7 +39,6 @@ type PaymentRequestService interface {
 	CancelRiderSearch(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) (*domain.PaymentRequest, error)
 
 	UpdateStatus(ctx context.Context, prID uuid.UUID, status domain.PaymentRequestStatus) error
-
 
 	Cancel(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID) error
 
@@ -62,11 +57,11 @@ type RebookDeliveryRequest struct {
 }
 
 type RebookStatusResponse struct {
-	Status          string     `json:"status"`
-	RebookDeadline  *time.Time `json:"rebook_deadline,omitempty"`
-	RebookAttempts  int        `json:"rebook_attempts"`
-	CanRebook       bool       `json:"can_rebook"`
-	TimeRemaining   string     `json:"time_remaining,omitempty"`
+	Status         string     `json:"status"`
+	RebookDeadline *time.Time `json:"rebook_deadline,omitempty"`
+	RebookAttempts int        `json:"rebook_attempts"`
+	CanRebook      bool       `json:"can_rebook"`
+	TimeRemaining  string     `json:"time_remaining,omitempty"`
 }
 
 type CreateDraftRequest struct {
@@ -82,7 +77,7 @@ type CreateDraftRequest struct {
 type ConfigureFulfillmentRequest struct {
 	DeliveryType   domain.DeliveryType `json:"delivery_type" binding:"required"`
 	PickupAddress  string              `json:"pickup_address"`
-	PickupState    string              `json:"pickup_state"`  // Required for inter_state delivery
+	PickupState    string              `json:"pickup_state"` // Required for inter_state delivery
 	PickupLat      *float64            `json:"pickup_lat"`
 	PickupLng      *float64            `json:"pickup_lng"`
 	DropoffAddress string              `json:"dropoff_address"`
@@ -178,7 +173,7 @@ func (s *PaymentRequestServiceImpl) CreateDraft(ctx context.Context, sellerID uu
 	return pr, nil
 }
 func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, prID uuid.UUID, sellerID uuid.UUID, req *ConfigureFulfillmentRequest) (*domain.PaymentRequest, error) {
-	s.logger.Info("starting fulfillment configuration", 
+	s.logger.Info("starting fulfillment configuration",
 		zap.String("pr_id", prID.String()),
 		zap.String("seller_id", sellerID.String()),
 		zap.String("delivery_type", string(req.DeliveryType)),
@@ -189,18 +184,18 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 		s.logger.Error("failed to get payment request", zap.Error(err), zap.String("pr_id", prID.String()))
 		return nil, err
 	}
-	
+
 	s.logger.Info("payment request retrieved", zap.String("current_status", string(pr.Status)))
-	
+
 	if pr.SellerID != sellerID {
-		s.logger.Error("unauthorized seller access", 
+		s.logger.Error("unauthorized seller access",
 			zap.String("pr_seller_id", pr.SellerID.String()),
 			zap.String("request_seller_id", sellerID.String()),
 		)
 		return nil, domain.ErrUnauthorized
 	}
 	if pr.Status != domain.PRStatusDraft {
-		s.logger.Error("invalid status transition", 
+		s.logger.Error("invalid status transition",
 			zap.String("current_status", string(pr.Status)),
 			zap.String("expected_status", string(domain.PRStatusDraft)),
 		)
@@ -233,8 +228,8 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 			return nil, domain.ErrMissingInterStateFields
 		}
 	}
-	
-	s.logger.Info("calculating delivery fees", 
+
+	s.logger.Info("calculating delivery fees",
 		zap.String("delivery_type", string(req.DeliveryType)),
 		zap.Bool("has_pickup_coords", req.PickupLat != nil && req.PickupLng != nil),
 		zap.Bool("has_dropoff_coords", req.DropoffLat != nil && req.DropoffLng != nil),
@@ -247,7 +242,7 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 		}
 		pr.VehicleType = &vehicleType
 
-		s.logger.Info("calculating intra-state delivery fee", 
+		s.logger.Info("calculating intra-state delivery fee",
 			zap.String("vehicle_type", string(vehicleType)),
 			zap.Float64("pickup_lat", *req.PickupLat),
 			zap.Float64("pickup_lng", *req.PickupLng),
@@ -275,26 +270,26 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 		pr.EstimatedDeliveryFee = &zero
 	}
 	s.logger.Info("calculating platform fees", zap.Float64("item_price", pr.ItemPrice))
-	
+
 	buyerFee := s.feeCalculator.CalculateBuyerFee(pr.ItemPrice)
 	sellerFee := s.feeCalculator.CalculateSellerFee(pr.ItemPrice)
 	pr.BuyerServiceFee = &buyerFee
 	pr.SellerPlatformFee = &sellerFee
-	
-	s.logger.Info("fees calculated", 
+
+	s.logger.Info("fees calculated",
 		zap.Float64("buyer_fee", buyerFee),
 		zap.Float64("seller_fee", sellerFee),
 	)
-	
+
 	deliveryFee := 0.0
 	if pr.EstimatedDeliveryFee != nil {
 		deliveryFee = *pr.EstimatedDeliveryFee
 	}
 	estimatedTotal := s.feeCalculator.CalculateTotalForBuyer(pr.ItemPrice, deliveryFee)
 	pr.EstimatedTotal = &estimatedTotal
-	
+
 	s.logger.Info("generating payment code and updating status")
-	
+
 	paymentCode := s.generatePaymentCode()
 	pr.PaymentCode = &paymentCode
 	linkExpiry := time.Now().Add(7 * 24 * time.Hour)
@@ -305,7 +300,7 @@ func (s *PaymentRequestServiceImpl) ConfigureFulfillment(ctx context.Context, pr
 	pr.LinkGeneratedAt = &now
 
 	s.logger.Info("updating payment request in database", zap.String("pr_id", pr.ID.String()))
-	
+
 	if err := s.prRepo.Update(ctx, pr); err != nil {
 		s.logger.Error("failed to update payment request in database", zap.Error(err), zap.String("pr_id", pr.ID.String()))
 		return nil, fmt.Errorf("failed to update payment request: %w", err)
@@ -340,7 +335,25 @@ func (s *PaymentRequestServiceImpl) GetByPaymentCode(ctx context.Context, code s
 	return s.prRepo.GetByPaymentCode(ctx, code)
 }
 func (s *PaymentRequestServiceImpl) GetBySellerID(ctx context.Context, sellerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error) {
-	return s.prRepo.GetBySellerID(ctx, sellerID, limit, offset)
+	requests, err := s.prRepo.GetBySellerID(ctx, sellerID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]*domain.PaymentRequest, 0, len(requests))
+	for _, pr := range requests {
+		if pr == nil {
+			continue
+		}
+		switch pr.Status {
+		case domain.PRStatusExpired, domain.PRStatusCancelled, domain.PRStatusCompleted, domain.PRStatusRefunded:
+			continue
+		default:
+			filtered = append(filtered, pr)
+		}
+	}
+
+	return filtered, nil
 }
 func (s *PaymentRequestServiceImpl) GetByBuyerID(ctx context.Context, buyerID uuid.UUID, limit, offset int) ([]*domain.PaymentRequest, error) {
 	return s.prRepo.GetByBuyerID(ctx, buyerID, limit, offset)
@@ -454,7 +467,6 @@ func (s *PaymentRequestServiceImpl) MarkReadyForPickup(ctx context.Context, prID
 			SearchTimeoutAt:     &searchTimeout,
 			Status:              domain.DJStatusSearching,
 		}
-
 
 		if err := s.deliveryJobRepo.Create(ctx, job); err != nil {
 			return nil, fmt.Errorf("failed to create delivery job: %w", err)
@@ -659,7 +671,7 @@ func (s *PaymentRequestServiceImpl) recordEvent(ctx context.Context, prID uuid.U
 		metadataBytes, err = json.Marshal(metadata)
 		if err != nil {
 			s.logger.Error("failed to marshal event metadata", zap.Error(err))
-			return 
+			return
 		}
 	} else {
 		metadataBytes = []byte("{}")
