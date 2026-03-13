@@ -150,7 +150,7 @@ func (r *NotificationLogRepo) CreateBulk(ctx context.Context, logs []*domain.Not
 
 func (r *NotificationLogRepo) GetByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.NotificationLog, error) {
 	var logs []*domain.NotificationLog
-	query := `SELECT * FROM notification_logs WHERE user_id = $1 ORDER BY sent_at DESC LIMIT $2 OFFSET $3`
+	query := `SELECT id, user_id, title, body, notification_type, sent_at, delivered FROM notification_logs WHERE user_id = $1 ORDER BY sent_at DESC LIMIT $2 OFFSET $3`
 
 	err := r.db.SelectContext(ctx, &logs, query, userID, limit, offset)
 	if err != nil {

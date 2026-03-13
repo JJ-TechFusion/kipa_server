@@ -467,6 +467,14 @@ func mapRiderErrorToResponse(err error) (int, string, string) {
 		return http.StatusBadRequest, "INVALID_CODE", "Invalid pickup verification code"
 	case errors.Is(err, domain.ErrInvalidDropoffCode):
 		return http.StatusBadRequest, "INVALID_CODE", "Invalid delivery verification code"
+	case errors.Is(err, domain.ErrPickupCodeExpired):
+		return http.StatusBadRequest, "CODE_EXPIRED", "Pickup verification code has expired"
+	case errors.Is(err, domain.ErrDropoffCodeExpired):
+		return http.StatusBadRequest, "CODE_EXPIRED", "Delivery verification code has expired"
+	case errors.Is(err, domain.ErrPickupCodeLocked):
+		return http.StatusForbidden, "CODE_LOCKED", "Too many failed pickup code attempts. Contact support."
+	case errors.Is(err, domain.ErrDropoffCodeLocked):
+		return http.StatusForbidden, "CODE_LOCKED", "Too many failed delivery code attempts. Contact support."
 	case errors.Is(err, domain.ErrDeliveryJobNotFound):
 		return http.StatusNotFound, "JOB_NOT_FOUND", "Delivery job not found"
 	case errors.Is(err, domain.ErrInvalidStatusTransition):
@@ -527,7 +535,6 @@ type JobOfferResponse struct {
 	DistanceKM    *float64  `json:"distance_km,omitempty"`
 	OfferedAt     string    `json:"offered_at"`
 }
-
 
 type DeliveryJobResponse struct {
 	ID                  uuid.UUID              `json:"id"`
@@ -602,6 +609,7 @@ func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
 
 	return resp
 }
+
 type DeliveryJobDetailResponse struct {
 	DeliveryJobResponse
 	PickupLat      float64                 `json:"pickup_lat"`
@@ -695,4 +703,3 @@ func errandToDetailsResponse(e *domain.Errand) *ErrandDetailsResponse {
 		DropoffContactPhone: e.DropoffContactPhone,
 	}
 }
-

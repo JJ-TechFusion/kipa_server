@@ -458,6 +458,10 @@ func (h *DriverHandler) handleError(c *gin.Context, err error) {
 		util.Error(c, http.StatusForbidden, "PICKUP_CODE_LOCKED", "Too many failed attempts. Contact support.")
 	case errors.Is(err, domain.ErrDropoffCodeLocked):
 		util.Error(c, http.StatusForbidden, "DROPOFF_CODE_LOCKED", "Too many failed attempts. Contact support.")
+	case errors.Is(err, domain.ErrPickupCodeExpired):
+		util.Error(c, http.StatusBadRequest, "PICKUP_CODE_EXPIRED", "Pickup code has expired")
+	case errors.Is(err, domain.ErrDropoffCodeExpired):
+		util.Error(c, http.StatusBadRequest, "DROPOFF_CODE_EXPIRED", "Dropoff code has expired")
 	case errors.Is(err, domain.ErrInvalidStatusTransition):
 		util.Error(c, http.StatusBadRequest, "INVALID_STATUS", "This action is not allowed in the current state")
 	case errors.Is(err, domain.ErrUnauthorized):
@@ -490,43 +494,43 @@ type DriverProfileResponse struct {
 }
 
 type DriverTripResponse struct {
-	ID              string   `json:"id"`
-	DriverID        string   `json:"driver_id"`
-	OriginCity      string   `json:"origin_city"`
-	DestinationCity string   `json:"destination_city"`
-	Status          string   `json:"status"`
-	TotalPackages   int      `json:"total_packages"`
-	TotalValue      float64  `json:"total_value"`
-	TotalDriverFee  float64  `json:"total_driver_fee"`
-	AcceptingUntil  *string  `json:"accepting_until,omitempty"`
-	DepartedAt      *string  `json:"departed_at,omitempty"`
-	ArrivedAt       *string  `json:"arrived_at,omitempty"`
-	CompletedAt     *string  `json:"completed_at,omitempty"`
-	CreatedAt       string   `json:"created_at"`
+	ID              string  `json:"id"`
+	DriverID        string  `json:"driver_id"`
+	OriginCity      string  `json:"origin_city"`
+	DestinationCity string  `json:"destination_city"`
+	Status          string  `json:"status"`
+	TotalPackages   int     `json:"total_packages"`
+	TotalValue      float64 `json:"total_value"`
+	TotalDriverFee  float64 `json:"total_driver_fee"`
+	AcceptingUntil  *string `json:"accepting_until,omitempty"`
+	DepartedAt      *string `json:"departed_at,omitempty"`
+	ArrivedAt       *string `json:"arrived_at,omitempty"`
+	CompletedAt     *string `json:"completed_at,omitempty"`
+	CreatedAt       string  `json:"created_at"`
 }
 
 type DriverDeliveryResponse struct {
-	ID               string   `json:"id"`
-	PaymentRequestID string   `json:"payment_request_id"`
-	TripID           *string  `json:"trip_id,omitempty"`
-	DriverID         *string  `json:"driver_id,omitempty"`
-	OriginCity       string   `json:"origin_city"`
-	DestinationCity  string   `json:"destination_city"`
-	PickupAddress    string   `json:"pickup_address"`
-	DropoffAddress   string   `json:"dropoff_address"`
-	ItemValue        float64  `json:"item_value"`
-	DriverFee        float64  `json:"driver_fee"`
-	Status           string   `json:"status"`
-	PickupAttempts   int      `json:"pickup_attempts"`
-	DropoffAttempts  int      `json:"dropoff_attempts"`
-	DriverAssignedAt *string  `json:"driver_assigned_at,omitempty"`
-	AtPickupAt       *string  `json:"at_pickup_at,omitempty"`
-	PickedUpAt       *string  `json:"picked_up_at,omitempty"`
-	DepartedAt       *string  `json:"departed_at,omitempty"`
-	ArrivedAt        *string  `json:"arrived_at,omitempty"`
-	DeliveredAt      *string  `json:"delivered_at,omitempty"`
-	CompletedAt      *string  `json:"completed_at,omitempty"`
-	CreatedAt        string   `json:"created_at"`
+	ID               string                          `json:"id"`
+	PaymentRequestID string                          `json:"payment_request_id"`
+	TripID           *string                         `json:"trip_id,omitempty"`
+	DriverID         *string                         `json:"driver_id,omitempty"`
+	OriginCity       string                          `json:"origin_city"`
+	DestinationCity  string                          `json:"destination_city"`
+	PickupAddress    string                          `json:"pickup_address"`
+	DropoffAddress   string                          `json:"dropoff_address"`
+	ItemValue        float64                         `json:"item_value"`
+	DriverFee        float64                         `json:"driver_fee"`
+	Status           string                          `json:"status"`
+	PickupAttempts   int                             `json:"pickup_attempts"`
+	DropoffAttempts  int                             `json:"dropoff_attempts"`
+	DriverAssignedAt *string                         `json:"driver_assigned_at,omitempty"`
+	AtPickupAt       *string                         `json:"at_pickup_at,omitempty"`
+	PickedUpAt       *string                         `json:"picked_up_at,omitempty"`
+	DepartedAt       *string                         `json:"departed_at,omitempty"`
+	ArrivedAt        *string                         `json:"arrived_at,omitempty"`
+	DeliveredAt      *string                         `json:"delivered_at,omitempty"`
+	CompletedAt      *string                         `json:"completed_at,omitempty"`
+	CreatedAt        string                          `json:"created_at"`
 	Timeline         *DriverDeliveryTimelineResponse `json:"timeline,omitempty"`
 }
 
