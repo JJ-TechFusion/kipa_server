@@ -146,7 +146,7 @@ func (h *BuyerHandler) InitializePayment(c *gin.Context) {
 			email = *user.Email
 		}
 		if email == "" {
-			util.Error(c, http.StatusBadRequest, "EMAIL_REQUIRED", "Please update your profile with an email address to make card payments")
+			util.Error(c, http.StatusBadRequest, "EMAIL_REQUIRED", "Please update your profile with an email address to make card payments.")
 			return
 		}
 		initReq := &service.InitializePaymentRequest{
