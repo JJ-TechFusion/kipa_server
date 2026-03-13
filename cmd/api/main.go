@@ -325,12 +325,21 @@ func main() {
 		notificationService,
 		logger,
 	)
+
+	// Wire support chat service to services that create disputes
+	if logisticsSvc, ok := logisticsService.(*service.LogisticsDeliveryServiceImpl); ok {
+		logisticsSvc.SetSupportChatService(supportChatService)
+	}
+	if disputeResSvc, ok := disputeResolutionService.(*service.DisputeResolutionServiceImpl); ok {
+		disputeResSvc.SetSupportChatService(supportChatService)
+	}
+
 	authHandler := handler.NewAuthHandler(authService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	adminMiddleware := middleware.NewAdminMiddleware(userRepo)
 	prHandler := handler.NewPaymentRequestHandler(prService)
 	transactionHandler := handler.NewTransactionHandler(prService, orderService, logisticsService, userRepo, deliveryJobRepo)
-	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeRepo, disputeResolutionService, driverService)
+	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeRepo, disputeResolutionService, driverService, supportChatService)
 	riderHandler := handler.NewRiderHandler(riderService)
 	commissionHandler := handler.NewRiderCommissionHandler(commissionService)
 	walletHandler := handler.NewWalletHandler(walletService, escrowService)

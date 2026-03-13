@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -23,6 +24,7 @@ type BuyerHandler struct {
 	disputeRepo              repository.DisputeRepository
 	disputeResolutionService service.DisputeResolutionService
 	driverService            service.DriverService
+	supportChatService       service.SupportChatService
 }
 
 func NewBuyerHandler(
@@ -34,6 +36,7 @@ func NewBuyerHandler(
 	disputeRepo repository.DisputeRepository,
 	disputeResolutionService service.DisputeResolutionService,
 	driverService service.DriverService,
+	supportChatService service.SupportChatService,
 ) *BuyerHandler {
 	return &BuyerHandler{
 		prService:                prService,
@@ -44,6 +47,7 @@ func NewBuyerHandler(
 		disputeRepo:              disputeRepo,
 		disputeResolutionService: disputeResolutionService,
 		driverService:            driverService,
+		supportChatService:       supportChatService,
 	}
 }
 
@@ -453,6 +457,13 @@ func (h *BuyerHandler) DisputePurchase(c *gin.Context) {
 	dispute := domain.NewDispute(*order.EscrowID, userID, req.Reason, req.Evidence)
 	if err := h.disputeRepo.Create(c.Request.Context(), dispute); err != nil {
 		_ = err
+	}
+
+	// Create support conversation for this dispute
+	if h.supportChatService != nil {
+		go func() {
+			_, _ = h.supportChatService.CreateDisputeConversation(context.Background(), userID, dispute.ID)
+		}()
 	}
 
 	if err := h.orderService.UpdateStatus(c.Request.Context(), order.ID, domain.OrderStatusDisputed); err != nil {

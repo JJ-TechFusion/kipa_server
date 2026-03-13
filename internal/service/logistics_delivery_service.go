@@ -71,17 +71,18 @@ type CreateLogisticsDeliveryRequest struct {
 }
 
 type LogisticsDeliveryServiceImpl struct {
-	deliveryRepo      repository.LogisticsDeliveryRepository
-	eventRepo         repository.LogisticsDeliveryEventRepository
-	evidenceRepo      repository.LogisticsEvidenceRepository
-	escrowRepo        repository.EscrowRepository
-	disputeRepo       repository.DisputeRepository
-	userRepo          repository.UserRepository
-	prRepo            repository.PaymentRequestRepository
-	walletService     WalletService
+	deliveryRepo        repository.LogisticsDeliveryRepository
+	eventRepo           repository.LogisticsDeliveryEventRepository
+	evidenceRepo        repository.LogisticsEvidenceRepository
+	escrowRepo          repository.EscrowRepository
+	disputeRepo         repository.DisputeRepository
+	userRepo            repository.UserRepository
+	prRepo              repository.PaymentRequestRepository
+	walletService       WalletService
 	notificationService NotificationService
-	config            *config.Config
-	logger            *zap.Logger
+	supportChatService  SupportChatService
+	config              *config.Config
+	logger              *zap.Logger
 }
 
 func NewLogisticsDeliveryService(
@@ -110,6 +111,10 @@ func NewLogisticsDeliveryService(
 		config:              cfg,
 		logger:              logger,
 	}
+}
+
+func (s *LogisticsDeliveryServiceImpl) SetSupportChatService(svc SupportChatService) {
+	s.supportChatService = svc
 }
 
 func (s *LogisticsDeliveryServiceImpl) Create(ctx context.Context, req *CreateLogisticsDeliveryRequest) (*domain.LogisticsDelivery, error) {
@@ -636,6 +641,17 @@ func (s *LogisticsDeliveryServiceImpl) OpenDispute(ctx context.Context, id uuid.
 		return err
 	}
 
+	// Create support conversation for this dispute
+	if s.supportChatService != nil {
+		go func() {
+			if _, err := s.supportChatService.CreateDisputeConversation(context.Background(), openerID, dispute.ID); err != nil {
+				s.logger.Warn("failed to create dispute support conversation",
+					zap.Error(err),
+					zap.String("dispute_id", dispute.ID.String()),
+				)
+			}
+		}()
+	}
 
 	s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusDisputed)
 	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusDisputed); err != nil {

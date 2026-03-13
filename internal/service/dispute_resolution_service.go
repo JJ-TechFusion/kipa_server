@@ -56,6 +56,7 @@ type DisputeResolutionServiceImpl struct {
 	notificationService   NotificationService
 	feeCalculator         FeeCalculatorService
 	broadcaster           JobStatusBroadcaster
+	supportChatService    SupportChatService
 	config                *config.Config
 	logger                *zap.Logger
 }
@@ -90,6 +91,10 @@ func NewDisputeResolutionService(
 		config:                cfg,
 		logger:                logger,
 	}
+}
+
+func (s *DisputeResolutionServiceImpl) SetSupportChatService(svc SupportChatService) {
+	s.supportChatService = svc
 }
 
 func (s *DisputeResolutionServiceImpl) ResolveDispute(ctx context.Context, disputeID uuid.UUID, adminID uuid.UUID, req *ResolveDisputeRequest) error {
@@ -331,6 +336,9 @@ func (s *DisputeResolutionServiceImpl) handleSellerWins(ctx context.Context, dis
 	s.sendNotification(ctx, *pr.BuyerID, "Dispute Resolved", fmt.Sprintf("Admin ruled in favor of the seller: %s", req.ResolutionNotes), domain.NotificationDisputeResolved)
 	s.sendNotification(ctx, pr.SellerID, "Funds Released", fmt.Sprintf("You won the dispute. NGN %.2f has been credited to your wallet.", sellerPayout), domain.NotificationDisputeResolved)
 
+	// Close the support chat for this dispute
+	s.closeSupportChatForDispute(ctx, dispute.ID, adminID)
+
 	s.logger.Info("dispute resolved: seller wins",
 		zap.String("dispute_id", dispute.ID.String()),
 		zap.Float64("payout", sellerPayout),
@@ -377,6 +385,9 @@ func (s *DisputeResolutionServiceImpl) handlePartialRefund(ctx context.Context, 
 	s.sendNotification(ctx, *pr.BuyerID, "Partial Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", refundAmount), domain.NotificationRefundProcessed)
 	s.sendNotification(ctx, pr.SellerID, "Partial Payment Released", fmt.Sprintf("NGN %.2f has been credited to your wallet.", sellerAmount), domain.NotificationDisputeResolved)
 
+	// Close the support chat for this dispute
+	s.closeSupportChatForDispute(ctx, dispute.ID, adminID)
+
 	s.logger.Info("dispute resolved: partial refund",
 		zap.String("dispute_id", dispute.ID.String()),
 		zap.Float64("refund", refundAmount),
@@ -407,6 +418,9 @@ func (s *DisputeResolutionServiceImpl) processFullRefund(ctx context.Context, di
 	}
 	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked), domain.NotificationRefundProcessed)
 	s.sendNotification(ctx, pr.SellerID, "Dispute Resolved", notes, domain.NotificationDisputeResolved)
+
+	// Close the support chat for this dispute
+	s.closeSupportChatForDispute(ctx, dispute.ID, adminID)
 
 	return nil
 }
@@ -877,6 +891,24 @@ func (s *DisputeResolutionServiceImpl) sendNotification(_ context.Context, userI
 	go func() {
 		if err := s.notificationService.SendToUser(context.Background(), userID, title, message, nil, notifType); err != nil {
 			s.logger.Debug("failed to send notification", zap.Error(err))
+		}
+	}()
+}
+
+func (s *DisputeResolutionServiceImpl) closeSupportChatForDispute(ctx context.Context, disputeID, adminID uuid.UUID) {
+	if s.supportChatService == nil {
+		return
+	}
+	go func() {
+		conv, err := s.supportChatService.GetByDisputeID(context.Background(), disputeID)
+		if err != nil || conv == nil {
+			return
+		}
+		if err := s.supportChatService.ResolveConversation(context.Background(), adminID, conv.ID); err != nil {
+			s.logger.Warn("failed to close support chat for resolved dispute",
+				zap.Error(err),
+				zap.String("dispute_id", disputeID.String()),
+			)
 		}
 	}()
 }

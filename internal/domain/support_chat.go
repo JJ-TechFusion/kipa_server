@@ -17,6 +17,7 @@ const (
 type SupportConversation struct {
 	ID            uuid.UUID                 `db:"id" json:"id"`
 	UserID        uuid.UUID                 `db:"user_id" json:"user_id"`
+	DisputeID     *uuid.UUID                `db:"dispute_id" json:"dispute_id,omitempty"`
 	Status        SupportConversationStatus `db:"status" json:"status"`
 	LastMessageAt *time.Time                `db:"last_message_at" json:"last_message_at,omitempty"`
 	CreatedAt     time.Time                 `db:"created_at" json:"created_at"`
@@ -29,6 +30,20 @@ func NewSupportConversation(userID uuid.UUID) *SupportConversation {
 		Status:    SupportConversationStatusOpen,
 		CreatedAt: time.Now(),
 	}
+}
+
+func NewDisputeSupportConversation(userID, disputeID uuid.UUID) *SupportConversation {
+	return &SupportConversation{
+		ID:        uuid.New(),
+		UserID:    userID,
+		DisputeID: &disputeID,
+		Status:    SupportConversationStatusOpen,
+		CreatedAt: time.Now(),
+	}
+}
+
+func (c *SupportConversation) IsDisputeChat() bool {
+	return c.DisputeID != nil
 }
 
 func (c *SupportConversation) Resolve() {

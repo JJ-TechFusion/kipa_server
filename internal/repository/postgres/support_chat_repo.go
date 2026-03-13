@@ -22,8 +22,8 @@ func NewSupportConversationRepo(db *sqlx.DB) repository.SupportConversationRepos
 
 func (r *SupportConversationRepo) Create(ctx context.Context, conversation *domain.SupportConversation) error {
 	query := `
-		INSERT INTO support_conversations (id, user_id, status, last_message_at, created_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO support_conversations (id, user_id, dispute_id, status, last_message_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`
 	if conversation.ID == uuid.Nil {
 		conversation.ID = uuid.New()
@@ -38,6 +38,7 @@ func (r *SupportConversationRepo) Create(ctx context.Context, conversation *doma
 	_, err := r.db.ExecContext(ctx, query,
 		conversation.ID,
 		conversation.UserID,
+		conversation.DisputeID,
 		conversation.Status,
 		conversation.LastMessageAt,
 		conversation.CreatedAt,
@@ -57,6 +58,18 @@ func (r *SupportConversationRepo) GetByID(ctx context.Context, id uuid.UUID) (*d
 	return &conversation, nil
 }
 
+func (r *SupportConversationRepo) GetByDisputeID(ctx context.Context, disputeID uuid.UUID) (*domain.SupportConversation, error) {
+	query := `SELECT * FROM support_conversations WHERE dispute_id = $1`
+	var conversation domain.SupportConversation
+	if err := r.db.GetContext(ctx, &conversation, query, disputeID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &conversation, nil
+}
+
 func (r *SupportConversationRepo) GetOpenByUserID(ctx context.Context, userID uuid.UUID) (*domain.SupportConversation, error) {
 	query := `SELECT * FROM support_conversations WHERE user_id = $1 AND status = 'open' ORDER BY created_at DESC LIMIT 1`
 	var conversation domain.SupportConversation
@@ -67,6 +80,27 @@ func (r *SupportConversationRepo) GetOpenByUserID(ctx context.Context, userID uu
 		return nil, err
 	}
 	return &conversation, nil
+}
+
+func (r *SupportConversationRepo) GetOpenGeneralByUserID(ctx context.Context, userID uuid.UUID) (*domain.SupportConversation, error) {
+	query := `SELECT * FROM support_conversations WHERE user_id = $1 AND status = 'open' AND dispute_id IS NULL ORDER BY created_at DESC LIMIT 1`
+	var conversation domain.SupportConversation
+	if err := r.db.GetContext(ctx, &conversation, query, userID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &conversation, nil
+}
+
+func (r *SupportConversationRepo) GetAllByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.SupportConversation, error) {
+	query := `SELECT * FROM support_conversations WHERE user_id = $1 ORDER BY last_message_at DESC NULLS LAST, created_at DESC`
+	var conversations []*domain.SupportConversation
+	if err := r.db.SelectContext(ctx, &conversations, query, userID); err != nil {
+		return nil, err
+	}
+	return conversations, nil
 }
 
 func (r *SupportConversationRepo) List(ctx context.Context, status *domain.SupportConversationStatus, limit, offset int) ([]*domain.SupportConversation, int, error) {

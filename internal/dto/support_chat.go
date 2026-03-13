@@ -29,14 +29,16 @@ type SupportMessageResponse struct {
 }
 
 type SupportConversationResponse struct {
-	ID            uuid.UUID  `json:"id"`
-	UserID        uuid.UUID  `json:"user_id"`
-	UserName      string     `json:"user_name"`
-	UserPhone     string     `json:"user_phone"`
-	Status        string     `json:"status"`
-	LastMessageAt *time.Time `json:"last_message_at,omitempty"`
-	UnreadCount   int        `json:"unread_count"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID            uuid.UUID                `json:"id"`
+	UserID        uuid.UUID                `json:"user_id"`
+	UserName      string                   `json:"user_name"`
+	UserPhone     string                   `json:"user_phone"`
+	DisputeID     *uuid.UUID               `json:"dispute_id,omitempty"`
+	Dispute       *SupportDisputeDetails   `json:"dispute,omitempty"`
+	Status        string                   `json:"status"`
+	LastMessageAt *time.Time               `json:"last_message_at,omitempty"`
+	UnreadCount   int                      `json:"unread_count"`
+	CreatedAt     time.Time                `json:"created_at"`
 }
 
 type SupportContextResponse struct {
@@ -160,9 +162,16 @@ func ToSupportConversationResponse(c *domain.SupportConversation, userName, user
 		UserID:        c.UserID,
 		UserName:      userName,
 		UserPhone:     userPhone,
+		DisputeID:     c.DisputeID,
 		Status:        string(c.Status),
 		LastMessageAt: c.LastMessageAt,
 		UnreadCount:   unreadCount,
 		CreatedAt:     c.CreatedAt,
 	}
+}
+
+func ToSupportConversationResponseWithDispute(c *domain.SupportConversation, userName, userPhone string, unreadCount int, dispute *SupportDisputeDetails) *SupportConversationResponse {
+	resp := ToSupportConversationResponse(c, userName, userPhone, unreadCount)
+	resp.Dispute = dispute
+	return resp
 }

@@ -114,6 +114,137 @@ func (h *SupportChatHandler) MarkAsRead(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+func (h *SupportChatHandler) ListUserConversations(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	conversations, err := h.supportChatService.ListUserConversations(c.Request.Context(), userID)
+	if err != nil {
+		h.logger.Error("failed to list user conversations", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list conversations"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"conversations": conversations})
+}
+
+func (h *SupportChatHandler) GetUserConversation(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	context, err := h.supportChatService.GetUserConversation(c.Request.Context(), userID, conversationID)
+	if err != nil {
+		h.logger.Error("failed to get user conversation", zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "Conversation not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, context)
+}
+
+func (h *SupportChatHandler) SendMessageToConversation(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	var req dto.SendSupportMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	message, err := h.supportChatService.SendMessageToConversation(c.Request.Context(), userID, conversationID, &req)
+	if err != nil {
+		h.logger.Error("failed to send message to conversation", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send message"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, message)
+}
+
+func (h *SupportChatHandler) GetConversationMessages(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	limit := 50
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	var beforeID *uuid.UUID
+	if beforeIDStr := c.Query("before_id"); beforeIDStr != "" {
+		if id, err := uuid.Parse(beforeIDStr); err == nil {
+			beforeID = &id
+		}
+	}
+
+	messages, err := h.supportChatService.GetConversationHistory(c.Request.Context(), userID, conversationID, limit, beforeID)
+	if err != nil {
+		h.logger.Error("failed to get conversation messages", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve messages"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"messages": messages})
+}
+
+func (h *SupportChatHandler) MarkConversationAsRead(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	if err := h.supportChatService.MarkConversationAsRead(c.Request.Context(), userID, conversationID); err != nil {
+		h.logger.Error("failed to mark conversation as read", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to mark messages as read"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
 
 func (h *SupportChatHandler) ListConversations(c *gin.Context) {
 	limit := 50
@@ -273,10 +404,18 @@ func (h *SupportChatHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware *
 	support := r.Group("/support")
 	support.Use(authMiddleware.RequireAuth())
 	{
+		// General support chat (creates/gets chat without dispute)
 		support.GET("", h.GetOrCreateConversation)
 		support.POST("/messages", h.SendMessage)
 		support.GET("/messages", h.GetHistory)
 		support.POST("/messages/read", h.MarkAsRead)
+
+		// Multi-conversation endpoints (including dispute chats)
+		support.GET("/conversations", h.ListUserConversations)
+		support.GET("/conversations/:id", h.GetUserConversation)
+		support.POST("/conversations/:id/messages", h.SendMessageToConversation)
+		support.GET("/conversations/:id/messages", h.GetConversationMessages)
+		support.POST("/conversations/:id/read", h.MarkConversationAsRead)
 	}
 
 	adminSupport := r.Group("/admin/support")
