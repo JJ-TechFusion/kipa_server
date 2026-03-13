@@ -1,9 +1,0 @@
-./code_generator.go
-./distance.go
-./fee_calculator.go
-./hasher.go
-./jwt.go
-./otp.go
-./phone.go
-./response.go
-./validator.go

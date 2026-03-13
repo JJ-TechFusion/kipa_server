@@ -1,9 +1,0 @@
-./alerts.go
-./api_service.go
-./events.go
-./model_list_alert_response.go
-./model_list_alert_response_meta.go
-./model_list_event_response.go
-./model_monitor_v1_alert.go
-./model_monitor_v1_alert_instance.go
-./model_monitor_v1_event.go

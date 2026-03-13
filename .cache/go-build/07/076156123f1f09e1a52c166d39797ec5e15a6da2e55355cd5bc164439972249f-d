@@ -1,5 +1,0 @@
-./api_service.go
-./authorize.go
-./model_oauth_v1_authorize.go
-./model_oauth_v1_token.go
-./token.go

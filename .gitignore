@@ -33,6 +33,7 @@ coverage.html
 # Temp files
 tmp/
 temp/
+.cache/
 
 # Build artifacts
 dist/

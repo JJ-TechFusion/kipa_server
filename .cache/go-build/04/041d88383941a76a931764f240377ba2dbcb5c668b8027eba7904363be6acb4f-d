@@ -1,9 +1,0 @@
-./base_client.go
-./client.go
-./error.go
-./mock_client.go
-./page_util.go
-./request_handler.go
-./request_validator.go
-./unmarshal.go
-./version.go

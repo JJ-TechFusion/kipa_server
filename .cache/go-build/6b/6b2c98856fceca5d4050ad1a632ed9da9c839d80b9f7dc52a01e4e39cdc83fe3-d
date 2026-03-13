@@ -1,7 +1,0 @@
-./api_service.go
-./model_routes_v2_phone_number.go
-./model_routes_v2_sip_domain.go
-./model_routes_v2_trunks.go
-./phone_numbers.go
-./sip_domains.go
-./trunks.go
