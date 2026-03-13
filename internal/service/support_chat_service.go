@@ -100,16 +100,9 @@ func (s *SupportChatServiceImpl) GetOrCreateConversation(ctx context.Context, us
 
 	unreadCount, _ := s.messageRepo.GetUnreadCount(ctx, conversation.ID, false)
 
-	// For general support chats, include active disputes as context
-	activeDisputes, err := s.getActiveDisputesForUser(ctx, userID)
-	if err != nil {
-		s.logger.Warn("failed to get active disputes", zap.Error(err))
-		activeDisputes = []*dto.SupportDisputeDetails{}
-	}
-
 	return &dto.SupportContextResponse{
 		Conversation:   dto.ToSupportConversationResponse(conversation, userName, userPhone, unreadCount),
-		ActiveDisputes: activeDisputes,
+		ActiveDisputes: nil,
 	}, nil
 }
 
@@ -371,7 +364,7 @@ func (s *SupportChatServiceImpl) AdminSendMessage(ctx context.Context, adminID, 
 	return dto.ToSupportMessageResponse(message, senderName), nil
 }
 
-func (s *SupportChatServiceImpl) notifyUser(ctx context.Context, userID uuid.UUID, msg *domain.SupportMessage, _ string) {
+func (s *SupportChatServiceImpl) notifyUser(_ context.Context, userID uuid.UUID, msg *domain.SupportMessage, _ string) {
 	if s.notificationSvc == nil {
 		return
 	}
@@ -391,7 +384,8 @@ func (s *SupportChatServiceImpl) notifyUser(ctx context.Context, userID uuid.UUI
 		"type":            "support_response",
 	}
 
-	if err := s.notificationSvc.SendToUser(ctx, userID, title, body, data, domain.NotificationSupportMessage); err != nil {
+	// Use Background context since this runs in a goroutine after HTTP response
+	if err := s.notificationSvc.SendToUser(context.Background(), userID, title, body, data, domain.NotificationSupportMessage); err != nil {
 		s.logger.Warn("failed to send user notification",
 			zap.Error(err),
 			zap.String("user_id", userID.String()),
@@ -617,25 +611,18 @@ func (s *SupportChatServiceImpl) GetUserConversation(ctx context.Context, userID
 	unreadCount, _ := s.messageRepo.GetUnreadCount(ctx, conversation.ID, false)
 
 	var convResponse *dto.SupportConversationResponse
-	var activeDisputes []*dto.SupportDisputeDetails
 
-	// For dispute chats, include dispute details; for general chats, include active disputes
+	// For dispute chats, include dispute details
 	if conversation.DisputeID != nil {
 		disputeDetails, _ := s.getDisputeDetails(ctx, *conversation.DisputeID)
 		convResponse = dto.ToSupportConversationResponseWithDispute(conversation, userName, userPhone, unreadCount, disputeDetails)
-		activeDisputes = nil // No need for active disputes list in dispute-specific chat
 	} else {
 		convResponse = dto.ToSupportConversationResponse(conversation, userName, userPhone, unreadCount)
-		activeDisputes, err = s.getActiveDisputesForUser(ctx, userID)
-		if err != nil {
-			s.logger.Warn("failed to get active disputes", zap.Error(err))
-			activeDisputes = []*dto.SupportDisputeDetails{}
-		}
 	}
 
 	return &dto.SupportContextResponse{
 		Conversation:   convResponse,
-		ActiveDisputes: activeDisputes,
+		ActiveDisputes: nil,
 	}, nil
 }
 
