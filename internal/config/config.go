@@ -21,6 +21,13 @@ type Config struct {
 	GoogleMaps  GoogleMapsConfig
 	S3          S3Config
 	Firebase    FirebaseConfig
+	Telegram    TelegramConfig
+}
+
+type TelegramConfig struct {
+	BotToken string
+	ChatID   string
+	Enabled  bool
 }
 
 type FirebaseConfig struct {
@@ -230,6 +237,11 @@ func Load() (*Config, error) {
 		Firebase: FirebaseConfig{
 			CredentialsPath: viper.GetString("firebase.credentials_path"),
 		},
+		Telegram: TelegramConfig{
+			BotToken: viper.GetString("telegram.bot_token"),
+			ChatID:   viper.GetString("telegram.chat_id"),
+			Enabled:  viper.GetBool("telegram.enabled"),
+		},
 	}
 
 	return cfg, nil
@@ -288,6 +300,9 @@ func setDefaults() {
 	viper.SetDefault("aws.region", "us-east-1")
 	viper.SetDefault("aws.max_file_size_mb", 5)
 	viper.SetDefault("firebase.credentials_path", "./firebase-service-account.json")
+	viper.SetDefault("telegram.enabled", false)
+	viper.SetDefault("telegram.bot_token", "")
+	viper.SetDefault("telegram.chat_id", "")
 }
 
 func parseCSV(value string) []string {

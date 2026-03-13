@@ -24,6 +24,7 @@ import (
 	"kipa/internal/integration/paystack"
 	"kipa/internal/integration/sms"
 	"kipa/internal/integration/storage"
+	"kipa/internal/integration/telegram"
 	"kipa/internal/repository/postgres"
 	redisrepo "kipa/internal/repository/redis"
 	"kipa/internal/service"
@@ -315,6 +316,14 @@ func main() {
 	)
 	supportConversationRepo := postgres.NewSupportConversationRepo(pgClient.DB)
 	supportMessageRepo := postgres.NewSupportMessageRepo(pgClient.DB)
+	telegramClient := telegram.NewClient(&telegram.Config{
+		BotToken: cfg.Telegram.BotToken,
+		ChatID:   cfg.Telegram.ChatID,
+		Enabled:  cfg.Telegram.Enabled,
+	}, logger)
+	if telegramClient.IsEnabled() {
+		logger.Info("Telegram notifications enabled")
+	}
 	supportChatService := service.NewSupportChatService(
 		supportConversationRepo,
 		supportMessageRepo,
@@ -323,6 +332,7 @@ func main() {
 		prRepo,
 		userRepo,
 		notificationService,
+		telegramClient,
 		logger,
 	)
 

@@ -9,6 +9,7 @@ import (
 
 	"kipa/internal/domain"
 	"kipa/internal/dto"
+	"kipa/internal/integration/telegram"
 	"kipa/internal/repository"
 )
 
@@ -34,6 +35,7 @@ type SupportChatService interface {
 	ListConversations(ctx context.Context, status *domain.SupportConversationStatus, limit, offset int) ([]*dto.SupportConversationResponse, int, error)
 	GetConversationDetails(ctx context.Context, conversationID uuid.UUID) (*dto.SupportContextResponse, error)
 	AdminSendMessage(ctx context.Context, adminID, conversationID uuid.UUID, req *dto.SendSupportMessageRequest) (*dto.SupportMessageResponse, error)
+	AdminSendMessageToUser(ctx context.Context, adminID, userID uuid.UUID, req *dto.SendSupportMessageRequest) (*dto.SupportMessageResponse, error)
 	AdminGetHistory(ctx context.Context, conversationID uuid.UUID, limit int, beforeID *uuid.UUID) ([]*dto.SupportMessageResponse, error)
 	AdminMarkAsRead(ctx context.Context, conversationID uuid.UUID) error
 	ResolveConversation(ctx context.Context, adminID, conversationID uuid.UUID) error
@@ -47,6 +49,7 @@ type SupportChatServiceImpl struct {
 	prRepo           repository.PaymentRequestRepository
 	userRepo         repository.UserRepository
 	notificationSvc  NotificationService
+	telegramClient   *telegram.Client
 	logger           *zap.Logger
 }
 
@@ -58,6 +61,7 @@ func NewSupportChatService(
 	prRepo repository.PaymentRequestRepository,
 	userRepo repository.UserRepository,
 	notificationSvc NotificationService,
+	telegramClient *telegram.Client,
 	logger *zap.Logger,
 ) SupportChatService {
 	return &SupportChatServiceImpl{
@@ -68,6 +72,7 @@ func NewSupportChatService(
 		prRepo:           prRepo,
 		userRepo:         userRepo,
 		notificationSvc:  notificationSvc,
+		telegramClient:   telegramClient,
 		logger:           logger,
 	}
 }
@@ -183,11 +188,7 @@ func (s *SupportChatServiceImpl) SendMessage(ctx context.Context, userID uuid.UU
 	return dto.ToSupportMessageResponse(message, senderName), nil
 }
 
-func (s *SupportChatServiceImpl) notifyAdmins(ctx context.Context, msg *domain.SupportMessage, senderName string) {
-	if s.notificationSvc == nil {
-		return
-	}
-
+func (s *SupportChatServiceImpl) notifyAdmins(_ context.Context, msg *domain.SupportMessage, senderName string) {
 	title := "New Support Message"
 	body := msg.Content
 	if len(body) > 100 {
@@ -200,17 +201,30 @@ func (s *SupportChatServiceImpl) notifyAdmins(ctx context.Context, msg *domain.S
 		title = fmt.Sprintf("Support: %s", senderName)
 	}
 
-	data := map[string]string{
-		"conversation_id": msg.ConversationID.String(),
-		"message_id":      msg.ID.String(),
-		"sender_id":       msg.SenderID.String(),
-		"type":            "support_message",
+	// Send push notification to admins
+	if s.notificationSvc != nil {
+		data := map[string]string{
+			"conversation_id": msg.ConversationID.String(),
+			"message_id":      msg.ID.String(),
+			"sender_id":       msg.SenderID.String(),
+			"type":            "support_message",
+		}
+
+		if err := s.notificationSvc.SendToAdmins(context.Background(), title, body, data); err != nil {
+			s.logger.Warn("failed to send admin push notification",
+				zap.Error(err),
+			)
+		}
 	}
 
-	if err := s.notificationSvc.SendToAdmins(ctx, title, body, data); err != nil {
-		s.logger.Warn("failed to send admin notification",
-			zap.Error(err),
-		)
+	// Send Telegram notification
+	if s.telegramClient != nil && s.telegramClient.IsEnabled() {
+		telegramMsg := fmt.Sprintf("<b>%s</b>\n%s", title, body)
+		if err := s.telegramClient.SendMessage(context.Background(), telegramMsg); err != nil {
+			s.logger.Warn("failed to send telegram notification",
+				zap.Error(err),
+			)
+		}
 	}
 }
 
@@ -358,6 +372,47 @@ func (s *SupportChatServiceImpl) AdminSendMessage(ctx context.Context, adminID, 
 	s.logger.Info("admin support message sent",
 		zap.String("message_id", message.ID.String()),
 		zap.String("conversation_id", conversationID.String()),
+		zap.String("admin_id", adminID.String()),
+	)
+
+	return dto.ToSupportMessageResponse(message, senderName), nil
+}
+
+func (s *SupportChatServiceImpl) AdminSendMessageToUser(ctx context.Context, adminID, userID uuid.UUID, req *dto.SendSupportMessageRequest) (*dto.SupportMessageResponse, error) {
+	// Get or create general support conversation for this user
+	conversation, err := s.conversationRepo.GetOpenGeneralByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get conversation: %w", err)
+	}
+
+	if conversation == nil {
+		conversation = domain.NewSupportConversation(userID)
+		if err := s.conversationRepo.Create(ctx, conversation); err != nil {
+			return nil, fmt.Errorf("failed to create conversation: %w", err)
+		}
+	}
+
+	message := domain.NewSupportMessage(conversation.ID, adminID, true, req.Content, req.MediaURL, req.MediaType)
+	if err := s.messageRepo.Create(ctx, message); err != nil {
+		return nil, fmt.Errorf("failed to create message: %w", err)
+	}
+
+	if err := s.conversationRepo.UpdateLastMessageAt(ctx, conversation.ID); err != nil {
+		s.logger.Warn("failed to update last message at", zap.Error(err))
+	}
+
+	admin, _ := s.userRepo.GetByID(ctx, adminID)
+	senderName := "Support"
+	if admin != nil && admin.FullName() != "" {
+		senderName = admin.FullName()
+	}
+
+	go s.notifyUser(ctx, userID, message, senderName)
+
+	s.logger.Info("admin sent message to user",
+		zap.String("message_id", message.ID.String()),
+		zap.String("conversation_id", conversation.ID.String()),
+		zap.String("user_id", userID.String()),
 		zap.String("admin_id", adminID.String()),
 	)
 

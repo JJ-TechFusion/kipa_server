@@ -2,16 +2,16 @@
 	"info": {
 		"_postman_id": "kipa-support-chat-collection",
 		"name": "Kipa - Support Chat & Admin Auth API",
-		"description": "Support Chat System and Admin Authentication for Kipa Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Overview\nUser-to-admin support chat system plus admin signup flow.\n\n## Support Chat Features\n- **One conversation per user** - Only one open conversation at a time\n- **Any admin can reply** - No assignment required\n- **Active disputes shown** - When user opens support, their open/under_review disputes are surfaced with full details\n- **Push notifications** - Admins notified on new user messages, users notified on admin replies\n- **Media support** - Text and image messages supported\n\n## User Support Flow\n1. User calls `GET /support` to open/resume conversation\n2. Response includes conversation + any active disputes with evidence\n3. User sends messages via `POST /support/messages`\n4. User fetches history via `GET /support/messages`\n5. User marks messages read via `POST /support/messages/read`\n\n## Admin Support Flow\n1. Admin lists conversations via `GET /admin/support/conversations`\n2. Admin views conversation details via `GET /admin/support/conversations/:id`\n3. Admin replies via `POST /admin/support/conversations/:id/messages`\n4. Admin resolves conversation via `POST /admin/support/conversations/:id/resolve`\n\n## Admin Signup Flow\n1. Send OTP via `POST /auth/otp/send` (same as regular users)\n2. Verify with admin secret via `POST /auth/admin/otp/verify`\n3. User becomes admin (is_admin: true)\n\n## Variables\n- `base_url`: API base URL (e.g., http://localhost:8080)\n- `access_token`: JWT access token\n- `conversation_id`: Support conversation ID\n- `admin_secret`: Server-configured admin signup secret\n- `verification_id`: OTP verification ID",
+		"description": "Support Chat System and Admin Authentication for Kipa Platform\n\nBase URL: {{base_url}}/api/v1\n\n## Overview\nUser-to-admin support chat system plus admin signup flow.\n\n## Support Chat Features\n- **Multiple conversations per user** - Users can have multiple open conversations (general + dispute-linked)\n- **Dispute integration** - When a dispute is opened, a dedicated support chat is auto-created\n- **Any admin can reply** - No assignment required\n- **Push notifications** - Users notified on admin replies\n- **Telegram notifications** - Admins notified via Telegram when users message\n- **Media support** - Text and image messages supported\n- **Auto-close** - Dispute chats auto-close when dispute is resolved\n\n## User Support Flow\n1. **General Chat:** `GET /support` to open/resume general conversation\n2. **Multiple Chats:** `GET /support/conversations` to list all conversations (general + disputes)\n3. **Specific Chat:** `GET /support/conversations/:id` to get a specific conversation\n4. User sends messages via `POST /support/messages` (general) or `POST /support/conversations/:id/messages` (specific)\n5. User fetches history via `GET /support/messages` or `GET /support/conversations/:id/messages`\n6. User marks messages read via `POST /support/messages/read` or `POST /support/conversations/:id/read`\n\n## Admin Support Flow\n1. Admin lists conversations via `GET /admin/support/conversations`\n2. Admin views conversation details via `GET /admin/support/conversations/:id`\n3. Admin replies via `POST /admin/support/conversations/:id/messages`\n4. Admin messages any user directly via `POST /admin/support/users/:user_id/messages`\n5. Admin resolves conversation via `POST /admin/support/conversations/:id/resolve`\n\n## Admin Signup Flow\n1. Send OTP via `POST /auth/otp/send` (same as regular users)\n2. Verify with admin secret via `POST /auth/admin/otp/verify`\n3. User becomes admin (is_admin: true)\n\n## Variables\n- `base_url`: API base URL (e.g., http://localhost:8080)\n- `access_token`: JWT access token\n- `conversation_id`: Support conversation ID\n- `user_id`: Target user ID (for admin messaging)\n- `admin_secret`: Server-configured admin signup secret\n- `verification_id`: OTP verification ID",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
 		{
-			"name": "User - Support Chat",
-			"description": "Endpoints for users to contact admin support.",
+			"name": "User - Support Chat (Legacy)",
+			"description": "Legacy endpoints for general support chat (single conversation). Use these for simple support without dispute context.",
 			"item": [
 				{
-					"name": "Get or Create Conversation",
+					"name": "Get or Create General Conversation",
 					"event": [
 						{
 							"listen": "test",
@@ -47,12 +47,12 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "support"]
 						},
-						"description": "Get existing open conversation or create a new one.\n\nAlso returns any active disputes (status: open or under_review) for the user with full details including escrow and payment request info.\n\n**Response:**\n```json\n{\n  \"conversation\": {\n    \"id\": \"uuid\",\n    \"user_id\": \"uuid\",\n    \"user_name\": \"John Doe\",\n    \"user_phone\": \"+2348012345678\",\n    \"status\": \"open\",\n    \"last_message_at\": \"2025-01-15T10:00:00Z\",\n    \"unread_count\": 2,\n    \"created_at\": \"2025-01-15T09:00:00Z\"\n  },\n  \"active_disputes\": [\n    {\n      \"dispute\": {\n        \"id\": \"uuid\",\n        \"escrow_id\": \"uuid\",\n        \"opened_by\": \"uuid\",\n        \"reason\": \"Item not as described\",\n        \"evidence\": [\"https://s3.../image1.jpg\", \"https://s3.../image2.jpg\"],\n        \"status\": \"open\",\n        \"outcome\": \"pending\",\n        \"created_at\": \"2025-01-14T10:00:00Z\"\n      },\n      \"escrow\": {\n        \"id\": \"uuid\",\n        \"payment_request_id\": \"uuid\",\n        \"buyer_id\": \"uuid\",\n        \"seller_id\": \"uuid\",\n        \"item_amount\": 50000,\n        \"buyer_fee\": 750,\n        \"delivery_fee_estimate\": 2000,\n        \"total_locked\": 52750,\n        \"status\": \"disputed\"\n      },\n      \"payment_request\": {\n        \"id\": \"uuid\",\n        \"seller_id\": \"uuid\",\n        \"buyer_id\": \"uuid\",\n        \"payment_code\": \"KIP-ABC123\",\n        \"item_name\": \"iPhone 15 Pro\",\n        \"item_description\": \"256GB Space Black\",\n        \"item_price\": 50000,\n        \"status\": \"disputed\"\n      }\n    }\n  ]\n}\n```"
+						"description": "Get existing open general conversation or create a new one.\n\nThis endpoint is for general support only (no dispute context). For dispute-linked conversations, those are auto-created when a dispute is opened.\n\n**Response:**\n```json\n{\n  \"conversation\": {\n    \"id\": \"uuid\",\n    \"user_id\": \"uuid\",\n    \"user_name\": \"John Doe\",\n    \"user_phone\": \"+2348012345678\",\n    \"status\": \"open\",\n    \"dispute_id\": null,\n    \"last_message_at\": \"2025-01-15T10:00:00Z\",\n    \"unread_count\": 2,\n    \"created_at\": \"2025-01-15T09:00:00Z\"\n  },\n  \"active_disputes\": null\n}\n```\n\n**Notes:**\n- Returns only general support conversation (no dispute_id)\n- Use `GET /support/conversations` to see all conversations including dispute chats"
 					},
 					"response": []
 				},
 				{
-					"name": "Send Message",
+					"name": "Send Message (General)",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -80,12 +80,12 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "support", "messages"]
 						},
-						"description": "Send a message in the user's open support conversation.\n\n**Request Body:**\n- `content` (required): Message text (1-2000 characters)\n- `media_url` (optional): URL to uploaded media\n- `media_type` (optional): `text` or `image` (default: text)\n\n**Response:**\n```json\n{\n  \"id\": \"uuid\",\n  \"conversation_id\": \"uuid\",\n  \"sender_id\": \"uuid\",\n  \"sender_name\": \"John Doe\",\n  \"is_admin\": false,\n  \"content\": \"Hello, I need help with my order\",\n  \"media_url\": null,\n  \"media_type\": \"text\",\n  \"status\": \"sent\",\n  \"created_at\": \"2025-01-15T10:00:00Z\",\n  \"read_at\": null\n}\n```\n\n**Notes:**\n- Admins are notified via push notification\n- User must have an open conversation first (call GET /support)"
+						"description": "Send a message in the user's open general support conversation.\n\n**Request Body:**\n- `content` (required): Message text (1-2000 characters)\n- `media_url` (optional): URL to uploaded media\n- `media_type` (optional): `text` or `image` (default: text)\n\n**Response:**\n```json\n{\n  \"id\": \"uuid\",\n  \"conversation_id\": \"uuid\",\n  \"sender_id\": \"uuid\",\n  \"sender_name\": \"John Doe\",\n  \"is_admin\": false,\n  \"content\": \"Hello, I need help with my order\",\n  \"media_url\": null,\n  \"media_type\": \"text\",\n  \"status\": \"sent\",\n  \"created_at\": \"2025-01-15T10:00:00Z\",\n  \"read_at\": null\n}\n```\n\n**Notes:**\n- Admins are notified via Telegram\n- User must have an open conversation first (call GET /support)"
 					},
 					"response": []
 				},
 				{
-					"name": "Send Image Message",
+					"name": "Send Image Message (General)",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -118,7 +118,7 @@
 					"response": []
 				},
 				{
-					"name": "Get Message History",
+					"name": "Get Message History (General)",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -150,12 +150,12 @@
 								}
 							]
 						},
-						"description": "Get message history for the user's open conversation.\n\n**Query Parameters:**\n- `limit` (optional): Number of messages (default: 50, max: 100)\n- `before_id` (optional): Message ID for pagination (fetch older messages)\n\n**Response:**\n```json\n{\n  \"messages\": [\n    {\n      \"id\": \"uuid\",\n      \"conversation_id\": \"uuid\",\n      \"sender_id\": \"uuid\",\n      \"sender_name\": \"Support\",\n      \"is_admin\": true,\n      \"content\": \"How can I help you today?\",\n      \"media_url\": null,\n      \"media_type\": \"text\",\n      \"status\": \"read\",\n      \"created_at\": \"2025-01-15T10:05:00Z\",\n      \"read_at\": \"2025-01-15T10:06:00Z\"\n    },\n    {\n      \"id\": \"uuid\",\n      \"conversation_id\": \"uuid\",\n      \"sender_id\": \"uuid\",\n      \"sender_name\": \"John Doe\",\n      \"is_admin\": false,\n      \"content\": \"Hello, I need help with my order\",\n      \"media_url\": null,\n      \"media_type\": \"text\",\n      \"status\": \"sent\",\n      \"created_at\": \"2025-01-15T10:00:00Z\",\n      \"read_at\": null\n    }\n  ]\n}\n```\n\n**Notes:**\n- Messages are returned in descending order (newest first)\n- Use `before_id` to load older messages"
+						"description": "Get message history for the user's open general conversation.\n\n**Query Parameters:**\n- `limit` (optional): Number of messages (default: 50, max: 100)\n- `before_id` (optional): Message ID for pagination (fetch older messages)\n\n**Response:**\n```json\n{\n  \"messages\": [\n    {\n      \"id\": \"uuid\",\n      \"conversation_id\": \"uuid\",\n      \"sender_id\": \"uuid\",\n      \"sender_name\": \"Support\",\n      \"is_admin\": true,\n      \"content\": \"How can I help you today?\",\n      \"media_url\": null,\n      \"media_type\": \"text\",\n      \"status\": \"read\",\n      \"created_at\": \"2025-01-15T10:05:00Z\",\n      \"read_at\": \"2025-01-15T10:06:00Z\"\n    }\n  ]\n}\n```\n\n**Notes:**\n- Messages are returned in descending order (newest first)\n- Use `before_id` to load older messages"
 					},
 					"response": []
 				},
 				{
-					"name": "Mark Messages as Read",
+					"name": "Mark Messages as Read (General)",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -174,7 +174,171 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "support", "messages", "read"]
 						},
-						"description": "Mark all admin messages as read in the user's conversation.\n\n**Response:**\n```json\n{\n  \"status\": \"ok\"\n}\n```\n\n**Notes:**\n- Only marks admin messages as read (not user's own messages)\n- Call this when user opens the chat screen"
+						"description": "Mark all admin messages as read in the user's general conversation.\n\n**Response:**\n```json\n{\n  \"status\": \"ok\"\n}\n```\n\n**Notes:**\n- Only marks admin messages as read (not user's own messages)\n- Call this when user opens the chat screen"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "User - Multi-Conversation Support",
+			"description": "Endpoints for managing multiple support conversations (general + dispute-linked).\n\nUsers can have:\n- One general support conversation\n- Multiple dispute-linked conversations (auto-created when disputes are opened)",
+			"item": [
+				{
+					"name": "List All Conversations",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/support/conversations",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "support", "conversations"]
+						},
+						"description": "List all support conversations for the user.\n\nIncludes both general support and dispute-linked conversations.\n\n**Response:**\n```json\n{\n  \"conversations\": [\n    {\n      \"id\": \"uuid\",\n      \"user_id\": \"uuid\",\n      \"user_name\": \"John Doe\",\n      \"user_phone\": \"+2348012345678\",\n      \"status\": \"open\",\n      \"dispute_id\": null,\n      \"dispute\": null,\n      \"last_message_at\": \"2025-01-15T10:00:00Z\",\n      \"unread_count\": 2,\n      \"created_at\": \"2025-01-15T09:00:00Z\"\n    },\n    {\n      \"id\": \"uuid\",\n      \"user_id\": \"uuid\",\n      \"user_name\": \"John Doe\",\n      \"user_phone\": \"+2348012345678\",\n      \"status\": \"open\",\n      \"dispute_id\": \"uuid\",\n      \"dispute\": {\n        \"id\": \"uuid\",\n        \"reason\": \"Item not as described\",\n        \"status\": \"open\",\n        \"item_name\": \"iPhone 15 Pro\",\n        \"item_amount\": 50000\n      },\n      \"last_message_at\": \"2025-01-14T10:00:00Z\",\n      \"unread_count\": 1,\n      \"created_at\": \"2025-01-14T09:00:00Z\"\n    }\n  ]\n}\n```\n\n**Notes:**\n- Sorted by last_message_at descending\n- `dispute_id` is null for general support conversations\n- `dispute` contains summary info for dispute-linked conversations"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Specific Conversation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.conversation && jsonData.conversation.id) {",
+									"        pm.environment.set('conversation_id', jsonData.conversation.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/support/conversations/{{conversation_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "support", "conversations", "{{conversation_id}}"]
+						},
+						"description": "Get a specific conversation by ID.\n\nFor dispute-linked conversations, includes full dispute details with escrow and payment request info.\n\n**Response (General Chat):**\n```json\n{\n  \"conversation\": {\n    \"id\": \"uuid\",\n    \"user_id\": \"uuid\",\n    \"user_name\": \"John Doe\",\n    \"user_phone\": \"+2348012345678\",\n    \"status\": \"open\",\n    \"dispute_id\": null,\n    \"last_message_at\": \"2025-01-15T10:00:00Z\",\n    \"unread_count\": 2,\n    \"created_at\": \"2025-01-15T09:00:00Z\"\n  },\n  \"active_disputes\": null\n}\n```\n\n**Response (Dispute Chat):**\n```json\n{\n  \"conversation\": {\n    \"id\": \"uuid\",\n    \"user_id\": \"uuid\",\n    \"user_name\": \"John Doe\",\n    \"user_phone\": \"+2348012345678\",\n    \"status\": \"open\",\n    \"dispute_id\": \"uuid\",\n    \"dispute\": {\n      \"id\": \"uuid\",\n      \"reason\": \"Item not as described\",\n      \"status\": \"open\",\n      \"item_name\": \"iPhone 15 Pro\",\n      \"item_amount\": 50000\n    },\n    \"last_message_at\": \"2025-01-14T10:00:00Z\",\n    \"unread_count\": 1,\n    \"created_at\": \"2025-01-14T09:00:00Z\"\n  },\n  \"active_disputes\": [\n    {\n      \"dispute\": {\n        \"id\": \"uuid\",\n        \"escrow_id\": \"uuid\",\n        \"opened_by\": \"uuid\",\n        \"reason\": \"Item not as described\",\n        \"evidence\": [\"https://s3.../image1.jpg\"],\n        \"status\": \"open\",\n        \"outcome\": \"pending\"\n      },\n      \"escrow\": {\n        \"id\": \"uuid\",\n        \"item_amount\": 50000,\n        \"status\": \"disputed\"\n      },\n      \"payment_request\": {\n        \"id\": \"uuid\",\n        \"payment_code\": \"KIP-ABC123\",\n        \"item_name\": \"iPhone 15 Pro\"\n      }\n    }\n  ]\n}\n```\n\n**Notes:**\n- Returns 404 if conversation doesn't belong to user\n- `active_disputes` only populated for dispute-linked conversations"
+					},
+					"response": []
+				},
+				{
+					"name": "Send Message to Conversation",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"content\": \"I have a question about this dispute\",\n  \"media_url\": null,\n  \"media_type\": \"text\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/support/conversations/{{conversation_id}}/messages",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "support", "conversations", "{{conversation_id}}", "messages"]
+						},
+						"description": "Send a message to a specific conversation.\n\nUse this for dispute-linked conversations or when you have multiple conversations.\n\n**Request Body:**\n- `content` (required): Message text (1-2000 characters)\n- `media_url` (optional): URL to uploaded media\n- `media_type` (optional): `text` or `image` (default: text)\n\n**Response:**\n```json\n{\n  \"id\": \"uuid\",\n  \"conversation_id\": \"uuid\",\n  \"sender_id\": \"uuid\",\n  \"sender_name\": \"John Doe\",\n  \"is_admin\": false,\n  \"content\": \"I have a question about this dispute\",\n  \"media_url\": null,\n  \"media_type\": \"text\",\n  \"status\": \"sent\",\n  \"created_at\": \"2025-01-15T10:00:00Z\",\n  \"read_at\": null\n}\n```\n\n**Notes:**\n- Admins are notified via Telegram\n- Returns 404 if conversation doesn't belong to user"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Conversation Messages",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/support/conversations/{{conversation_id}}/messages?limit=50",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "support", "conversations", "{{conversation_id}}", "messages"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Number of messages to return (default: 50, max: 100)"
+								},
+								{
+									"key": "before_id",
+									"value": "",
+									"description": "Fetch messages before this message ID (for pagination)",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get message history for a specific conversation.\n\n**Query Parameters:**\n- `limit` (optional): Number of messages (default: 50, max: 100)\n- `before_id` (optional): Message ID for pagination (fetch older messages)\n\n**Response:**\n```json\n{\n  \"messages\": [\n    {\n      \"id\": \"uuid\",\n      \"conversation_id\": \"uuid\",\n      \"sender_id\": \"uuid\",\n      \"sender_name\": \"Support\",\n      \"is_admin\": true,\n      \"content\": \"I see you opened a dispute. Let me help.\",\n      \"media_url\": null,\n      \"media_type\": \"text\",\n      \"status\": \"read\",\n      \"created_at\": \"2025-01-15T10:05:00Z\",\n      \"read_at\": \"2025-01-15T10:06:00Z\"\n    },\n    {\n      \"id\": \"uuid\",\n      \"conversation_id\": \"uuid\",\n      \"sender_id\": null,\n      \"sender_name\": \"System\",\n      \"is_admin\": false,\n      \"content\": \"Dispute opened for iPhone 15 Pro (₦50,000). Reason: Item not as described\",\n      \"media_url\": null,\n      \"media_type\": \"text\",\n      \"status\": \"sent\",\n      \"created_at\": \"2025-01-14T10:00:00Z\",\n      \"read_at\": null\n    }\n  ]\n}\n```\n\n**Notes:**\n- Messages are returned in descending order (newest first)\n- Dispute conversations have an auto-generated system message with dispute context\n- Returns 404 if conversation doesn't belong to user"
+					},
+					"response": []
+				},
+				{
+					"name": "Mark Conversation as Read",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/support/conversations/{{conversation_id}}/read",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "support", "conversations", "{{conversation_id}}", "read"]
+						},
+						"description": "Mark all admin messages as read in a specific conversation.\n\n**Response:**\n```json\n{\n  \"status\": \"ok\"\n}\n```\n\n**Notes:**\n- Only marks admin messages as read (not user's own messages)\n- Call this when user opens the conversation\n- Returns 404 if conversation doesn't belong to user"
 					},
 					"response": []
 				}
@@ -182,7 +346,7 @@
 		},
 		{
 			"name": "Admin - Support Chat",
-			"description": "Admin endpoints for managing support conversations.\n\nRequires admin privileges.",
+			"description": "Admin endpoints for managing support conversations.\n\nRequires admin privileges.\n\n**Notifications:**\n- Telegram: Admins receive Telegram notifications when users send messages\n- Configure via env vars: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_ENABLED`",
 			"item": [
 				{
 					"name": "List Conversations",
@@ -221,7 +385,7 @@
 								}
 							]
 						},
-						"description": "List all support conversations.\n\n**Query Parameters:**\n- `status` (optional): Filter by status (`open`, `resolved`, `closed`)\n- `limit` (optional): Number of results (default: 50)\n- `offset` (optional): Pagination offset (default: 0)\n\n**Response:**\n```json\n{\n  \"conversations\": [\n    {\n      \"id\": \"uuid\",\n      \"user_id\": \"uuid\",\n      \"user_name\": \"John Doe\",\n      \"user_phone\": \"+2348012345678\",\n      \"status\": \"open\",\n      \"last_message_at\": \"2025-01-15T10:00:00Z\",\n      \"unread_count\": 3,\n      \"created_at\": \"2025-01-15T09:00:00Z\"\n    }\n  ],\n  \"total\": 15\n}\n```\n\n**Notes:**\n- Sorted by last_message_at descending\n- `unread_count` shows user messages not read by admin"
+						"description": "List all support conversations.\n\nIncludes both general and dispute-linked conversations.\n\n**Query Parameters:**\n- `status` (optional): Filter by status (`open`, `resolved`, `closed`)\n- `limit` (optional): Number of results (default: 50)\n- `offset` (optional): Pagination offset (default: 0)\n\n**Response:**\n```json\n{\n  \"conversations\": [\n    {\n      \"id\": \"uuid\",\n      \"user_id\": \"uuid\",\n      \"user_name\": \"John Doe\",\n      \"user_phone\": \"+2348012345678\",\n      \"status\": \"open\",\n      \"dispute_id\": \"uuid\",\n      \"dispute\": {\n        \"id\": \"uuid\",\n        \"reason\": \"Item not as described\",\n        \"status\": \"open\",\n        \"item_name\": \"iPhone 15 Pro\",\n        \"item_amount\": 50000\n      },\n      \"last_message_at\": \"2025-01-15T10:00:00Z\",\n      \"unread_count\": 3,\n      \"created_at\": \"2025-01-15T09:00:00Z\"\n    },\n    {\n      \"id\": \"uuid\",\n      \"user_id\": \"uuid\",\n      \"user_name\": \"Jane Smith\",\n      \"user_phone\": \"+2348098765432\",\n      \"status\": \"open\",\n      \"dispute_id\": null,\n      \"dispute\": null,\n      \"last_message_at\": \"2025-01-15T09:30:00Z\",\n      \"unread_count\": 1,\n      \"created_at\": \"2025-01-15T08:00:00Z\"\n    }\n  ],\n  \"total\": 15\n}\n```\n\n**Notes:**\n- Sorted by last_message_at descending\n- `unread_count` shows user messages not read by admin\n- `dispute` is populated for dispute-linked conversations"
 					},
 					"response": []
 				},
@@ -261,7 +425,7 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "admin", "support", "conversations", "{{conversation_id}}"]
 						},
-						"description": "Get conversation details including user's active disputes.\n\nSame response format as user's GET /support endpoint - includes full dispute details with escrow and payment request info.\n\n**Response:**\n```json\n{\n  \"conversation\": {\n    \"id\": \"uuid\",\n    \"user_id\": \"uuid\",\n    \"user_name\": \"John Doe\",\n    \"user_phone\": \"+2348012345678\",\n    \"status\": \"open\",\n    \"last_message_at\": \"2025-01-15T10:00:00Z\",\n    \"unread_count\": 3,\n    \"created_at\": \"2025-01-15T09:00:00Z\"\n  },\n  \"active_disputes\": [\n    {\n      \"dispute\": { ... },\n      \"escrow\": { ... },\n      \"payment_request\": { ... }\n    }\n  ]\n}\n```"
+						"description": "Get conversation details including user's active disputes.\n\nFor dispute-linked conversations, includes full dispute details with escrow and payment request info.\n\n**Response:**\n```json\n{\n  \"conversation\": {\n    \"id\": \"uuid\",\n    \"user_id\": \"uuid\",\n    \"user_name\": \"John Doe\",\n    \"user_phone\": \"+2348012345678\",\n    \"status\": \"open\",\n    \"dispute_id\": \"uuid\",\n    \"last_message_at\": \"2025-01-15T10:00:00Z\",\n    \"unread_count\": 3,\n    \"created_at\": \"2025-01-15T09:00:00Z\"\n  },\n  \"active_disputes\": [\n    {\n      \"dispute\": {\n        \"id\": \"uuid\",\n        \"escrow_id\": \"uuid\",\n        \"opened_by\": \"uuid\",\n        \"reason\": \"Item not as described\",\n        \"evidence\": [\"https://s3.../image1.jpg\"],\n        \"status\": \"open\",\n        \"outcome\": \"pending\",\n        \"created_at\": \"2025-01-14T10:00:00Z\"\n      },\n      \"escrow\": {\n        \"id\": \"uuid\",\n        \"payment_request_id\": \"uuid\",\n        \"buyer_id\": \"uuid\",\n        \"seller_id\": \"uuid\",\n        \"item_amount\": 50000,\n        \"buyer_fee\": 750,\n        \"delivery_fee_estimate\": 2000,\n        \"total_locked\": 52750,\n        \"status\": \"disputed\"\n      },\n      \"payment_request\": {\n        \"id\": \"uuid\",\n        \"seller_id\": \"uuid\",\n        \"buyer_id\": \"uuid\",\n        \"payment_code\": \"KIP-ABC123\",\n        \"item_name\": \"iPhone 15 Pro\",\n        \"item_description\": \"256GB Space Black\",\n        \"item_price\": 50000,\n        \"status\": \"disputed\"\n      }\n    }\n  ]\n}\n```"
 					},
 					"response": []
 				},
@@ -303,7 +467,7 @@
 					"response": []
 				},
 				{
-					"name": "Send Reply",
+					"name": "Send Reply to Conversation",
 					"request": {
 						"auth": {
 							"type": "bearer",
@@ -332,6 +496,39 @@
 							"path": ["api", "v1", "admin", "support", "conversations", "{{conversation_id}}", "messages"]
 						},
 						"description": "Send a reply to a user's conversation.\n\n**Request Body:**\n- `content` (required): Message text (1-2000 characters)\n- `media_url` (optional): URL to uploaded media\n- `media_type` (optional): `text` or `image`\n\n**Response:**\n```json\n{\n  \"id\": \"uuid\",\n  \"conversation_id\": \"uuid\",\n  \"sender_id\": \"uuid\",\n  \"sender_name\": \"Admin Name\",\n  \"is_admin\": true,\n  \"content\": \"Hello! I can help you with that.\",\n  \"media_url\": null,\n  \"media_type\": \"text\",\n  \"status\": \"sent\",\n  \"created_at\": \"2025-01-15T10:05:00Z\",\n  \"read_at\": null\n}\n```\n\n**Notes:**\n- User receives push notification\n- Any admin can reply to any conversation"
+					},
+					"response": []
+				},
+				{
+					"name": "Send Message to Any User",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"content\": \"Hi, we noticed a dispute was opened against you. Can you please provide your side of the story?\",\n  \"media_url\": null,\n  \"media_type\": \"text\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/admin/support/users/{{user_id}}/messages",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "admin", "support", "users", "{{user_id}}", "messages"]
+						},
+						"description": "Send a message to any user directly.\n\nUseful for reaching out to sellers when a buyer opens a dispute, or proactively contacting users.\n\nIf the user has an open general support conversation, the message is added there. Otherwise, a new conversation is created.\n\n**Request Body:**\n- `content` (required): Message text (1-2000 characters)\n- `media_url` (optional): URL to uploaded media\n- `media_type` (optional): `text` or `image`\n\n**Response:**\n```json\n{\n  \"id\": \"uuid\",\n  \"conversation_id\": \"uuid\",\n  \"sender_id\": \"uuid\",\n  \"sender_name\": \"Admin Name\",\n  \"is_admin\": true,\n  \"content\": \"Hi, we noticed a dispute was opened against you...\",\n  \"media_url\": null,\n  \"media_type\": \"text\",\n  \"status\": \"sent\",\n  \"created_at\": \"2025-01-15T10:05:00Z\",\n  \"read_at\": null\n}\n```\n\n**Notes:**\n- User receives push notification\n- Creates a new general conversation if user has no open one\n- Use this to reach sellers in buyer-opened disputes"
 					},
 					"response": []
 				},
@@ -379,7 +576,7 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "admin", "support", "conversations", "{{conversation_id}}", "resolve"]
 						},
-						"description": "Mark a conversation as resolved.\n\nOnce resolved, the user will get a new conversation if they contact support again.\n\n**Response:**\n```json\n{\n  \"message\": \"conversation resolved successfully\"\n}\n```\n\n**Notes:**\n- Changes status from `open` to `resolved`\n- User can start a new conversation if needed"
+						"description": "Mark a conversation as resolved.\n\nOnce resolved, the conversation appears with \"resolved\" status in the user's conversation list.\n\n**Response:**\n```json\n{\n  \"message\": \"conversation resolved successfully\"\n}\n```\n\n**Notes:**\n- Changes status from `open` to `resolved`\n- User can start a new general conversation if needed\n- Dispute-linked conversations are auto-resolved when the dispute is resolved"
 					},
 					"response": []
 				}
@@ -511,6 +708,11 @@
 		},
 		{
 			"key": "conversation_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
 			"value": "",
 			"type": "string"
 		},

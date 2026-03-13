@@ -400,6 +400,36 @@ func (h *SupportChatHandler) ResolveConversation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "conversation resolved successfully"})
 }
 
+func (h *SupportChatHandler) AdminSendMessageToUser(c *gin.Context) {
+	adminID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	userIDStr := c.Param("user_id")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	var req dto.SendSupportMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	message, err := h.supportChatService.AdminSendMessageToUser(c.Request.Context(), adminID, userID, &req)
+	if err != nil {
+		h.logger.Error("failed to send message to user", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send message"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, message)
+}
+
 func (h *SupportChatHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware, adminMiddleware *middleware.AdminMiddleware) {
 	support := r.Group("/support")
 	support.Use(authMiddleware.RequireAuth())
@@ -428,5 +458,6 @@ func (h *SupportChatHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware *
 		adminSupport.GET("/conversations/:id/messages", h.AdminGetHistory)
 		adminSupport.POST("/conversations/:id/read", h.AdminMarkAsRead)
 		adminSupport.POST("/conversations/:id/resolve", h.ResolveConversation)
+		adminSupport.POST("/users/:user_id/messages", h.AdminSendMessageToUser)
 	}
 }
