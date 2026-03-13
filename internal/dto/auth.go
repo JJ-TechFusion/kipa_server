@@ -84,6 +84,11 @@ type LogoutResponse struct {
 	Message string `json:"message"`
 }
 
+type DeleteAccountRequest struct {
+	Reasons            []string `json:"reasons" binding:"omitempty,max=10,dive,min=1,max=100"`
+	AdditionalFeedback *string  `json:"additional_feedback" binding:"omitempty,max=1000"`
+}
+
 type TokenPair struct {
 	AccessToken           string
 	RefreshToken          string

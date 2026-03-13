@@ -295,6 +295,8 @@ func main() {
 		disputeRepo,
 		escrowRepo,
 		prRepo,
+		logisticsDeliveryRepo,
+		logisticsEventRepo,
 		deliveryJobRepo,
 		userRepo,
 		walletService,

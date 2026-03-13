@@ -1,0 +1,17 @@
+./api_service.go
+./model_keyword_configuration.go
+./model_keyword_item.go
+./model_keyword_type_config.go
+./model_keywords_response.go
+./model_language_properties.go
+./model_locale_response.go
+./model_message_properties.go
+./model_message_type_config.go
+./model_message_types_response.go
+./model_messages_response.go
+./model_opt_out_config.go
+./model_opt_out_default_keyword_message_response.go
+./model_opt_out_default_keyword_message_response_default_keywords.go
+./model_opt_out_keywords_entity.go
+./model_opt_out_messages_entity.go
+./model_supported_message_types.go

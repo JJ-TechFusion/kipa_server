@@ -14,9 +14,7 @@ import (
 	"kipa/internal/repository"
 )
 
-
 type ErrandService interface {
-
 	Create(ctx context.Context, userID uuid.UUID, req *CreateErrandRequest) (*domain.Errand, error)
 	Confirm(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) (*domain.Errand, error)
 	Cancel(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) error
@@ -25,11 +23,9 @@ type ErrandService interface {
 	List(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Errand, error)
 	GetActive(ctx context.Context, userID uuid.UUID) ([]*domain.Errand, error)
 
-
 	OnJobAccepted(ctx context.Context, errandID uuid.UUID, riderID uuid.UUID) error
 	OnJobPickedUp(ctx context.Context, errandID uuid.UUID) error
 	OnJobDelivered(ctx context.Context, errandID uuid.UUID) error
-
 
 	CompleteErrand(ctx context.Context, userID uuid.UUID, errandID uuid.UUID, code string) (*domain.Errand, error)
 	GetByErrandID(ctx context.Context, errandID uuid.UUID) (*domain.Errand, error)
@@ -39,10 +35,10 @@ type ErrandWithDelivery struct {
 	DeliveryJob *ErrandDeliveryInfo `json:"delivery_job,omitempty"`
 }
 type ErrandDeliveryInfo struct {
-	ID          uuid.UUID `json:"id"`
-	Status      string    `json:"status"`
-	PickupCode  *string   `json:"pickup_code,omitempty"`
-	DropoffCode *string   `json:"dropoff_code,omitempty"`
+	ID          uuid.UUID        `json:"id"`
+	Status      string           `json:"status"`
+	PickupCode  *string          `json:"pickup_code,omitempty"`
+	DropoffCode *string          `json:"dropoff_code,omitempty"`
 	Rider       *ErrandRiderInfo `json:"rider,omitempty"`
 }
 type ErrandRiderInfo struct {
@@ -115,7 +111,6 @@ func (s *ErrandServiceImpl) Create(ctx context.Context, userID uuid.UUID, req *C
 		return nil, domain.ErrInvalidVehicleType
 	}
 
-
 	feeEstimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(
 		ctx,
 		req.PickupLat, req.PickupLng,
@@ -125,7 +120,6 @@ func (s *ErrandServiceImpl) Create(ctx context.Context, userID uuid.UUID, req *C
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate delivery fee: %w", err)
 	}
-
 
 	dropoffCode := generateDropoffCode()
 
@@ -175,16 +169,13 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 		return nil, err
 	}
 
-
 	if errand.UserID != userID {
 		return nil, domain.ErrUnauthorized
 	}
 
-
 	if !errand.CanConfirm() {
 		return nil, domain.ErrErrandNotConfirmable
 	}
-
 
 	sourceType := domain.DeliverySourceErrand
 	job := &domain.DeliveryJob{
@@ -204,7 +195,6 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 		Status:              domain.DJStatusSearching,
 		SearchRadiusKM:      5, // Default initial radius
 	}
-
 
 	riderPayout := errand.DeliveryFee
 	job.RiderPayout = &riderPayout
@@ -286,7 +276,6 @@ func (s *ErrandServiceImpl) Cancel(ctx context.Context, userID uuid.UUID, errand
 
 	return nil
 }
-
 
 func (s *ErrandServiceImpl) GetByID(ctx context.Context, userID uuid.UUID, errandID uuid.UUID) (*domain.Errand, error) {
 	errand, err := s.errandRepo.GetByID(ctx, errandID)
@@ -446,8 +435,9 @@ func (s *ErrandServiceImpl) OnJobDelivered(ctx context.Context, errandID uuid.UU
 	}
 
 	now := time.Now()
-	errand.Status = domain.ErrandStatusDelivered
+	errand.Status = domain.ErrandStatusCompleted
 	errand.DeliveredAt = &now
+	errand.CompletedAt = &now
 
 	if err := s.errandRepo.Update(ctx, errand); err != nil {
 		return err
@@ -457,9 +447,9 @@ func (s *ErrandServiceImpl) OnJobDelivered(ctx context.Context, errandID uuid.UU
 			context.Background(),
 			errand.UserID,
 			"Package Delivered",
-			"Your package has been delivered. Please confirm with your dropoff code.",
+			"Your package has been delivered successfully.",
 			map[string]string{"errand_id": errandID.String()},
-			domain.NotificationErrandDelivered,
+			domain.NotificationErrandCompleted,
 		)
 	}
 
@@ -475,12 +465,16 @@ func (s *ErrandServiceImpl) CompleteErrand(ctx context.Context, userID uuid.UUID
 		return nil, domain.ErrUnauthorized
 	}
 
+	if errand.Status == domain.ErrandStatusCompleted {
+		return errand, nil
+	}
+
 	if !errand.CanComplete() {
-		return nil, fmt.Errorf("errand cannot be completed in current status: %s", errand.Status)
+		return nil, domain.ErrErrandNotConfirmable
 	}
 
 	if errand.DropoffCode == nil || *errand.DropoffCode != code {
-		return nil, fmt.Errorf("invalid dropoff code")
+		return nil, domain.ErrInvalidDropoffCode
 	}
 
 	now := time.Now()
@@ -520,6 +514,5 @@ func generateDropoffCode() string {
 func (s *ErrandServiceImpl) GetByErrandID(ctx context.Context, errandID uuid.UUID) (*domain.Errand, error) {
 	return s.errandRepo.GetByID(ctx, errandID)
 }
-
 
 var _ ErrandService = (*ErrandServiceImpl)(nil)

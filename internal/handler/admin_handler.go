@@ -704,8 +704,10 @@ func (h *AdminHandler) GetDispute(c *gin.Context) {
 }
 
 type ResolveDisputeRequest struct {
-	Outcome string `json:"outcome" binding:"required"`
-	Notes   string `json:"notes" binding:"required"`
+	Outcome               string   `json:"outcome" binding:"required"`
+	Notes                 string   `json:"notes" binding:"required"`
+	ReturnCostBuyerShare  *float64 `json:"return_cost_buyer_share" binding:"omitempty,min=0,max=100"`
+	ReturnCostSellerShare *float64 `json:"return_cost_seller_share" binding:"omitempty,min=0,max=100"`
 }
 
 func (h *AdminHandler) ResolveDispute(c *gin.Context) {
@@ -723,8 +725,10 @@ func (h *AdminHandler) ResolveDispute(c *gin.Context) {
 
 	adminID := c.MustGet("user_id").(uuid.UUID)
 	serviceReq := &service.ResolveDisputeRequest{
-		Outcome:         req.Outcome,
-		ResolutionNotes: req.Notes,
+		Outcome:               req.Outcome,
+		ResolutionNotes:       req.Notes,
+		ReturnCostBuyerShare:  req.ReturnCostBuyerShare,
+		ReturnCostSellerShare: req.ReturnCostSellerShare,
 	}
 
 	if err := h.disputeResolutionService.ResolveDispute(c.Request.Context(), disputeID, adminID, serviceReq); err != nil {

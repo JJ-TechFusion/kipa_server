@@ -12,6 +12,7 @@ import (
 	"kipa/internal/domain"
 	"kipa/internal/repository"
 )
+
 type DisputeResolutionService interface {
 	ResolveDispute(ctx context.Context, disputeID uuid.UUID, adminID uuid.UUID, req *ResolveDisputeRequest) error
 	CreateReturnDeliveryJob(ctx context.Context, paymentRequestID uuid.UUID) (*domain.DeliveryJob, error)
@@ -23,17 +24,18 @@ type DisputeResolutionService interface {
 }
 
 type ResolveDisputeRequest struct {
-	Outcome              string   // buyer_wins, seller_wins, partial_refund
-	ResolutionNotes      string
-	RefundAmount         *float64 // For partial refund
-	ReturnCostBuyerShare *float64 // Percentage of return shipping buyer pays
+	Outcome               string // buyer_wins, seller_wins, partial_refund
+	ResolutionNotes       string
+	RefundAmount          *float64 // For partial refund
+	ReturnCostBuyerShare  *float64 // Percentage of return shipping buyer pays
+	ReturnCostSellerShare *float64 // Percentage of return shipping seller pays
 }
 
 type ConfirmReturnRequest struct {
-	Condition            string   // good, damaged, incomplete
-	Notes                *string
-	DamageReason         *string  // Required if damaged/incomplete
-	DamageEvidenceURLs   []string // Evidence photos
+	Condition          string // good, damaged, incomplete
+	Notes              *string
+	DamageReason       *string  // Required if damaged/incomplete
+	DamageEvidenceURLs []string // Evidence photos
 }
 
 type ResolveDamageClaimRequest struct {
@@ -43,23 +45,27 @@ type ResolveDamageClaimRequest struct {
 }
 
 type DisputeResolutionServiceImpl struct {
-	disputeRepo         repository.DisputeRepository
-	escrowRepo          repository.EscrowRepository
-	prRepo              repository.PaymentRequestRepository
-	deliveryJobRepo     repository.DeliveryJobRepository
-	userRepo            repository.UserRepository
-	walletService       WalletService
-	notificationService NotificationService
-	feeCalculator       FeeCalculatorService
-	broadcaster         JobStatusBroadcaster
-	config              *config.Config
-	logger              *zap.Logger
+	disputeRepo           repository.DisputeRepository
+	escrowRepo            repository.EscrowRepository
+	prRepo                repository.PaymentRequestRepository
+	logisticsDeliveryRepo repository.LogisticsDeliveryRepository
+	logisticsEventRepo    repository.LogisticsDeliveryEventRepository
+	deliveryJobRepo       repository.DeliveryJobRepository
+	userRepo              repository.UserRepository
+	walletService         WalletService
+	notificationService   NotificationService
+	feeCalculator         FeeCalculatorService
+	broadcaster           JobStatusBroadcaster
+	config                *config.Config
+	logger                *zap.Logger
 }
 
 func NewDisputeResolutionService(
 	disputeRepo repository.DisputeRepository,
 	escrowRepo repository.EscrowRepository,
 	prRepo repository.PaymentRequestRepository,
+	logisticsDeliveryRepo repository.LogisticsDeliveryRepository,
+	logisticsEventRepo repository.LogisticsDeliveryEventRepository,
 	deliveryJobRepo repository.DeliveryJobRepository,
 	userRepo repository.UserRepository,
 	walletService WalletService,
@@ -70,17 +76,19 @@ func NewDisputeResolutionService(
 	logger *zap.Logger,
 ) DisputeResolutionService {
 	return &DisputeResolutionServiceImpl{
-		disputeRepo:         disputeRepo,
-		escrowRepo:          escrowRepo,
-		prRepo:              prRepo,
-		deliveryJobRepo:     deliveryJobRepo,
-		userRepo:            userRepo,
-		walletService:       walletService,
-		notificationService: notificationService,
-		feeCalculator:       feeCalculator,
-		broadcaster:         broadcaster,
-		config:              cfg,
-		logger:              logger,
+		disputeRepo:           disputeRepo,
+		escrowRepo:            escrowRepo,
+		prRepo:                prRepo,
+		logisticsDeliveryRepo: logisticsDeliveryRepo,
+		logisticsEventRepo:    logisticsEventRepo,
+		deliveryJobRepo:       deliveryJobRepo,
+		userRepo:              userRepo,
+		walletService:         walletService,
+		notificationService:   notificationService,
+		feeCalculator:         feeCalculator,
+		broadcaster:           broadcaster,
+		config:                cfg,
+		logger:                logger,
 	}
 }
 
@@ -148,7 +156,83 @@ func (s *DisputeResolutionServiceImpl) handleBuyerWins(ctx context.Context, disp
 		)
 		return nil
 	}
+
+	if pr.IsInterStateDelivery() {
+		return s.handleInterStateBuyerWins(ctx, dispute, pr, adminID, req)
+	}
+
 	return s.processFullRefund(ctx, dispute, escrow, pr, adminID, req.ResolutionNotes)
+}
+
+func (s *DisputeResolutionServiceImpl) handleInterStateBuyerWins(ctx context.Context, dispute *domain.Dispute, pr *domain.PaymentRequest, adminID uuid.UUID, req *ResolveDisputeRequest) error {
+	if s.logisticsDeliveryRepo == nil {
+		return fmt.Errorf("logistics delivery repository not configured")
+	}
+
+	var (
+		delivery *domain.LogisticsDelivery
+		err      error
+	)
+
+	if pr.LogisticsDeliveryID != nil {
+		delivery, err = s.logisticsDeliveryRepo.GetByID(ctx, *pr.LogisticsDeliveryID)
+	} else {
+		delivery, err = s.logisticsDeliveryRepo.GetByPaymentRequestID(ctx, pr.ID)
+	}
+	if err != nil {
+		return err
+	}
+
+	fromStatus := delivery.Status
+	buyerShare := 100.0
+	sellerShare := 0.0
+	if req.ReturnCostBuyerShare != nil {
+		buyerShare = *req.ReturnCostBuyerShare
+	}
+	if req.ReturnCostSellerShare != nil {
+		sellerShare = *req.ReturnCostSellerShare
+	} else {
+		sellerShare = 100 - buyerShare
+	}
+
+	if err := s.logisticsDeliveryRepo.SetReturnInfo(ctx, delivery.ID, buyerShare, sellerShare); err != nil {
+		return err
+	}
+
+	outcome := "buyer_favor"
+	delivery.Status = domain.LDStatusReturnRequired
+	delivery.ReturnCostBuyerShare = &buyerShare
+	delivery.ReturnCostSellerShare = &sellerShare
+	delivery.DisputeOutcome = &outcome
+	if err := s.logisticsDeliveryRepo.Update(ctx, delivery); err != nil {
+		return err
+	}
+
+	pr.Status = domain.PRStatusReturnRequired
+	if err := s.prRepo.Update(ctx, pr); err != nil {
+		return err
+	}
+
+	dispute.Resolve(adminID, domain.DisputeOutcomePending, req.ResolutionNotes)
+	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
+		return err
+	}
+
+	s.recordLogisticsEvent(ctx, delivery.ID, &fromStatus, domain.LDStatusReturnRequired, &adminID, "admin", req.ResolutionNotes)
+	s.sendNotification(ctx, delivery.BuyerID, "Return Required",
+		"You won the dispute. Please ship the item back to the seller to receive your refund.",
+		domain.NotificationDisputeResolved)
+	s.sendNotification(ctx, delivery.SellerID, "Dispute Resolved - Return Required",
+		"Buyer won the dispute and will be returning the item. Refund will be processed after you confirm return receipt.",
+		domain.NotificationDisputeResolved)
+
+	s.logger.Info("dispute resolved: buyer wins, return required (inter-state)",
+		zap.String("dispute_id", dispute.ID.String()),
+		zap.String("pr_id", pr.ID.String()),
+		zap.String("logistics_delivery_id", delivery.ID.String()),
+	)
+
+	return nil
 }
 func (s *DisputeResolutionServiceImpl) createReturnJobInternal(ctx context.Context, pr *domain.PaymentRequest, dispute *domain.Dispute) (*domain.DeliveryJob, error) {
 	if pr.DeliveryJobID == nil {
@@ -173,7 +257,7 @@ func (s *DisputeResolutionServiceImpl) createReturnJobInternal(ctx context.Conte
 		feeEstimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(
 			ctx,
 			coords.DropoffLat, coords.DropoffLng, // Return pickup (buyer's location)
-			coords.PickupLat, coords.PickupLng,   // Return dropoff (seller's location)
+			coords.PickupLat, coords.PickupLng, // Return dropoff (seller's location)
 			originalJob.RequiredVehicleType,
 		)
 		if err != nil {
@@ -326,6 +410,30 @@ func (s *DisputeResolutionServiceImpl) processFullRefund(ctx context.Context, di
 
 	return nil
 }
+
+func (s *DisputeResolutionServiceImpl) recordLogisticsEvent(ctx context.Context, deliveryID uuid.UUID, fromStatus *domain.LogisticsDeliveryStatus, toStatus domain.LogisticsDeliveryStatus, actorID *uuid.UUID, actorType, reason string) {
+	if s.logisticsEventRepo == nil {
+		return
+	}
+
+	event := &domain.LogisticsDeliveryEvent{
+		ID:                  uuid.New(),
+		LogisticsDeliveryID: deliveryID,
+		FromStatus:          fromStatus,
+		ToStatus:            toStatus,
+		ActorID:             actorID,
+		ActorType:           actorType,
+		Reason:              &reason,
+		Metadata:            []byte("null"),
+	}
+
+	if err := s.logisticsEventRepo.Create(ctx, event); err != nil {
+		s.logger.Warn("failed to record logistics event",
+			zap.Error(err),
+			zap.String("delivery_id", deliveryID.String()),
+		)
+	}
+}
 func (s *DisputeResolutionServiceImpl) ConfirmReadyForReturn(ctx context.Context, paymentRequestID uuid.UUID, buyerID uuid.UUID) (*domain.DeliveryJob, error) {
 	pr, err := s.prRepo.GetByID(ctx, paymentRequestID)
 	if err != nil {
@@ -445,7 +553,7 @@ func (s *DisputeResolutionServiceImpl) CreateReturnDeliveryJob(ctx context.Conte
 		feeEstimate, err := s.feeCalculator.CalculateDeliveryFeeWithVehicle(
 			ctx,
 			coords.DropoffLat, coords.DropoffLng, // Return pickup (buyer's location)
-			coords.PickupLat, coords.PickupLng,   // Return dropoff (seller's location)
+			coords.PickupLat, coords.PickupLng, // Return dropoff (seller's location)
 			originalJob.RequiredVehicleType,
 		)
 		if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -204,7 +205,6 @@ func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPReque
 		return nil, domain.ErrInvalidOTP
 	}
 
-
 	user, isNewUser, err := s.getOrCreateUser(ctx, req.PhoneNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get or create user: %w", err)
@@ -213,7 +213,6 @@ func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPReque
 	if user.IsSuspended {
 		return nil, domain.ErrUserSuspended
 	}
-
 
 	idempotencyKey := &domain.IdempotencyKey{
 		Key:         req.IdempotencyKey,
@@ -226,7 +225,6 @@ func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPReque
 		}
 	}
 
-	
 	if err := s.sessionRepo.Delete(ctx, user.ID, req.DeviceID); err != nil {
 		if !errors.Is(err, domain.ErrSessionNotFound) {
 			s.logger.Error("failed to revoke existing session", zap.Error(err))
@@ -243,7 +241,6 @@ func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPReque
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-
 	session := &domain.Session{
 		UserID:       user.ID,
 		DeviceID:     req.DeviceID,
@@ -257,11 +254,9 @@ func (s *AuthServiceImpl) VerifyOTP(ctx context.Context, req *dto.VerifyOTPReque
 		return nil, fmt.Errorf("failed to store session: %w", err)
 	}
 
-
 	if err := s.userRepo.UpdateLastLogin(ctx, user.ID); err != nil {
 		s.logger.Error("failed to update last login", zap.Error(err))
 	}
-
 
 	if isNewUser {
 		if err := s.userRepo.SetPhoneVerified(ctx, user.ID); err != nil {
@@ -452,7 +447,6 @@ func (s *AuthServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshToke
 		return nil, domain.ErrInvalidRefreshToken
 	}
 
-
 	valid, err := s.sessionRepo.ValidateRefreshToken(ctx, claims.UserID, req.DeviceID, req.RefreshToken)
 	if err != nil {
 		if errors.Is(err, domain.ErrSessionNotFound) {
@@ -464,7 +458,6 @@ func (s *AuthServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshToke
 		return nil, domain.ErrInvalidRefreshToken
 	}
 
-
 	accessToken, accessExpiresAt, err := s.jwtManager.GenerateAccessToken(claims.UserID, req.DeviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate access token: %w", err)
@@ -474,7 +467,6 @@ func (s *AuthServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshToke
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
-
 
 	session := &domain.Session{
 		UserID:       claims.UserID,
@@ -639,7 +631,7 @@ func (s *AuthServiceImpl) GenerateDevToken(ctx context.Context, req *dto.DevToke
 		}
 		user.FirstName = &req.FirstName
 		user.LastName = &req.LastName
-		
+
 		if err := s.userRepo.Update(ctx, user); err != nil {
 			return nil, err
 		}
@@ -707,7 +699,7 @@ func generateRequestHash(phoneNumber, verificationID, otpCode string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID, req *dto.DeleteAccountRequest) error {
 	hasActiveEscrows, err := s.escrowRepo.HasActiveByUserID(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to check active escrows", zap.Error(err))
@@ -732,7 +724,8 @@ func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID) e
 	if wallet != nil && (wallet.AvailableBalance > 0 || wallet.LockedBalance > 0) {
 		return domain.ErrWalletBalanceNotZero
 	}
-	if err := s.userRepo.SoftDelete(ctx, userID); err != nil {
+	deleteReason := buildDeleteAccountReason(req)
+	if err := s.userRepo.SoftDelete(ctx, userID, deleteReason); err != nil {
 		s.logger.Error("failed to soft delete user", zap.Error(err))
 		return fmt.Errorf("failed to delete account: %w", err)
 	}
@@ -742,9 +735,30 @@ func (s *AuthServiceImpl) DeleteAccount(ctx context.Context, userID uuid.UUID) e
 
 	s.logger.Info("user account deleted",
 		zap.String("user_id", userID.String()),
+		zap.String("delete_reason", deleteReason),
 	)
 
 	return nil
+}
+
+func buildDeleteAccountReason(req *dto.DeleteAccountRequest) string {
+	base := "Account deleted by user"
+	if req == nil {
+		return base
+	}
+
+	parts := []string{base}
+	if len(req.Reasons) > 0 {
+		parts = append(parts, "reasons: "+strings.Join(req.Reasons, ", "))
+	}
+	if req.AdditionalFeedback != nil {
+		feedback := strings.TrimSpace(*req.AdditionalFeedback)
+		if feedback != "" {
+			parts = append(parts, "feedback: "+feedback)
+		}
+	}
+
+	return strings.Join(parts, " | ")
 }
 
 var _ AuthService = (*AuthServiceImpl)(nil)

@@ -1,0 +1,3 @@
+./api_service.go
+./model_chat_v3_channel.go
+./services_channels.go

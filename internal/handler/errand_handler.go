@@ -12,6 +12,7 @@ import (
 	"kipa/internal/service"
 	"kipa/internal/util"
 )
+
 type ErrandHandler struct {
 	errandService service.ErrandService
 }
@@ -172,9 +173,9 @@ func (h *ErrandHandler) Confirm(c *gin.Context) {
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
-		"errand":      errand,
+		"errand":       errand,
 		"dropoff_code": errand.DropoffCode,
-		"message":     "Searching for a rider. You will be notified when one accepts.",
+		"message":      "Searching for a rider. You will be notified when one accepts.",
 	})
 }
 func (h *ErrandHandler) Cancel(c *gin.Context) {
@@ -245,6 +246,8 @@ func mapErrandErrorToResponse(err error) (int, string, string) {
 		return http.StatusBadRequest, "NOT_CONFIRMABLE", "Errand cannot be confirmed in its current state"
 	case errors.Is(err, domain.ErrErrandNotCancellable):
 		return http.StatusBadRequest, "NOT_CANCELLABLE", "Errand cannot be cancelled in its current state"
+	case errors.Is(err, domain.ErrInvalidDropoffCode):
+		return http.StatusBadRequest, "INVALID_DROPOFF_CODE", "Invalid dropoff code"
 	case errors.Is(err, domain.ErrUnauthorized):
 		return http.StatusForbidden, domain.CodeUnauthorized, "You don't have permission for this action"
 	case errors.Is(err, domain.ErrInvalidVehicleType):

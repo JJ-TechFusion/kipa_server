@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
+
 type PaymentRequestRepo struct {
 	db *sqlx.DB
 }
@@ -46,12 +47,12 @@ func (r *PaymentRequestRepo) Create(ctx context.Context, pr *domain.PaymentReque
 		pr.IsReusable,
 		pr.MaxUses,
 		pr.CurrentUses,
-		pr.PickupAddress,              // $13
-		pr.PickupState,                // $14
-		pr.PickupLng, pr.PickupLat,    // $15, $16
-		pr.DropoffAddress,             // $17
-		pr.DropoffState,               // $18
-		pr.DropoffLng, pr.DropoffLat,  // $19, $20
+		pr.PickupAddress,           // $13
+		pr.PickupState,             // $14
+		pr.PickupLng, pr.PickupLat, // $15, $16
+		pr.DropoffAddress,            // $17
+		pr.DropoffState,              // $18
+		pr.DropoffLng, pr.DropoffLat, // $19, $20
 	).Scan(&pr.CreatedAt, &pr.UpdatedAt)
 }
 
@@ -111,7 +112,8 @@ func (r *PaymentRequestRepo) GetBySellerID(ctx context.Context, sellerID uuid.UU
 			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
 			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
 		FROM payment_requests
-		WHERE seller_id = $1 AND status != 'cancelled'
+		WHERE seller_id = $1
+			AND status NOT IN ('expired', 'cancelled', 'completed', 'refunded')
 		ORDER BY created_at DESC LIMIT $2 OFFSET $3`
 
 	err := r.db.SelectContext(ctx, &requests, query, sellerID, limit, offset)
@@ -275,8 +277,8 @@ func (r *PaymentRequestRepo) Update(ctx context.Context, pr *domain.PaymentReque
 		pr.DeliveryType,
 		pr.VehicleType,
 		pr.PickupAddress,
-		pr.PickupState,               // $10
-		pr.PickupLng, pr.PickupLat,   // $11, $12
+		pr.PickupState,             // $10
+		pr.PickupLng, pr.PickupLat, // $11, $12
 		pr.DropoffAddress,
 		pr.DropoffState,              // $14
 		pr.DropoffLng, pr.DropoffLat, // $15, $16
@@ -420,7 +422,6 @@ func (r *PaymentRequestRepo) SetUnavailabilityFee(ctx context.Context, id uuid.U
 }
 
 type PaymentRequestEventRepo struct {
-
 	db *sqlx.DB
 }
 

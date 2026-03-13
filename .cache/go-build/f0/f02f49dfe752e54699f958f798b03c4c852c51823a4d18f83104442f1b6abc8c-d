@@ -1,0 +1,6 @@
+./api_service.go
+./hosted_numbers_hosted_number_orders.go
+./model_hosted_number_order_enum_status.go
+./model_hosted_number_order_enum_verification_type.go
+./model_numbers_v3_hosted_number_order.go
+./model_numbers_v3_hosted_numbers_hosted_number_order_capabilities.go

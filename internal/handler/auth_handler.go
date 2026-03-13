@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"io"
 	"net/http"
 
 	"kipa/internal/domain"
@@ -264,7 +265,13 @@ func (h *AuthHandler) DeleteAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.authService.DeleteAccount(c.Request.Context(), userID); err != nil {
+	var req dto.DeleteAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		util.ValidationError(c, err)
+		return
+	}
+
+	if err := h.authService.DeleteAccount(c.Request.Context(), userID, &req); err != nil {
 		h.handleError(c, err)
 		return
 	}

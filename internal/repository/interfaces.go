@@ -24,7 +24,7 @@ type UserRepository interface {
 	VerifySeller(ctx context.Context, userID uuid.UUID) error
 	List(ctx context.Context, filters interface{}, limit, offset int) ([]*domain.User, error)
 	GetStatistics(ctx context.Context) (*UserStatistics, error)
-	SoftDelete(ctx context.Context, userID uuid.UUID) error
+	SoftDelete(ctx context.Context, userID uuid.UUID, reason string) error
 	GetAllActiveUserIDs(ctx context.Context) ([]uuid.UUID, error)
 }
 
@@ -140,20 +140,20 @@ type EscrowRepository interface {
 	HasActiveByUserID(ctx context.Context, userID uuid.UUID) (bool, error)
 }
 type PendingEscrowDetails struct {
-	EscrowID     uuid.UUID           `db:"escrow_id"`
-	EscrowStatus domain.EscrowStatus `db:"escrow_status"`
-	ItemAmount   float64             `db:"item_amount"`
-	TotalLocked  float64             `db:"total_locked"`
-	FundedAt     *time.Time          `db:"funded_at"`
-	CreatedAt    time.Time           `db:"created_at"`
-	PaymentRequestID    uuid.UUID `db:"payment_request_id"`
-	ItemName            string    `db:"item_name"`
-	ItemDescription     *string   `db:"item_description"`
-	ProcessingTimeHours *int      `db:"processing_time_hours"`
-	IsBuyer bool `db:"is_buyer"`
-	CounterPartyID       uuid.UUID `db:"counter_party_id"`
-	CounterPartyName     string    `db:"counter_party_name"`
-	CounterPartyPhotoURL *string   `db:"counter_party_photo_url"`
+	EscrowID             uuid.UUID           `db:"escrow_id"`
+	EscrowStatus         domain.EscrowStatus `db:"escrow_status"`
+	ItemAmount           float64             `db:"item_amount"`
+	TotalLocked          float64             `db:"total_locked"`
+	FundedAt             *time.Time          `db:"funded_at"`
+	CreatedAt            time.Time           `db:"created_at"`
+	PaymentRequestID     uuid.UUID           `db:"payment_request_id"`
+	ItemName             string              `db:"item_name"`
+	ItemDescription      *string             `db:"item_description"`
+	ProcessingTimeHours  *int                `db:"processing_time_hours"`
+	IsBuyer              bool                `db:"is_buyer"`
+	CounterPartyID       uuid.UUID           `db:"counter_party_id"`
+	CounterPartyName     string              `db:"counter_party_name"`
+	CounterPartyPhotoURL *string             `db:"counter_party_photo_url"`
 }
 type WalletRepository interface {
 	Create(ctx context.Context, wallet *domain.Wallet) error
@@ -372,12 +372,12 @@ type DriverProfileRepository interface {
 }
 
 type DriverStatistics struct {
-	TotalDrivers    int     `db:"total_drivers" json:"total_drivers"`
-	VerifiedDrivers int     `db:"verified_drivers" json:"verified_drivers"`
-	OnlineDrivers   int     `db:"online_drivers" json:"online_drivers"`
-	InTransitDrivers int    `db:"in_transit_drivers" json:"in_transit_drivers"`
-	TotalDeliveries int     `db:"total_deliveries" json:"total_deliveries"`
-	AverageRating   float64 `db:"average_rating" json:"average_rating"`
+	TotalDrivers     int     `db:"total_drivers" json:"total_drivers"`
+	VerifiedDrivers  int     `db:"verified_drivers" json:"verified_drivers"`
+	OnlineDrivers    int     `db:"online_drivers" json:"online_drivers"`
+	InTransitDrivers int     `db:"in_transit_drivers" json:"in_transit_drivers"`
+	TotalDeliveries  int     `db:"total_deliveries" json:"total_deliveries"`
+	AverageRating    float64 `db:"average_rating" json:"average_rating"`
 }
 
 type DriverTripRepository interface {

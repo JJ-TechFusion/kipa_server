@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
+
 type UserRepo struct {
 	db *sqlx.DB
 }
@@ -172,7 +173,7 @@ func (r *UserRepo) GetStatistics(ctx context.Context) (*repository.UserStatistic
 	return &stats, nil
 }
 
-func (r *UserRepo) SoftDelete(ctx context.Context, userID uuid.UUID) error {
+func (r *UserRepo) SoftDelete(ctx context.Context, userID uuid.UUID, reason string) error {
 	query := `
 		UPDATE users SET
 			first_name = 'Deleted',
@@ -180,10 +181,10 @@ func (r *UserRepo) SoftDelete(ctx context.Context, userID uuid.UUID) error {
 			email = NULL,
 			profile_photo_url = NULL,
 			is_suspended = true,
-			suspension_reason = 'Account deleted by user',
+			suspension_reason = $2,
 			updated_at = NOW()
 		WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID)
+	_, err := r.db.ExecContext(ctx, query, userID, reason)
 	return err
 }
 
@@ -268,6 +269,7 @@ func (r *OTPRepo) DeleteExpired(ctx context.Context) (int64, error) {
 	}
 	return result.RowsAffected()
 }
+
 type IdempotencyRepo struct {
 	db *sqlx.DB
 }

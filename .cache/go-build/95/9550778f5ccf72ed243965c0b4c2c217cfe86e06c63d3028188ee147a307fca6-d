@@ -1,0 +1,10 @@
+./api_service.go
+./content.go
+./content_and_approvals.go
+./model_content_v1_approval_fetch.go
+./model_content_v1_content.go
+./model_content_v1_content_and_approvals.go
+./model_content_v1_legacy_content.go
+./model_list_content_and_approvals_response.go
+./model_list_content_response.go
+./model_list_content_response_meta.go

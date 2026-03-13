@@ -1,0 +1,15 @@
+./api_service.go
+./model_auth0_authentication_code_exchange_request.go
+./model_auth0_authorize_response.go
+./model_auth0_login_email_request.go
+./model_auth0_refresh_scoped_token_request.go
+./model_auth0_refresh_token_heartbeat_response.go
+./model_auth0_refresh_token_response.go
+./model_auth0_signup_request.go
+./model_auth0_test_login_request.go
+./model_auth0_test_login_response.go
+./model_auth0_token_response.go
+./model_error.go
+./model_v2_oauth2_token_response.go
+./model_v2_oauth_auth0_callback_response.go
+./token.go
