@@ -54,6 +54,10 @@ type AdminService interface {
 	SendBroadcast(ctx context.Context, title, body, topic string, adminID uuid.UUID) error
 	GetCommissionSettings(ctx context.Context) (*domain.CommissionSettings, error)
 	UpdateCommissionSettings(ctx context.Context, settings *domain.CommissionSettings, adminID uuid.UUID) error
+	GetTimerSettings(ctx context.Context) (*domain.TimerSettings, error)
+	UpdateTimerSettings(ctx context.Context, settings *domain.TimerSettings, adminID uuid.UUID) error
+	GetFAQSettings(ctx context.Context) (*domain.FAQSettings, error)
+	UpdateFAQSettings(ctx context.Context, settings *domain.FAQSettings, adminID uuid.UUID) error
 	GetUserWallet(ctx context.Context, userID uuid.UUID) (*domain.Wallet, error)
 	AdjustWallet(ctx context.Context, userID uuid.UUID, amount float64, adjustmentType string, reason string, adminID uuid.UUID) error
 	GetWalletTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.WalletTransaction, error)
@@ -1127,6 +1131,96 @@ func (s *AdminServiceImpl) UpdateCommissionSettings(ctx context.Context, setting
 	s.logger.Info("commission settings updated",
 		zap.Int("max_unpaid_rides", settings.MaxUnpaidRides),
 		zap.Float64("commission_rate", settings.CommissionRate),
+		zap.String("admin_id", adminID.String()),
+	)
+
+	return nil
+}
+
+func (s *AdminServiceImpl) GetTimerSettings(ctx context.Context) (*domain.TimerSettings, error) {
+	data, err := s.settingsRepo.Get(ctx, "timer_settings")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get timer settings: %w", err)
+	}
+
+	if data == nil {
+		return &domain.TimerSettings{
+			DisputeWindowMinutes:   1440, // 24 hours
+			RiderWaitTimeMinutes:   45,
+			RebookWindowMinutes:    45,
+			PaymentLinkExpiryHours: 24,
+			RiderSearchTimeoutMins: 30,
+		}, nil
+	}
+
+	var settings domain.TimerSettings
+	if err := json.Unmarshal(data.SettingValue, &settings); err != nil {
+		return nil, fmt.Errorf("failed to parse timer settings: %w", err)
+	}
+
+	return &settings, nil
+}
+
+func (s *AdminServiceImpl) UpdateTimerSettings(ctx context.Context, settings *domain.TimerSettings, adminID uuid.UUID) error {
+	if settings.DisputeWindowMinutes < 60 {
+		return fmt.Errorf("dispute window must be at least 60 minutes")
+	}
+	if settings.RiderWaitTimeMinutes < 15 {
+		return fmt.Errorf("rider wait time must be at least 15 minutes")
+	}
+
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal timer settings: %w", err)
+	}
+
+	desc := "Timer settings for dispute window and rider wait time"
+	if err := s.settingsRepo.Set(ctx, "timer_settings", data, &desc, &adminID); err != nil {
+		return fmt.Errorf("failed to save timer settings: %w", err)
+	}
+
+	s.logger.Info("timer settings updated",
+		zap.Int("dispute_window_minutes", settings.DisputeWindowMinutes),
+		zap.Int("rider_wait_time_minutes", settings.RiderWaitTimeMinutes),
+		zap.String("admin_id", adminID.String()),
+	)
+
+	return nil
+}
+
+func (s *AdminServiceImpl) GetFAQSettings(ctx context.Context) (*domain.FAQSettings, error) {
+	data, err := s.settingsRepo.Get(ctx, "faq_settings")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get FAQ settings: %w", err)
+	}
+
+	if data == nil {
+		return &domain.FAQSettings{
+			Categories: []domain.FAQCategory{},
+		}, nil
+	}
+
+	var settings domain.FAQSettings
+	if err := json.Unmarshal(data.SettingValue, &settings); err != nil {
+		return nil, fmt.Errorf("failed to parse FAQ settings: %w", err)
+	}
+
+	return &settings, nil
+}
+
+func (s *AdminServiceImpl) UpdateFAQSettings(ctx context.Context, settings *domain.FAQSettings, adminID uuid.UUID) error {
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal FAQ settings: %w", err)
+	}
+
+	desc := "FAQ content settings"
+	if err := s.settingsRepo.Set(ctx, "faq_settings", data, &desc, &adminID); err != nil {
+		return fmt.Errorf("failed to save FAQ settings: %w", err)
+	}
+
+	s.logger.Info("FAQ settings updated",
+		zap.Int("category_count", len(settings.Categories)),
 		zap.String("admin_id", adminID.String()),
 	)
 

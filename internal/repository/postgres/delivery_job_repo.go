@@ -290,7 +290,8 @@ func (r *DeliveryJobRepo) Update(ctx context.Context, job *domain.DeliveryJob) e
 			picked_up_at = $10,
 			delivered_at = $11,
 			dropoff_address = $12,
-			dropoff_location = ST_SetSRID(ST_MakePoint($13, $14), 4326)::geography
+			dropoff_location = ST_SetSRID(ST_MakePoint($13, $14), 4326)::geography,
+			unavailable_marked_at = $15
 		WHERE id = $1`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -307,6 +308,7 @@ func (r *DeliveryJobRepo) Update(ctx context.Context, job *domain.DeliveryJob) e
 		job.DeliveredAt,
 		job.DropoffAddress,
 		job.DropoffLng, job.DropoffLat,
+		job.UnavailableMarkedAt,
 	)
 
 	return err

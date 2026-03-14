@@ -121,6 +121,16 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			commission.GET("", h.GetCommissionSettings)
 			commission.PUT("", h.UpdateCommissionSettings)
 		}
+		timers := admin.Group("/settings/timers")
+		{
+			timers.GET("", h.GetTimerSettings)
+			timers.PUT("", h.UpdateTimerSettings)
+		}
+		faqs := admin.Group("/settings/faqs")
+		{
+			faqs.GET("", h.GetFAQSettings)
+			faqs.PUT("", h.UpdateFAQSettings)
+		}
 		wallets := admin.Group("/wallets")
 		{
 			wallets.GET("/user/:id", h.GetUserWallet)
@@ -1224,4 +1234,58 @@ func (h *AdminHandler) ListAllDeliveryJobs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *AdminHandler) GetTimerSettings(c *gin.Context) {
+	settings, err := h.adminService.GetTimerSettings(c.Request.Context())
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, settings)
+}
+
+func (h *AdminHandler) UpdateTimerSettings(c *gin.Context) {
+	var req domain.TimerSettings
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	if err := h.adminService.UpdateTimerSettings(c.Request.Context(), &req, adminID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "timer settings updated successfully"})
+}
+
+func (h *AdminHandler) GetFAQSettings(c *gin.Context) {
+	settings, err := h.adminService.GetFAQSettings(c.Request.Context())
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, settings)
+}
+
+func (h *AdminHandler) UpdateFAQSettings(c *gin.Context) {
+	var req domain.FAQSettings
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	if err := h.adminService.UpdateFAQSettings(c.Request.Context(), &req, adminID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "FAQ settings updated successfully"})
 }

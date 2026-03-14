@@ -29,6 +29,28 @@ type PlatformFees struct {
 }
 
 type CommissionSettings struct {
-	MaxUnpaidRides  int     `json:"max_unpaid_rides"`
-	CommissionRate  float64 `json:"commission_rate"`
+	MaxUnpaidRides int     `json:"max_unpaid_rides"`
+	CommissionRate float64 `json:"commission_rate"`
+}
+
+type TimerSettings struct {
+	DisputeWindowMinutes     int `json:"dispute_window_minutes"`      // Default: 1440 (24 hours)
+	RiderWaitTimeMinutes     int `json:"rider_wait_time_minutes"`     // Default: 45
+	RebookWindowMinutes      int `json:"rebook_window_minutes"`       // Default: 45
+	PaymentLinkExpiryHours   int `json:"payment_link_expiry_hours"`   // Default: 24
+	RiderSearchTimeoutMins   int `json:"rider_search_timeout_mins"`   // Default: 30
+}
+
+type FAQQuestion struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+type FAQCategory struct {
+	Category  string        `json:"category"`
+	Questions []FAQQuestion `json:"questions"`
+}
+
+type FAQSettings struct {
+	Categories []FAQCategory `json:"categories"`
 }
