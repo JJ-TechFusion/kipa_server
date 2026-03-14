@@ -71,6 +71,7 @@ type WalletFundingServiceImpl struct {
 	paystackClient      *paystack.Client
 	flutterwaveClient   *flutterwave.Client
 	notificationService NotificationService
+	adminAlertSvc       AdminAlertService
 	config              WalletFundingConfig
 	logger              *zap.Logger
 }
@@ -119,6 +120,11 @@ func NewWalletFundingService(
 		logger:              logger,
 	}
 }
+
+func (s *WalletFundingServiceImpl) SetAdminAlertService(svc AdminAlertService) {
+	s.adminAlertSvc = svc
+}
+
 func (s *WalletFundingServiceImpl) AddBankAccount(ctx context.Context, userID uuid.UUID, bankCode, accountNumber string) (*domain.BankAccount, error) {
 	existingAccount, err := s.bankAccountRepo.GetByAccountNumber(ctx, userID, accountNumber, bankCode)
 	if err != nil {
@@ -572,6 +578,18 @@ func (s *WalletFundingServiceImpl) ProcessWithdrawalWebhook(ctx context.Context,
 			IdempotencyKey: &idempotencyKey,
 		}
 		s.walletTxRepo.Create(ctx, tx)
+
+		// Send admin alert
+		if s.adminAlertSvc != nil {
+			go func(w *domain.Withdrawal, reason string) {
+				user, _ := s.userRepo.GetByID(context.Background(), w.UserID)
+				userName := ""
+				if user != nil {
+					userName = user.FullName()
+				}
+				s.adminAlertSvc.AlertWithdrawalFailed(context.Background(), w.ID, userName, w.Amount, reason)
+			}(withdrawal, failureReason)
+		}
 	}
 	if status == domain.WithdrawalStatusSuccess {
 		wallet, _ := s.walletRepo.GetByID(ctx, withdrawal.WalletID)
@@ -906,6 +924,18 @@ func (s *WalletFundingServiceImpl) ProcessFlutterwaveWithdrawalWebhook(ctx conte
 			IdempotencyKey: &idempotencyKey,
 		}
 		s.walletTxRepo.Create(ctx, tx)
+
+		// Send admin alert
+		if s.adminAlertSvc != nil {
+			go func(w *domain.Withdrawal, reason string) {
+				user, _ := s.userRepo.GetByID(context.Background(), w.UserID)
+				userName := ""
+				if user != nil {
+					userName = user.FullName()
+				}
+				s.adminAlertSvc.AlertWithdrawalFailed(context.Background(), w.ID, userName, w.Amount, reason)
+			}(withdrawal, failureReason)
+		}
 	}
 	if status == domain.WithdrawalStatusSuccess {
 		wallet, _ := s.walletRepo.GetByID(ctx, withdrawal.WalletID)

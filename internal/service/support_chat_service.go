@@ -50,6 +50,7 @@ type SupportChatServiceImpl struct {
 	userRepo         repository.UserRepository
 	notificationSvc  NotificationService
 	telegramClient   *telegram.Client
+	adminAlertSvc    AdminAlertService
 	logger           *zap.Logger
 }
 
@@ -75,6 +76,10 @@ func NewSupportChatService(
 		telegramClient:   telegramClient,
 		logger:           logger,
 	}
+}
+
+func (s *SupportChatServiceImpl) SetAdminAlertService(alertSvc AdminAlertService) {
+	s.adminAlertSvc = alertSvc
 }
 
 func (s *SupportChatServiceImpl) GetOrCreateConversation(ctx context.Context, userID uuid.UUID) (*dto.SupportContextResponse, error) {
@@ -189,7 +194,6 @@ func (s *SupportChatServiceImpl) SendMessage(ctx context.Context, userID uuid.UU
 }
 
 func (s *SupportChatServiceImpl) notifyAdmins(_ context.Context, msg *domain.SupportMessage, senderName string) {
-	title := "New Support Message"
 	body := msg.Content
 	if len(body) > 100 {
 		body = body[:97] + "..."
@@ -197,6 +201,15 @@ func (s *SupportChatServiceImpl) notifyAdmins(_ context.Context, msg *domain.Sup
 	if msg.MediaType == string(domain.MediaTypeImage) {
 		body = "📷 Image"
 	}
+
+	// Use AdminAlertService if available
+	if s.adminAlertSvc != nil {
+		s.adminAlertSvc.AlertNewSupportMessage(context.Background(), msg.ConversationID, senderName, body)
+		return
+	}
+
+	// Fallback to direct notifications
+	title := "New Support Message"
 	if senderName != "" {
 		title = fmt.Sprintf("Support: %s", senderName)
 	}
@@ -540,7 +553,16 @@ func (s *SupportChatServiceImpl) CreateDisputeConversation(ctx context.Context, 
 		s.logger.Warn("failed to get dispute for system message", zap.Error(err))
 	}
 
-	// Create system message with dispute context
+	// Get user info first (needed for system message and alert)
+	user, _ := s.userRepo.GetByID(ctx, userID)
+	userName := ""
+	userPhone := ""
+	if user != nil {
+		userName = user.FullName()
+		userPhone = user.PhoneNumber
+	}
+
+	// Create system message with dispute context and send admin alert
 	if dispute != nil {
 		escrow, _ := s.escrowRepo.GetByID(ctx, dispute.EscrowID)
 		var pr *domain.PaymentRequest
@@ -550,8 +572,12 @@ func (s *SupportChatServiceImpl) CreateDisputeConversation(ctx context.Context, 
 
 		// Build system message
 		var systemMsg string
+		itemName := "Unknown Item"
+		itemAmount := 0.0
 		if pr != nil && escrow != nil {
-			systemMsg = fmt.Sprintf("Dispute opened for \"%s\" (₦%.2f). Reason: %s", pr.ItemName, escrow.ItemAmount, dispute.Reason)
+			itemName = pr.ItemName
+			itemAmount = escrow.ItemAmount
+			systemMsg = fmt.Sprintf("Dispute opened for \"%s\" (₦%.2f). Reason: %s", itemName, itemAmount, dispute.Reason)
 		} else {
 			systemMsg = fmt.Sprintf("Dispute opened. Reason: %s", dispute.Reason)
 		}
@@ -563,14 +589,11 @@ func (s *SupportChatServiceImpl) CreateDisputeConversation(ctx context.Context, 
 		} else {
 			_ = s.conversationRepo.UpdateLastMessageAt(ctx, conversation.ID)
 		}
-	}
 
-	user, _ := s.userRepo.GetByID(ctx, userID)
-	userName := ""
-	userPhone := ""
-	if user != nil {
-		userName = user.FullName()
-		userPhone = user.PhoneNumber
+		// Send admin alert for new dispute
+		if s.adminAlertSvc != nil {
+			go s.adminAlertSvc.AlertDisputeOpened(context.Background(), disputeID, userName, itemName, itemAmount, dispute.Reason)
+		}
 	}
 
 	s.logger.Info("dispute support conversation created",

@@ -2,15 +2,16 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"kipa/internal/domain"
+	"kipa/internal/dto"
 	"kipa/internal/handler/middleware"
 	"kipa/internal/repository"
 	"kipa/internal/service"
-	"strconv"
 )
 
 type AdminHandler struct {
@@ -18,6 +19,7 @@ type AdminHandler struct {
 	disputeResolutionService service.DisputeResolutionService
 	deliveryJobRepo          repository.DeliveryJobRepository
 	paymentRequestService    service.PaymentRequestService
+	supportStaffService      service.SupportStaffService
 }
 
 func NewAdminHandler(
@@ -25,12 +27,14 @@ func NewAdminHandler(
 	disputeResolutionService service.DisputeResolutionService,
 	deliveryJobRepo repository.DeliveryJobRepository,
 	paymentRequestService service.PaymentRequestService,
+	supportStaffService service.SupportStaffService,
 ) *AdminHandler {
 	return &AdminHandler{
 		adminService:             adminService,
 		disputeResolutionService: disputeResolutionService,
 		deliveryJobRepo:          deliveryJobRepo,
 		paymentRequestService:    paymentRequestService,
+		supportStaffService:      supportStaffService,
 	}
 }
 
@@ -119,6 +123,14 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			wallets.GET("/user/:id", h.GetUserWallet)
 			wallets.POST("/user/:id/adjust", h.AdjustWallet)
 			wallets.GET("/user/:id/transactions", h.GetWalletTransactions)
+		}
+		supportStaff := admin.Group("/support-staff")
+		{
+			supportStaff.POST("", h.AddSupportStaff)
+			supportStaff.GET("", h.ListSupportStaff)
+			supportStaff.GET("/:user_id", h.GetSupportStaff)
+			supportStaff.PUT("/:user_id", h.UpdateSupportStaff)
+			supportStaff.DELETE("/:user_id", h.RemoveSupportStaff)
 		}
 	}
 }
@@ -1032,4 +1044,108 @@ func toReturnDamageClaimResponse(job *domain.DeliveryJob) ReturnDamageClaimRespo
 	}
 
 	return resp
+}
+
+func (h *AdminHandler) AddSupportStaff(c *gin.Context) {
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	var req dto.AddSupportStaffRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	staff, err := h.supportStaffService.AddStaff(c.Request.Context(), adminID, &req)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, staff)
+}
+
+func (h *AdminHandler) ListSupportStaff(c *gin.Context) {
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		if val, err := strconv.Atoi(l); err == nil && val > 0 {
+			limit = val
+		}
+	}
+
+	offset := 0
+	if o := c.Query("offset"); o != "" {
+		if val, err := strconv.Atoi(o); err == nil && val >= 0 {
+			offset = val
+		}
+	}
+
+	activeOnly := c.Query("active_only") == "true"
+
+	staff, total, err := h.supportStaffService.ListStaff(c.Request.Context(), activeOnly, limit, offset)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"support_staff": staff,
+		"total":         total,
+	})
+}
+
+func (h *AdminHandler) GetSupportStaff(c *gin.Context) {
+	userID, err := uuid.Parse(c.Param("user_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	staff, err := h.supportStaffService.GetStaff(c.Request.Context(), userID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, staff)
+}
+
+func (h *AdminHandler) UpdateSupportStaff(c *gin.Context) {
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	userID, err := uuid.Parse(c.Param("user_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	var req dto.UpdateSupportStaffRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	staff, err := h.supportStaffService.UpdateStaff(c.Request.Context(), adminID, userID, &req)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, staff)
+}
+
+func (h *AdminHandler) RemoveSupportStaff(c *gin.Context) {
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	userID, err := uuid.Parse(c.Param("user_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	if err := h.supportStaffService.RemoveStaff(c.Request.Context(), adminID, userID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "support staff removed successfully"})
 }

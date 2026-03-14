@@ -316,6 +316,7 @@ func main() {
 	)
 	supportConversationRepo := postgres.NewSupportConversationRepo(pgClient.DB)
 	supportMessageRepo := postgres.NewSupportMessageRepo(pgClient.DB)
+	supportStaffRepo := postgres.NewSupportStaffRepo(pgClient.DB)
 	telegramClient := telegram.NewClient(&telegram.Config{
 		BotToken: cfg.Telegram.BotToken,
 		ChatID:   cfg.Telegram.ChatID,
@@ -336,17 +337,34 @@ func main() {
 		logger,
 	)
 
+	// Create admin alert service
+	adminAlertService := service.NewAdminAlertService(telegramClient, notificationService, logger)
+
 	// Wire support chat service to services that create disputes
 	if logisticsSvc, ok := logisticsService.(*service.LogisticsDeliveryServiceImpl); ok {
 		logisticsSvc.SetSupportChatService(supportChatService)
+		logisticsSvc.SetAdminAlertService(adminAlertService)
 	}
 	if disputeResSvc, ok := disputeResolutionService.(*service.DisputeResolutionServiceImpl); ok {
 		disputeResSvc.SetSupportChatService(supportChatService)
 	}
 
+	// Wire admin alert service to support chat
+	if scs, ok := supportChatService.(*service.SupportChatServiceImpl); ok {
+		scs.SetAdminAlertService(adminAlertService)
+	}
+
+	// Wire admin alert service to wallet funding
+	if wfs, ok := walletFundingService.(*service.WalletFundingServiceImpl); ok {
+		wfs.SetAdminAlertService(adminAlertService)
+	}
+
+	supportStaffService := service.NewSupportStaffService(supportStaffRepo, userRepo, logger)
+
 	authHandler := handler.NewAuthHandler(authService)
 	authMiddleware := middleware.NewAuthMiddleware(authService)
 	adminMiddleware := middleware.NewAdminMiddleware(userRepo)
+	supportMiddleware := middleware.NewSupportMiddleware(supportStaffRepo, userRepo)
 	prHandler := handler.NewPaymentRequestHandler(prService)
 	transactionHandler := handler.NewTransactionHandler(prService, orderService, logisticsService, userRepo, deliveryJobRepo)
 	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeRepo, disputeResolutionService, driverService, supportChatService)
@@ -367,7 +385,7 @@ func main() {
 	errandHandler := handler.NewErrandHandler(errandService)
 	disputeHandler := handler.NewDisputeHandler(disputeService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
-	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo, prService)
+	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo, prService, supportStaffService)
 	notificationHandler := handler.NewNotificationHandler(notificationService, logger)
 	chatHandler := handler.NewChatHandler(chatService, logger)
 	supportChatHandler := handler.NewSupportChatHandler(supportChatService, logger)
@@ -400,7 +418,7 @@ func main() {
 	uploadHandler.RegisterRoutes(v1, authMiddleware)
 	adminHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 	chatHandler.RegisterRoutes(v1, authMiddleware)
-	supportChatHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
+	supportChatHandler.RegisterRoutesWithSupport(v1, authMiddleware, supportMiddleware)
 	logisticsHandler.RegisterRoutes(v1, authMiddleware, adminMiddleware)
 	driverHandler.RegisterRoutes(v1, authMiddleware)
 	usersRoutes := v1.Group("/users")

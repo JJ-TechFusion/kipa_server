@@ -81,6 +81,7 @@ type LogisticsDeliveryServiceImpl struct {
 	walletService       WalletService
 	notificationService NotificationService
 	supportChatService  SupportChatService
+	adminAlertSvc       AdminAlertService
 	config              *config.Config
 	logger              *zap.Logger
 }
@@ -115,6 +116,10 @@ func NewLogisticsDeliveryService(
 
 func (s *LogisticsDeliveryServiceImpl) SetSupportChatService(svc SupportChatService) {
 	s.supportChatService = svc
+}
+
+func (s *LogisticsDeliveryServiceImpl) SetAdminAlertService(svc AdminAlertService) {
+	s.adminAlertSvc = svc
 }
 
 func (s *LogisticsDeliveryServiceImpl) Create(ctx context.Context, req *CreateLogisticsDeliveryRequest) (*domain.LogisticsDelivery, error) {
@@ -474,6 +479,27 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 		s.sendNotification(ctx, delivery.SellerID, "Damage Claim Submitted",
 			"Your damage claim has been submitted. Admin will review and make a decision.")
 
+		// Send admin alert
+		if s.adminAlertSvc != nil {
+			go func(d *domain.LogisticsDelivery, reason string) {
+				seller, _ := s.userRepo.GetByID(context.Background(), d.SellerID)
+				pr, _ := s.prRepo.GetByID(context.Background(), d.PaymentRequestID)
+
+				sellerName := ""
+				itemName := "Unknown Item"
+				var amount float64
+				if seller != nil {
+					sellerName = seller.FullName()
+				}
+				if pr != nil {
+					itemName = pr.ItemName
+					amount = pr.ItemPrice
+				}
+
+				s.adminAlertSvc.AlertReturnDamageClaimed(context.Background(), d.ID, sellerName, itemName, amount, reason)
+			}(delivery, *req.DamageReason)
+		}
+
 	default:
 		return fmt.Errorf("invalid condition: %s", req.Condition)
 	}
@@ -528,6 +554,36 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmDelivery(ctx context.Context, id u
 		s.logger.Info("high value delivery confirmed, pending admin approval",
 			zap.String("delivery_id", id.String()),
 		)
+
+		// Send admin alert for high-value order pending approval
+		if s.adminAlertSvc != nil {
+			go func() {
+				buyer, _ := s.userRepo.GetByID(context.Background(), delivery.BuyerID)
+				seller, _ := s.userRepo.GetByID(context.Background(), delivery.SellerID)
+				pr, _ := s.prRepo.GetByID(context.Background(), delivery.PaymentRequestID)
+				escrow, _ := s.escrowRepo.GetByID(context.Background(), delivery.EscrowID)
+
+				buyerName := ""
+				sellerName := ""
+				itemName := "Unknown Item"
+				amount := 0.0
+
+				if buyer != nil {
+					buyerName = buyer.FullName()
+				}
+				if seller != nil {
+					sellerName = seller.FullName()
+				}
+				if pr != nil {
+					itemName = pr.ItemName
+				}
+				if escrow != nil {
+					amount = escrow.ItemAmount
+				}
+
+				s.adminAlertSvc.AlertHighValuePendingApproval(context.Background(), id, buyerName, sellerName, itemName, amount)
+			}()
+		}
 	} else {
 		newStatus = domain.LDStatusConfirmed
 		s.recordEvent(ctx, id, &fromStatus, newStatus, &buyerID, "buyer", "Buyer confirmed delivery", nil)
@@ -667,6 +723,57 @@ func (s *LogisticsDeliveryServiceImpl) OpenDispute(ctx context.Context, id uuid.
 		notifyID = delivery.BuyerID
 	}
 	s.sendNotification(ctx, notifyID, "Dispute Opened", fmt.Sprintf("A dispute has been opened: %s", req.Reason))
+
+	// Send admin alert with tracking details and evidence
+	if s.adminAlertSvc != nil {
+		go func(d *domain.LogisticsDelivery, disp *domain.Dispute, evidenceURLs []string) {
+			opener, _ := s.userRepo.GetByID(context.Background(), disp.OpenedBy)
+			pr, _ := s.prRepo.GetByID(context.Background(), d.PaymentRequestID)
+
+			openerName := ""
+			itemName := "Unknown Item"
+			var amount float64
+			if opener != nil {
+				openerName = opener.FullName()
+			}
+			if pr != nil {
+				itemName = pr.ItemName
+				amount = pr.ItemPrice
+			}
+
+			carrier := ""
+			if d.Carrier != nil {
+				carrier = string(*d.Carrier)
+			}
+			trackingNumber := ""
+			if d.TrackingNumber != nil {
+				trackingNumber = *d.TrackingNumber
+			}
+			trackingURL := ""
+			if d.TrackingURL != nil {
+				trackingURL = *d.TrackingURL
+			}
+			shipmentReceiptURL := ""
+			if d.ShipmentReceiptURL != nil {
+				shipmentReceiptURL = *d.ShipmentReceiptURL
+			}
+
+			s.adminAlertSvc.AlertLogisticsDisputeOpened(context.Background(), &LogisticsDisputeDetails{
+				DeliveryID:         d.ID,
+				DisputeID:          disp.ID,
+				OpenerName:         openerName,
+				OpenerType:         openerType,
+				ItemName:           itemName,
+				Amount:             amount,
+				Reason:             disp.Reason,
+				Carrier:            carrier,
+				TrackingNumber:     trackingNumber,
+				TrackingURL:        trackingURL,
+				ShipmentReceiptURL: shipmentReceiptURL,
+				EvidenceURLs:       evidenceURLs,
+			})
+		}(delivery, dispute, req.EvidenceURLs)
+	}
 
 	s.logger.Info("dispute opened",
 		zap.String("delivery_id", id.String()),
@@ -1048,6 +1155,33 @@ func (s *LogisticsDeliveryServiceImpl) ProcessExceededShipDeadlines(ctx context.
 			"The seller has not shipped your order. You may now cancel for a full refund.")
 		s.sendNotification(ctx, d.SellerID, "Shipping Deadline Missed",
 			"You missed the shipping deadline. The buyer can now cancel the order.")
+
+		// Send admin alert
+		if s.adminAlertSvc != nil {
+			go func(delivery *domain.LogisticsDelivery) {
+				seller, _ := s.userRepo.GetByID(context.Background(), delivery.SellerID)
+				pr, _ := s.prRepo.GetByID(context.Background(), delivery.PaymentRequestID)
+
+				sellerName := ""
+				itemName := "Unknown Item"
+				if seller != nil {
+					sellerName = seller.FullName()
+				}
+				if pr != nil {
+					itemName = pr.ItemName
+				}
+
+				daysOverdue := 1
+				if !delivery.ShipDeadline.IsZero() {
+					daysOverdue = int(time.Since(delivery.ShipDeadline).Hours() / 24)
+					if daysOverdue < 1 {
+						daysOverdue = 1
+					}
+				}
+
+				s.adminAlertSvc.AlertShipDeadlineExceeded(context.Background(), delivery.ID, sellerName, itemName, daysOverdue)
+			}(d)
+		}
 	}
 
 	if len(deliveries) > 0 {
@@ -1106,6 +1240,30 @@ func (s *LogisticsDeliveryServiceImpl) ProcessAutoEscalations(ctx context.Contex
 
 		s.sendNotification(ctx, d.BuyerID, "Order Escalated", "Your order has been escalated to admin for review due to no response.")
 		s.sendNotification(ctx, d.SellerID, "Order Escalated", "The order has been escalated to admin for review.")
+
+		// Send admin alert
+		if s.adminAlertSvc != nil {
+			go func(delivery *domain.LogisticsDelivery) {
+				buyer, _ := s.userRepo.GetByID(context.Background(), delivery.BuyerID)
+				seller, _ := s.userRepo.GetByID(context.Background(), delivery.SellerID)
+				pr, _ := s.prRepo.GetByID(context.Background(), delivery.PaymentRequestID)
+
+				buyerName := ""
+				sellerName := ""
+				itemName := "Unknown Item"
+				if buyer != nil {
+					buyerName = buyer.FullName()
+				}
+				if seller != nil {
+					sellerName = seller.FullName()
+				}
+				if pr != nil {
+					itemName = pr.ItemName
+				}
+
+				s.adminAlertSvc.AlertAutoEscalatedToDispute(context.Background(), delivery.ID, buyerName, sellerName, itemName, "buyer unresponsive for 14 days")
+			}(d)
+		}
 	}
 
 	if len(deliveries) > 0 {

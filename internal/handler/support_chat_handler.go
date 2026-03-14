@@ -448,6 +448,7 @@ func (h *SupportChatHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware *
 		support.POST("/conversations/:id/read", h.MarkConversationAsRead)
 	}
 
+	// Admin support routes (still uses admin middleware for backwards compatibility)
 	adminSupport := r.Group("/admin/support")
 	adminSupport.Use(authMiddleware.RequireAuth())
 	adminSupport.Use(adminMiddleware.RequireAdmin())
@@ -459,5 +460,61 @@ func (h *SupportChatHandler) RegisterRoutes(r *gin.RouterGroup, authMiddleware *
 		adminSupport.POST("/conversations/:id/read", h.AdminMarkAsRead)
 		adminSupport.POST("/conversations/:id/resolve", h.ResolveConversation)
 		adminSupport.POST("/users/:user_id/messages", h.AdminSendMessageToUser)
+	}
+}
+
+// RegisterRoutesWithSupport registers routes with support staff middleware (preferred).
+// Support staff can access these endpoints based on their configured permissions.
+func (h *SupportChatHandler) RegisterRoutesWithSupport(r *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware, supportMiddleware *middleware.SupportMiddleware) {
+	support := r.Group("/support")
+	support.Use(authMiddleware.RequireAuth())
+	{
+		// General support chat (creates/gets chat without dispute)
+		support.GET("", h.GetOrCreateConversation)
+		support.POST("/messages", h.SendMessage)
+		support.GET("/messages", h.GetHistory)
+		support.POST("/messages/read", h.MarkAsRead)
+
+		// Multi-conversation endpoints (including dispute chats)
+		support.GET("/conversations", h.ListUserConversations)
+		support.GET("/conversations/:id", h.GetUserConversation)
+		support.POST("/conversations/:id/messages", h.SendMessageToConversation)
+		support.GET("/conversations/:id/messages", h.GetConversationMessages)
+		support.POST("/conversations/:id/read", h.MarkConversationAsRead)
+	}
+
+	// Admin/Support staff routes - accessible by admin or support staff with permissions
+	adminSupport := r.Group("/admin/support")
+	adminSupport.Use(authMiddleware.RequireAuth())
+	adminSupport.Use(supportMiddleware.RequireSupport())
+	{
+		// List/view conversations - all support staff can access
+		adminSupport.GET("/conversations", h.ListConversations)
+		adminSupport.GET("/conversations/:id/messages", h.AdminGetHistory)
+
+		// View dispute details - requires view_disputes permission
+		adminSupport.GET("/conversations/:id",
+			supportMiddleware.RequirePermission(domain.PermViewDisputes),
+			h.GetConversationDetails)
+
+		// Reply to chats - requires reply_chats permission
+		adminSupport.POST("/conversations/:id/messages",
+			supportMiddleware.RequirePermission(domain.PermReplyChats),
+			h.AdminSendMessage)
+
+		// Mark as read - requires reply_chats permission
+		adminSupport.POST("/conversations/:id/read",
+			supportMiddleware.RequirePermission(domain.PermReplyChats),
+			h.AdminMarkAsRead)
+
+		// Resolve conversation - requires resolve_chats permission
+		adminSupport.POST("/conversations/:id/resolve",
+			supportMiddleware.RequirePermission(domain.PermResolveChats),
+			h.ResolveConversation)
+
+		// Message any user - requires message_users permission
+		adminSupport.POST("/users/:user_id/messages",
+			supportMiddleware.RequirePermission(domain.PermMessageUsers),
+			h.AdminSendMessageToUser)
 	}
 }
