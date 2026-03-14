@@ -95,7 +95,7 @@ func (r *SupportConversationRepo) GetOpenGeneralByUserID(ctx context.Context, us
 }
 
 func (r *SupportConversationRepo) GetAllByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.SupportConversation, error) {
-	query := `SELECT * FROM support_conversations WHERE user_id = $1 ORDER BY last_message_at DESC NULLS LAST, created_at DESC`
+	query := `SELECT * FROM support_conversations WHERE user_id = $1 AND status = 'open' ORDER BY last_message_at DESC NULLS LAST, created_at DESC`
 	var conversations []*domain.SupportConversation
 	if err := r.db.SelectContext(ctx, &conversations, query, userID); err != nil {
 		return nil, err

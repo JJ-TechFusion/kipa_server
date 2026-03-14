@@ -741,6 +741,11 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 		"The return has been completed. Buyer has been refunded.",
 		domain.NotificationItemReturned)
 
+	// Close support chat now that return is complete
+	if job.DisputeID != nil {
+		s.closeSupportChatForDispute(ctx, *job.DisputeID, uuid.Nil)
+	}
+
 	s.logger.Info("return refund processed",
 		zap.String("job_id", job.ID.String()),
 		zap.Float64("amount", escrow.TotalLocked),
@@ -830,6 +835,11 @@ func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Co
 		fmt.Sprintf("NGN %.2f has been credited for the damage compensation.", sellerAmount),
 		domain.NotificationDisputeResolved)
 
+	// Close support chat now that damage claim is resolved
+	if job.DisputeID != nil {
+		s.closeSupportChatForDispute(ctx, *job.DisputeID, uuid.Nil)
+	}
+
 	return nil
 }
 
@@ -866,6 +876,11 @@ func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job 
 		fmt.Sprintf("NGN %.2f has been credited due to confirmed return damage.", escrow.TotalLocked),
 		domain.NotificationDisputeResolved)
 
+	// Close support chat now that damage claim is resolved
+	if job.DisputeID != nil {
+		s.closeSupportChatForDispute(ctx, *job.DisputeID, uuid.Nil)
+	}
+
 	return nil
 }
 func (s *DisputeResolutionServiceImpl) GetReturnJob(ctx context.Context, paymentRequestID uuid.UUID) (*domain.DeliveryJob, error) {
@@ -897,17 +912,36 @@ func (s *DisputeResolutionServiceImpl) sendNotification(_ context.Context, userI
 
 func (s *DisputeResolutionServiceImpl) closeSupportChatForDispute(_ context.Context, disputeID, adminID uuid.UUID) {
 	if s.supportChatService == nil {
+		s.logger.Warn("supportChatService is nil, cannot close support chat for dispute",
+			zap.String("dispute_id", disputeID.String()),
+		)
 		return
 	}
 	go func() {
 		conv, err := s.supportChatService.GetByDisputeID(context.Background(), disputeID)
-		if err != nil || conv == nil {
+		if err != nil {
+			s.logger.Warn("failed to get support conversation for dispute",
+				zap.Error(err),
+				zap.String("dispute_id", disputeID.String()),
+			)
+			return
+		}
+		if conv == nil {
+			s.logger.Info("no support conversation found for dispute",
+				zap.String("dispute_id", disputeID.String()),
+			)
 			return
 		}
 		if err := s.supportChatService.ResolveConversation(context.Background(), adminID, conv.ID); err != nil {
 			s.logger.Warn("failed to close support chat for resolved dispute",
 				zap.Error(err),
 				zap.String("dispute_id", disputeID.String()),
+				zap.String("conversation_id", conv.ID.String()),
+			)
+		} else {
+			s.logger.Info("closed support chat for resolved dispute",
+				zap.String("dispute_id", disputeID.String()),
+				zap.String("conversation_id", conv.ID.String()),
 			)
 		}
 	}()
