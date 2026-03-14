@@ -199,7 +199,6 @@ func (p *JobProcessor) processErrandUnavailableExpiry(ctx context.Context, job *
 		return nil
 	}
 
-	// End the delivery job
 	job.Status = domain.DJStatusFailed
 	if err := p.deliveryJobRepo.UpdateStatus(ctx, job.ID, domain.DJStatusFailed); err != nil {
 		p.logger.Error("rebook expiry job: failed to update errand job status",
@@ -213,7 +212,6 @@ func (p *JobProcessor) processErrandUnavailableExpiry(ctx context.Context, job *
 		p.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusFailed))
 	}
 
-	// Update errand status
 	if p.errandRepo != nil {
 		if err := p.errandRepo.UpdateStatus(ctx, *job.ErrandID, domain.ErrandStatusReceiverUnavailable); err != nil {
 			p.logger.Error("rebook expiry job: failed to update errand status",
@@ -223,7 +221,6 @@ func (p *JobProcessor) processErrandUnavailableExpiry(ctx context.Context, job *
 		}
 	}
 
-	// Notify the errand requester
 	if p.notificationService != nil && p.errandRepo != nil {
 		errand, err := p.errandRepo.GetByID(ctx, *job.ErrandID)
 		if err == nil && errand != nil {
@@ -234,6 +231,15 @@ func (p *JobProcessor) processErrandUnavailableExpiry(ctx context.Context, job *
 			go p.notificationService.SendToUser(ctx, errand.UserID, "Errand Ended",
 				"The receiver was unavailable and the wait time has expired. The ride has ended. Please settle with the rider directly.",
 				data, domain.NotificationErrandCompleted)
+
+			if job.RiderID != nil && p.riderProfileRepo != nil {
+				riderProfile, err := p.riderProfileRepo.GetByID(ctx, *job.RiderID)
+				if err == nil && riderProfile != nil {
+					go p.notificationService.SendToUser(ctx, riderProfile.UserID, "Errand Ended",
+						"The receiver was unavailable and the wait time has expired. The ride has ended. Please settle with the requester directly.",
+						data, domain.NotificationErrandCompleted)
+				}
+			}
 		}
 	}
 
