@@ -530,6 +530,31 @@ func (r *DeliveryJobRepo) GetExpiredErrandUnavailableJobs(ctx context.Context, w
 	return jobs, nil
 }
 
+func (r *DeliveryJobRepo) GetAll(ctx context.Context, limit, offset int) ([]*domain.DeliveryJob, int, error) {
+	var total int
+	countQuery := `SELECT COUNT(*) FROM delivery_jobs`
+	if err := r.db.GetContext(ctx, &total, countQuery); err != nil {
+		return nil, 0, err
+	}
+
+	var jobs []*domain.DeliveryJob
+	query := `
+		SELECT *,
+			COALESCE(ST_Y(pickup_location::geometry), 0) as pickup_lat,
+			COALESCE(ST_X(pickup_location::geometry), 0) as pickup_lng,
+			COALESCE(ST_Y(dropoff_location::geometry), 0) as dropoff_lat,
+			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
+		FROM delivery_jobs
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2`
+
+	if err := r.db.SelectContext(ctx, &jobs, query, limit, offset); err != nil {
+		return nil, 0, err
+	}
+
+	return jobs, total, nil
+}
+
 type RiderJobOfferRepo struct {
 	db *sqlx.DB
 }

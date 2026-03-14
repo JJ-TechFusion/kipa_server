@@ -61,9 +61,11 @@ type RiderEarnings struct {
 }
 
 type ForcedReturnInfo struct {
-	ForcedReturnJobID string `json:"forced_return_job_id"`
-	ReturnCode        string `json:"return_code"`
+	ForcedReturnJobID string `json:"forced_return_job_id,omitempty"`
+	ReturnCode        string `json:"return_code,omitempty"`
 	RebookDeadline    string `json:"rebook_deadline"`
+	WaitTimeMinutes   int    `json:"wait_time_minutes"`
+	IsErrand          bool   `json:"is_errand"`
 }
 
 type ContactInfo struct {
@@ -912,7 +914,9 @@ func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid
 		)
 
 		return &ForcedReturnInfo{
-			RebookDeadline: rebookDeadline.Format("2006-01-02T15:04:05Z07:00"),
+			RebookDeadline:  rebookDeadline.Format("2006-01-02T15:04:05Z07:00"),
+			WaitTimeMinutes: 45,
+			IsErrand:        true,
 		}, nil
 	}
 
@@ -950,7 +954,9 @@ func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid
 	)
 
 	return &ForcedReturnInfo{
-		RebookDeadline: rebookDeadline.Format("2006-01-02T15:04:05Z07:00"),
+		RebookDeadline:  rebookDeadline.Format("2006-01-02T15:04:05Z07:00"),
+		WaitTimeMinutes: 45,
+		IsErrand:        false,
 	}, nil
 }
 

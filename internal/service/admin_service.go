@@ -16,6 +16,7 @@ import (
 
 type AdminService interface {
 	VerifyRider(ctx context.Context, riderID uuid.UUID, adminID uuid.UUID) error
+	RejectRider(ctx context.Context, riderID uuid.UUID, reason string, adminID uuid.UUID) error
 	SuspendRider(ctx context.Context, riderID uuid.UUID, reason string, adminID uuid.UUID) error
 	UnsuspendRider(ctx context.Context, riderID uuid.UUID, adminID uuid.UUID) error
 	GetPendingRiders(ctx context.Context, limit, offset int) ([]*domain.RiderProfile, error)
@@ -56,6 +57,8 @@ type AdminService interface {
 	GetUserWallet(ctx context.Context, userID uuid.UUID) (*domain.Wallet, error)
 	AdjustWallet(ctx context.Context, userID uuid.UUID, amount float64, adjustmentType string, reason string, adminID uuid.UUID) error
 	GetWalletTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.WalletTransaction, error)
+	ListAllTransactions(ctx context.Context, filters *TransactionFilters, limit, offset int) (*TransactionListResponse, error)
+	ListAllDeliveryJobs(ctx context.Context, filters *DeliveryJobFilters, limit, offset int) (*DeliveryJobListResponse, error)
 }
 
 type UserFilters struct {
@@ -82,6 +85,68 @@ type UserStatistics struct {
 	TotalBuyers    int `json:"total_buyers"`
 	TotalRiders    int `json:"total_riders"`
 	SuspendedUsers int `json:"suspended_users"`
+}
+
+type TransactionFilters struct {
+	Status   *string `json:"status"`
+	SellerID *uuid.UUID
+	BuyerID  *uuid.UUID
+}
+
+type TransactionItem struct {
+	ID                   uuid.UUID  `json:"id"`
+	PaymentCode          *string    `json:"payment_code"`
+	ItemName             string     `json:"item_name"`
+	ItemPrice            float64    `json:"item_price"`
+	Status               string     `json:"status"`
+	DeliveryType         string     `json:"delivery_type"`
+	BuyerServiceFee      *float64   `json:"buyer_service_fee"`
+	SellerPlatformFee    *float64   `json:"seller_platform_fee"`
+	PlatformEarnings     float64    `json:"platform_earnings"`
+	EstimatedDeliveryFee *float64   `json:"estimated_delivery_fee"`
+	ActualDeliveryFee    *float64   `json:"actual_delivery_fee"`
+	SellerID             uuid.UUID  `json:"seller_id"`
+	BuyerID              *uuid.UUID `json:"buyer_id"`
+	PaidAt               *time.Time `json:"paid_at"`
+	CompletedAt          *time.Time `json:"completed_at"`
+	CreatedAt            time.Time  `json:"created_at"`
+}
+
+type TransactionListResponse struct {
+	Transactions          []*TransactionItem `json:"transactions"`
+	Total                 int                `json:"total"`
+	TotalPlatformEarnings float64            `json:"total_platform_earnings"`
+}
+
+type DeliveryJobFilters struct {
+	Status     *string `json:"status"`
+	SourceType *string `json:"source_type"` // "errand" or "payment_request"
+	RiderID    *uuid.UUID
+}
+
+type DeliveryJobItem struct {
+	ID                  uuid.UUID  `json:"id"`
+	SourceType          *string    `json:"source_type"`
+	Status              string     `json:"status"`
+	PickupAddress       string     `json:"pickup_address"`
+	DropoffAddress      string     `json:"dropoff_address"`
+	DistanceKM          *float64   `json:"distance_km"`
+	DeliveryFee         float64    `json:"delivery_fee"`
+	RiderPayout         *float64   `json:"rider_payout"`
+	PlatformDeliveryFee *float64   `json:"platform_delivery_fee"`
+	PlatformEarnings    float64    `json:"platform_earnings"`
+	RiderID             *uuid.UUID `json:"rider_id"`
+	PaymentRequestID    *uuid.UUID `json:"payment_request_id"`
+	ErrandID            *uuid.UUID `json:"errand_id"`
+	AcceptedAt          *time.Time `json:"accepted_at"`
+	DeliveredAt         *time.Time `json:"delivered_at"`
+	CreatedAt           time.Time  `json:"created_at"`
+}
+
+type DeliveryJobListResponse struct {
+	DeliveryJobs          []*DeliveryJobItem `json:"delivery_jobs"`
+	Total                 int                `json:"total"`
+	TotalPlatformEarnings float64            `json:"total_platform_earnings"`
 }
 
 type AdminServiceImpl struct {
@@ -203,6 +268,36 @@ func (s *AdminServiceImpl) VerifyRider(ctx context.Context, riderID uuid.UUID, a
 		zap.String("user_id", rider.UserID.String()),
 		zap.String("admin_id", adminID.String()),
 	)
+
+	return nil
+}
+
+func (s *AdminServiceImpl) RejectRider(ctx context.Context, riderID uuid.UUID, reason string, adminID uuid.UUID) error {
+	rider, err := s.riderRepo.GetByID(ctx, riderID)
+	if err != nil {
+		return fmt.Errorf("failed to get rider: %w", err)
+	}
+
+	if rider.Status != domain.RiderStatusPendingVerification {
+		return fmt.Errorf("rider is not pending verification")
+	}
+
+	if err := s.riderRepo.UpdateStatus(ctx, riderID, domain.RiderStatusRejected); err != nil {
+		return fmt.Errorf("failed to reject rider: %w", err)
+	}
+
+	s.logger.Info("rider verification rejected by admin",
+		zap.String("rider_id", riderID.String()),
+		zap.String("user_id", rider.UserID.String()),
+		zap.String("admin_id", adminID.String()),
+		zap.String("reason", reason),
+	)
+
+	if s.notificationService != nil {
+		go s.notificationService.SendToUser(context.Background(), rider.UserID, "Verification Rejected",
+			fmt.Sprintf("Your rider verification was rejected. Reason: %s", reason),
+			map[string]string{"reason": reason}, domain.NotificationRiderSuspended)
+	}
 
 	return nil
 }
@@ -1111,6 +1206,100 @@ func (s *AdminServiceImpl) GetWalletTransactions(ctx context.Context, userID uui
 	}
 
 	return s.walletTxRepo.GetByWalletID(ctx, wallet.ID, limit, offset)
+}
+
+func (s *AdminServiceImpl) ListAllTransactions(ctx context.Context, filters *TransactionFilters, limit, offset int) (*TransactionListResponse, error) {
+	requests, total, err := s.prRepo.GetAllWithCount(ctx, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transactions: %w", err)
+	}
+
+	transactions := make([]*TransactionItem, len(requests))
+	var totalPlatformEarnings float64
+
+	for i, pr := range requests {
+		var platformEarnings float64
+		if pr.BuyerServiceFee != nil {
+			platformEarnings += *pr.BuyerServiceFee
+		}
+		if pr.SellerPlatformFee != nil {
+			platformEarnings += *pr.SellerPlatformFee
+		}
+		totalPlatformEarnings += platformEarnings
+
+		transactions[i] = &TransactionItem{
+			ID:                   pr.ID,
+			PaymentCode:          pr.PaymentCode,
+			ItemName:             pr.ItemName,
+			ItemPrice:            pr.ItemPrice,
+			Status:               string(pr.Status),
+			DeliveryType:         string(pr.DeliveryType),
+			BuyerServiceFee:      pr.BuyerServiceFee,
+			SellerPlatformFee:    pr.SellerPlatformFee,
+			PlatformEarnings:     platformEarnings,
+			EstimatedDeliveryFee: pr.EstimatedDeliveryFee,
+			ActualDeliveryFee:    pr.ActualDeliveryFee,
+			SellerID:             pr.SellerID,
+			BuyerID:              pr.BuyerID,
+			PaidAt:               pr.PaidAt,
+			CompletedAt:          pr.CompletedAt,
+			CreatedAt:            pr.CreatedAt,
+		}
+	}
+
+	return &TransactionListResponse{
+		Transactions:          transactions,
+		Total:                 total,
+		TotalPlatformEarnings: totalPlatformEarnings,
+	}, nil
+}
+
+func (s *AdminServiceImpl) ListAllDeliveryJobs(ctx context.Context, filters *DeliveryJobFilters, limit, offset int) (*DeliveryJobListResponse, error) {
+	jobs, total, err := s.deliveryJobRepo.GetAll(ctx, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get delivery jobs: %w", err)
+	}
+
+	deliveryJobs := make([]*DeliveryJobItem, len(jobs))
+	var totalPlatformEarnings float64
+
+	for i, job := range jobs {
+		var platformEarnings float64
+		if job.PlatformDeliveryFee != nil {
+			platformEarnings = *job.PlatformDeliveryFee
+		}
+		totalPlatformEarnings += platformEarnings
+
+		var prID *uuid.UUID
+		if job.PaymentRequestID != uuid.Nil {
+			prID = &job.PaymentRequestID
+		}
+
+		deliveryJobs[i] = &DeliveryJobItem{
+			ID:                  job.ID,
+			SourceType:          job.SourceType,
+			Status:              string(job.Status),
+			PickupAddress:       job.PickupAddress,
+			DropoffAddress:      job.DropoffAddress,
+			DistanceKM:          job.DistanceKM,
+			DeliveryFee:         job.DeliveryFee,
+			RiderPayout:         job.RiderPayout,
+			PlatformDeliveryFee: job.PlatformDeliveryFee,
+			PlatformEarnings:    platformEarnings,
+			RiderID:             job.RiderID,
+			PaymentRequestID:    prID,
+			ErrandID:            job.ErrandID,
+			AcceptedAt:          job.AcceptedAt,
+			DeliveredAt:         job.DeliveredAt,
+			CreatedAt:           job.CreatedAt,
+		}
+	}
+
+	return &DeliveryJobListResponse{
+		DeliveryJobs:          deliveryJobs,
+		Total:                 total,
+		TotalPlatformEarnings: totalPlatformEarnings,
+	}, nil
 }
 
 var _ AdminService = (*AdminServiceImpl)(nil)

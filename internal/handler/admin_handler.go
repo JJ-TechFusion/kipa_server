@@ -46,6 +46,7 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 		riders := admin.Group("/riders")
 		{
 			riders.POST("/:id/verify", h.VerifyRider)
+			riders.POST("/:id/reject", h.RejectRider)
 			riders.POST("/:id/suspend", h.SuspendRider)
 			riders.POST("/:id/unsuspend", h.UnsuspendRider)
 			riders.GET("/pending", h.GetPendingRiders)
@@ -80,6 +81,8 @@ func (h *AdminHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *m
 			analytics.GET("/revenue", h.GetPlatformRevenue)
 			analytics.GET("/active-deliveries", h.GetActiveDeliveries)
 			analytics.GET("/rider-performance", h.GetRiderPerformance)
+			analytics.GET("/transactions", h.ListAllTransactions)
+			analytics.GET("/delivery-jobs", h.ListAllDeliveryJobs)
 		}
 		paymentRequests := admin.Group("/payment-requests")
 		{
@@ -154,6 +157,33 @@ func (h *AdminHandler) VerifyRider(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "rider verified successfully"})
+}
+
+type RejectRiderRequest struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
+func (h *AdminHandler) RejectRider(c *gin.Context) {
+	riderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rider ID"})
+		return
+	}
+
+	var req RejectRiderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	adminID := c.MustGet("user_id").(uuid.UUID)
+
+	if err := h.adminService.RejectRider(c.Request.Context(), riderID, req.Reason, adminID); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "rider verification rejected"})
 }
 
 type SuspendRiderRequest struct {
@@ -1148,4 +1178,50 @@ func (h *AdminHandler) RemoveSupportStaff(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "support staff removed successfully"})
+}
+
+func (h *AdminHandler) ListAllTransactions(c *gin.Context) {
+	limit := 50
+	offset := 0
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	response, err := h.adminService.ListAllTransactions(c.Request.Context(), nil, limit, offset)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *AdminHandler) ListAllDeliveryJobs(c *gin.Context) {
+	limit := 50
+	offset := 0
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	response, err := h.adminService.ListAllDeliveryJobs(c.Request.Context(), nil, limit, offset)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }

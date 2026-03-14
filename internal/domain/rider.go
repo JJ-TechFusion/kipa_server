@@ -10,6 +10,7 @@ type RiderStatus string
 const (
 	RiderStatusPendingVerification RiderStatus = "pending_verification"
 	RiderStatusVerified            RiderStatus = "verified"
+	RiderStatusRejected            RiderStatus = "rejected"
 	RiderStatusSuspended           RiderStatus = "suspended"
 	RiderStatusDeactivated         RiderStatus = "deactivated"
 )

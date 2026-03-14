@@ -75,6 +75,7 @@ type PaymentRequestRepository interface {
 	GetExpiredLinks(ctx context.Context) ([]*domain.PaymentRequest, error)
 	GetOverdueProcessingOrders(ctx context.Context, reminderCooldownMins int) ([]*domain.PaymentRequest, error)
 	GetAll(ctx context.Context, limit, offset int) ([]*domain.PaymentRequest, error)
+	GetAllWithCount(ctx context.Context, limit, offset int) ([]*domain.PaymentRequest, int, error)
 	Update(ctx context.Context, pr *domain.PaymentRequest) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.PaymentRequestStatus) error
 	UpdateReminderSent(ctx context.Context, id uuid.UUID) error
@@ -111,6 +112,7 @@ type DeliveryJobRepository interface {
 	UpdateForcedReturn(ctx context.Context, job *domain.DeliveryJob) error
 	HasActiveByRiderUserID(ctx context.Context, userID uuid.UUID) (bool, error)
 	GetExpiredErrandUnavailableJobs(ctx context.Context, waitMinutes int) ([]*domain.DeliveryJob, error)
+	GetAll(ctx context.Context, limit, offset int) ([]*domain.DeliveryJob, int, error)
 }
 
 type JobCoordinates struct {

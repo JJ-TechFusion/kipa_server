@@ -386,6 +386,23 @@ func (r *PaymentRequestRepo) GetAll(ctx context.Context, limit, offset int) ([]*
 
 	return requests, nil
 }
+
+func (r *PaymentRequestRepo) GetAllWithCount(ctx context.Context, limit, offset int) ([]*domain.PaymentRequest, int, error) {
+	var total int
+	countQuery := `SELECT COUNT(*) FROM payment_requests`
+	if err := r.db.GetContext(ctx, &total, countQuery); err != nil {
+		return nil, 0, err
+	}
+
+	var requests []*domain.PaymentRequest
+	query := `SELECT * FROM payment_requests ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+
+	if err := r.db.SelectContext(ctx, &requests, query, limit, offset); err != nil {
+		return nil, 0, err
+	}
+
+	return requests, total, nil
+}
 func (r *PaymentRequestRepo) GetExpiredRebookRequests(ctx context.Context) ([]*domain.PaymentRequest, error) {
 	var requests []*domain.PaymentRequest
 	query := `

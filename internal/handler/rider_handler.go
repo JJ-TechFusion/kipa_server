@@ -410,11 +410,20 @@ func (h *RiderHandler) MarkBuyerUnavailable(c *gin.Context) {
 		return
 	}
 
+	var message string
+	if forcedReturnInfo.IsErrand {
+		message = "Receiver marked as unavailable. Please wait for receiver or resolution."
+	} else {
+		message = "Buyer marked as unavailable. Please return item to seller."
+	}
+
 	util.Success(c, http.StatusOK, gin.H{
-		"message":              "Buyer marked as unavailable. Please return item to seller.",
+		"message":              message,
 		"forced_return_job_id": forcedReturnInfo.ForcedReturnJobID,
 		"return_code":          forcedReturnInfo.ReturnCode,
 		"rebook_deadline":      forcedReturnInfo.RebookDeadline,
+		"wait_time_minutes":    forcedReturnInfo.WaitTimeMinutes,
+		"is_errand":            forcedReturnInfo.IsErrand,
 	})
 }
 func (h *RiderHandler) CompleteForcedReturn(c *gin.Context) {
