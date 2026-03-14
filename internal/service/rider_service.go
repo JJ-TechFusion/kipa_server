@@ -902,7 +902,7 @@ func (s *RiderServiceImpl) MarkBuyerUnavailable(ctx context.Context, userID uuid
 			}
 			go s.notificationService.SendToUser(context.Background(), errand.UserID, "Receiver Unavailable",
 				"The receiver was unavailable for delivery. Please wait 45 minutes. If unresolved, the ride will end and you can settle with the rider directly.",
-				data, domain.NotificationDeliveryFailed)
+				data, domain.NotificationBuyerUnavailable)
 		}
 
 		s.logger.Info("errand receiver marked unavailable, 45-min wait window started",
