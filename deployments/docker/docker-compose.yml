@@ -92,6 +92,31 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Kipa Worker (background jobs)
+  worker:
+    build:
+      context: ../../
+      dockerfile: deployments/docker/Dockerfile
+    container_name: kipa-worker
+    command: ["/app/worker"]
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_SSLMODE: disable
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      FIREBASE_CREDENTIALS_PATH: /app/firebase-service-account.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

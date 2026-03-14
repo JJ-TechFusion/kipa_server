@@ -139,8 +139,9 @@ func (r *ErrandRepo) Update(ctx context.Context, errand *domain.Errand) error {
 			accepted_at = $24,
 			picked_up_at = $25,
 			delivered_at = $26,
-			cancelled_at = $27,
-			updated_at = $28
+			completed_at = $27,
+			cancelled_at = $28,
+			updated_at = $29
 		WHERE id = $1`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -170,6 +171,7 @@ func (r *ErrandRepo) Update(ctx context.Context, errand *domain.Errand) error {
 		errand.AcceptedAt,
 		errand.PickedUpAt,
 		errand.DeliveredAt,
+		errand.CompletedAt,
 		errand.CancelledAt,
 		errand.UpdatedAt,
 	)
