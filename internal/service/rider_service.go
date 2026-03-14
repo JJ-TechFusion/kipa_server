@@ -397,6 +397,18 @@ func (s *RiderServiceImpl) AcceptJob(ctx context.Context, userID uuid.UUID, jobI
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Re-evaluate block status based on current settings (in case max_unpaid_rides changed)
+	if err := s.commissionService.CheckAndUpdateBlockStatus(ctx, profile.ID); err != nil {
+		s.logger.Warn("failed to check commission block status", zap.Error(err))
+	}
+
+	// Refresh profile after status check
+	profile, err = s.riderRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	if profile.IsCommissionBlocked {
 		s.logger.Warn("rider blocked for unpaid commission",
 			zap.String("user_id", userID.String()),
