@@ -33,6 +33,8 @@ type FeeCalculatorService interface {
 
 	CalculateRiderPayout(deliveryFee float64) float64
 
+	CalculatePlatformDeliveryFee(deliveryFee float64) float64
+
 	GetZoneByLocation(ctx context.Context, lat, lng float64) (*domain.DeliveryZone, error)
 }
 
@@ -162,7 +164,7 @@ func (s *FeeCalculatorServiceImpl) CalculateTotalForBuyer(itemPrice float64, del
 func (s *FeeCalculatorServiceImpl) CalculateSettlement(itemPrice, actualDeliveryFee float64) *SettlementBreakdown {
 	buyerServiceFee := s.CalculateBuyerFee(itemPrice)
 	sellerPlatformFee := s.CalculateSellerFee(itemPrice)
-	platformDeliveryFee := s.calculatePlatformDeliveryFee(actualDeliveryFee)
+	platformDeliveryFee := s.CalculatePlatformDeliveryFee(actualDeliveryFee)
 
 	sellerPayout := itemPrice - sellerPlatformFee
 	riderPayout := actualDeliveryFee - platformDeliveryFee
@@ -203,7 +205,7 @@ func (s *FeeCalculatorServiceImpl) calculateDistanceKM(lat1, lng1, lat2, lng2 fl
 	distance := earthRadiusKM * c
 	return math.Round(distance*100) / 100
 }
-func (s *FeeCalculatorServiceImpl) calculatePlatformDeliveryFee(deliveryFee float64) float64 {
+func (s *FeeCalculatorServiceImpl) CalculatePlatformDeliveryFee(deliveryFee float64) float64 {
 	rate := 1.0 - s.getRiderPayoutRate()
 	return math.Round(deliveryFee*rate*100) / 100
 }

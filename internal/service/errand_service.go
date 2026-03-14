@@ -196,9 +196,9 @@ func (s *ErrandServiceImpl) Confirm(ctx context.Context, userID uuid.UUID, erran
 		SearchRadiusKM:      5, // Default initial radius
 	}
 
-	riderPayout := errand.DeliveryFee
+	riderPayout := s.feeCalculator.CalculateRiderPayout(errand.DeliveryFee)
 	job.RiderPayout = &riderPayout
-	platformFee := domain.CalculateCommission(errand.DeliveryFee)
+	platformFee := s.feeCalculator.CalculatePlatformDeliveryFee(errand.DeliveryFee)
 	job.PlatformDeliveryFee = &platformFee
 
 	now := time.Now()

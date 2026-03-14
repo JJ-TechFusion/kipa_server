@@ -207,6 +207,7 @@ func main() {
 		riderCommissionRepo,
 		commissionPaymentRepo,
 		riderProfileRepo,
+		platformSettingsRepo,
 		walletService,
 		logger,
 	)
@@ -244,6 +245,7 @@ func main() {
 		escrowService,
 		walletService,
 		commissionService,
+		feeCalculator,
 		errandService,
 		locationService,
 		notificationService,
@@ -368,7 +370,7 @@ func main() {
 	prHandler := handler.NewPaymentRequestHandler(prService)
 	transactionHandler := handler.NewTransactionHandler(prService, orderService, logisticsService, userRepo, deliveryJobRepo)
 	buyerHandler := handler.NewBuyerHandler(prService, orderService, escrowService, userRepo, deliveryJobRepo, disputeRepo, disputeResolutionService, driverService, supportChatService)
-	riderHandler := handler.NewRiderHandler(riderService)
+	riderHandler := handler.NewRiderHandler(riderService, feeCalculator)
 	commissionHandler := handler.NewRiderCommissionHandler(commissionService)
 	walletHandler := handler.NewWalletHandler(walletService, escrowService)
 	walletFundingHandler := handler.NewWalletFundingHandler(
@@ -382,7 +384,7 @@ func main() {
 	)
 	webhookHandler := handler.NewWebhookHandler(paystackClient, flutterwaveClient, walletFundingService, orderService, logger)
 	sellerHandler := handler.NewSellerHandler(orderService, prService, escrowService, deliveryJobRepo, disputeResolutionService, driverService)
-	errandHandler := handler.NewErrandHandler(errandService)
+	errandHandler := handler.NewErrandHandler(errandService, feeCalculator)
 	disputeHandler := handler.NewDisputeHandler(disputeService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
 	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo, prService, supportStaffService)

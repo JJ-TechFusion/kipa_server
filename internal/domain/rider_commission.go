@@ -44,21 +44,21 @@ type CommissionPayment struct {
 
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
-func CalculateCommission(deliveryFee float64) float64 {
-	return roundToTwoDecimals(deliveryFee * RiderCommissionRate)
+func CalculateCommission(deliveryFee, commissionRate float64) float64 {
+	return roundToTwoDecimals(deliveryFee * commissionRate)
 }
-func CalculateRiderTake(deliveryFee float64) float64 {
-	return roundToTwoDecimals(deliveryFee - CalculateCommission(deliveryFee))
+func CalculateRiderTake(deliveryFee, commissionRate float64) float64 {
+	return roundToTwoDecimals(deliveryFee - CalculateCommission(deliveryFee, commissionRate))
 }
-func NewRiderCommission(riderProfileID, deliveryJobID uuid.UUID, deliveryFee float64) *RiderCommission {
-	commissionAmount := CalculateCommission(deliveryFee)
+func NewRiderCommission(riderProfileID, deliveryJobID uuid.UUID, deliveryFee, commissionRate float64) *RiderCommission {
+	commissionAmount := CalculateCommission(deliveryFee, commissionRate)
 
 	return &RiderCommission{
 		ID:               uuid.New(),
 		RiderProfileID:   riderProfileID,
 		DeliveryJobID:    deliveryJobID,
 		DeliveryFee:      deliveryFee,
-		CommissionRate:   RiderCommissionRate,
+		CommissionRate:   commissionRate,
 		CommissionAmount: commissionAmount,
 		Status:           CommissionStatusPending,
 		CreatedAt:        time.Now(),
@@ -70,13 +70,13 @@ type RiderFeeBreakdown struct {
 	RiderTake          float64 `json:"rider_take"`          // What rider keeps (85%)
 	CommissionRate     float64 `json:"commission_rate"`     // 0.15
 }
-func NewRiderFeeBreakdown(deliveryFee float64) *RiderFeeBreakdown {
-	commission := CalculateCommission(deliveryFee)
+func NewRiderFeeBreakdown(deliveryFee, commissionRate float64) *RiderFeeBreakdown {
+	commission := CalculateCommission(deliveryFee, commissionRate)
 	return &RiderFeeBreakdown{
 		DeliveryFee:        deliveryFee,
 		PlatformCommission: commission,
 		RiderTake:          deliveryFee - commission,
-		CommissionRate:     RiderCommissionRate,
+		CommissionRate:     commissionRate,
 	}
 }
 func roundToTwoDecimals(val float64) float64 {

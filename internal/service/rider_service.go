@@ -104,6 +104,7 @@ type RiderServiceImpl struct {
 	escrowService        EscrowService
 	walletService        WalletService
 	commissionService    RiderCommissionService
+	feeCalculator        FeeCalculatorService
 	errandService        ErrandService
 	locationService      LocationService
 	notificationService  NotificationService
@@ -122,6 +123,7 @@ func NewRiderService(
 	escrowService EscrowService,
 	walletService WalletService,
 	commissionService RiderCommissionService,
+	feeCalculator FeeCalculatorService,
 	errandService ErrandService,
 	locationService LocationService,
 	notificationService NotificationService,
@@ -139,6 +141,7 @@ func NewRiderService(
 		escrowService:        escrowService,
 		walletService:        walletService,
 		commissionService:    commissionService,
+		feeCalculator:        feeCalculator,
 		errandService:        errandService,
 		locationService:      locationService,
 		notificationService:  notificationService,
@@ -685,7 +688,7 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 		if err := s.commissionService.CheckAndUpdateBlockStatus(ctx, profile.ID); err != nil {
 			s.logger.Error("failed to check commission block status", zap.Error(err))
 		}
-		riderTake := domain.CalculateRiderTake(job.DeliveryFee)
+		riderTake := s.feeCalculator.CalculateRiderPayout(job.DeliveryFee)
 		if err := s.riderRepo.AddEarnings(ctx, profile.ID, riderTake); err != nil {
 			s.logger.Error("failed to update rider earnings", zap.Error(err))
 		}
@@ -749,7 +752,7 @@ func (s *RiderServiceImpl) confirmReturnDelivery(ctx context.Context, profile *d
 		s.logger.Error("failed to increment deliveries for return job", zap.Error(err))
 	}
 	if job.DeliveryFee > 0 {
-		riderTake := domain.CalculateRiderTake(job.DeliveryFee)
+		riderTake := s.feeCalculator.CalculateRiderPayout(job.DeliveryFee)
 		if err := s.riderRepo.AddEarnings(ctx, profile.ID, riderTake); err != nil {
 			s.logger.Error("failed to update rider earnings for return job", zap.Error(err))
 		}
@@ -1046,7 +1049,7 @@ func (s *RiderServiceImpl) CompleteForcedReturn(ctx context.Context, userID uuid
 
 	s.broadcastJobStatus(jobID, domain.DJStatusForcedReturnDone)
 	if job.DeliveryFee > 0 {
-		riderTake := domain.CalculateRiderTake(job.DeliveryFee)
+		riderTake := s.feeCalculator.CalculateRiderPayout(job.DeliveryFee)
 		s.logger.Info("adding rider earnings for forced return",
 			zap.Float64("delivery_fee", job.DeliveryFee),
 			zap.Float64("rider_take", riderTake),

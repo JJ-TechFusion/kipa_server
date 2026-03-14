@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -17,7 +18,7 @@ type RiderCommissionService interface {
 	PayAllFromWallet(ctx context.Context, userID uuid.UUID) (*CommissionPaymentResult, error)
 	CheckAndUpdateBlockStatus(ctx context.Context, riderProfileID uuid.UUID) error
 	WaiveCommissions(ctx context.Context, riderProfileID uuid.UUID, reason string) error
-	GetFeeBreakdown(deliveryFee float64) *domain.RiderFeeBreakdown
+	GetFeeBreakdown(ctx context.Context, deliveryFee float64) *domain.RiderFeeBreakdown
 }
 type CommissionSummary struct {
 	TotalOwed         float64 `json:"total_owed"`
@@ -38,6 +39,7 @@ type RiderCommissionServiceImpl struct {
 	commissionRepo repository.RiderCommissionRepository
 	paymentRepo    repository.CommissionPaymentRepository
 	riderRepo      repository.RiderProfileRepository
+	settingsRepo   repository.PlatformSettingsRepository
 	walletService  WalletService
 	logger         *zap.Logger
 }
@@ -46,6 +48,7 @@ func NewRiderCommissionService(
 	commissionRepo repository.RiderCommissionRepository,
 	paymentRepo repository.CommissionPaymentRepository,
 	riderRepo repository.RiderProfileRepository,
+	settingsRepo repository.PlatformSettingsRepository,
 	walletService WalletService,
 	logger *zap.Logger,
 ) RiderCommissionService {
@@ -53,12 +56,40 @@ func NewRiderCommissionService(
 		commissionRepo: commissionRepo,
 		paymentRepo:    paymentRepo,
 		riderRepo:      riderRepo,
+		settingsRepo:   settingsRepo,
 		walletService:  walletService,
 		logger:         logger,
 	}
 }
+
+func (s *RiderCommissionServiceImpl) getCommissionSettings(ctx context.Context) *domain.CommissionSettings {
+	// Default settings
+	defaults := &domain.CommissionSettings{
+		MaxUnpaidRides: domain.MaxUnpaidRidesBeforeBlock,
+		CommissionRate: domain.RiderCommissionRate,
+	}
+
+	if s.settingsRepo == nil {
+		return defaults
+	}
+
+	data, err := s.settingsRepo.Get(ctx, "commission_settings")
+	if err != nil || data == nil {
+		return defaults
+	}
+
+	var settings domain.CommissionSettings
+	if err := json.Unmarshal(data.SettingValue, &settings); err != nil {
+		s.logger.Warn("failed to parse commission settings, using defaults", zap.Error(err))
+		return defaults
+	}
+
+	return &settings
+}
+
 func (s *RiderCommissionServiceImpl) RecordCommission(ctx context.Context, riderProfileID, deliveryJobID uuid.UUID, deliveryFee float64) error {
-	commission := domain.NewRiderCommission(riderProfileID, deliveryJobID, deliveryFee)
+	settings := s.getCommissionSettings(ctx)
+	commission := domain.NewRiderCommission(riderProfileID, deliveryJobID, deliveryFee, settings.CommissionRate)
 
 	if err := s.commissionRepo.Create(ctx, commission); err != nil {
 		return fmt.Errorf("failed to create commission record: %w", err)
@@ -88,15 +119,20 @@ func (s *RiderCommissionServiceImpl) GetSummary(ctx context.Context, userID uuid
 		return nil, err
 	}
 
-	ridesUntilBlocked := profile.RidesUntilBlocked()
+	settings := s.getCommissionSettings(ctx)
+
+	ridesUntilBlocked := settings.MaxUnpaidRides - profile.UnpaidDeliveryCount
+	if ridesUntilBlocked < 0 {
+		ridesUntilBlocked = 0
+	}
 
 	return &CommissionSummary{
 		TotalOwed:         profile.UnpaidCommission,
 		UnpaidRideCount:   profile.UnpaidDeliveryCount,
 		IsBlocked:         profile.IsCommissionBlocked,
 		RidesUntilBlocked: ridesUntilBlocked,
-		GracePeriodRides:  domain.MaxUnpaidRidesBeforeBlock,
-		CommissionRate:    domain.RiderCommissionRate,
+		GracePeriodRides:  settings.MaxUnpaidRides,
+		CommissionRate:    settings.CommissionRate,
 	}, nil
 }
 func (s *RiderCommissionServiceImpl) GetPendingCommissions(ctx context.Context, userID uuid.UUID) ([]*domain.RiderCommission, error) {
@@ -183,7 +219,9 @@ func (s *RiderCommissionServiceImpl) CheckAndUpdateBlockStatus(ctx context.Conte
 		return err
 	}
 
-	shouldBlock := profile.ShouldBlockForCommission()
+	settings := s.getCommissionSettings(ctx)
+	shouldBlock := profile.UnpaidDeliveryCount >= settings.MaxUnpaidRides
+
 	if shouldBlock && !profile.IsCommissionBlocked {
 		if err := s.riderRepo.SetCommissionBlocked(ctx, riderProfileID, true); err != nil {
 			return fmt.Errorf("failed to block rider: %w", err)
@@ -192,6 +230,7 @@ func (s *RiderCommissionServiceImpl) CheckAndUpdateBlockStatus(ctx context.Conte
 			zap.String("rider_profile_id", riderProfileID.String()),
 			zap.Float64("unpaid_commission", profile.UnpaidCommission),
 			zap.Int("unpaid_count", profile.UnpaidDeliveryCount),
+			zap.Int("max_unpaid_rides", settings.MaxUnpaidRides),
 		)
 	} else if !shouldBlock && profile.IsCommissionBlocked {
 		if err := s.riderRepo.SetCommissionBlocked(ctx, riderProfileID, false); err != nil {
@@ -222,7 +261,8 @@ func (s *RiderCommissionServiceImpl) WaiveCommissions(ctx context.Context, rider
 
 	return nil
 }
-func (s *RiderCommissionServiceImpl) GetFeeBreakdown(deliveryFee float64) *domain.RiderFeeBreakdown {
-	return domain.NewRiderFeeBreakdown(deliveryFee)
+func (s *RiderCommissionServiceImpl) GetFeeBreakdown(ctx context.Context, deliveryFee float64) *domain.RiderFeeBreakdown {
+	settings := s.getCommissionSettings(ctx)
+	return domain.NewRiderFeeBreakdown(deliveryFee, settings.CommissionRate)
 }
 var _ RiderCommissionService = (*RiderCommissionServiceImpl)(nil)

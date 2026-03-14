@@ -15,11 +15,15 @@ import (
 )
 
 type RiderHandler struct {
-	riderService service.RiderService
+	riderService  service.RiderService
+	feeCalculator service.FeeCalculatorService
 }
 
-func NewRiderHandler(riderService service.RiderService) *RiderHandler {
-	return &RiderHandler{riderService: riderService}
+func NewRiderHandler(riderService service.RiderService, feeCalculator service.FeeCalculatorService) *RiderHandler {
+	return &RiderHandler{
+		riderService:  riderService,
+		feeCalculator: feeCalculator,
+	}
 }
 
 func (h *RiderHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware) {
@@ -173,7 +177,7 @@ func (h *RiderHandler) GetAvailableJobs(c *gin.Context) {
 
 	responses := make([]DeliveryJobResponse, len(availableJobs))
 	for i, aj := range availableJobs {
-		responses[i] = deliveryJobToResponse(aj.Job)
+		responses[i] = h.deliveryJobToResponse(aj.Job)
 		if aj.Errand != nil {
 			responses[i].ErrandDetails = errandToDetailsResponse(aj.Errand)
 		}
@@ -203,7 +207,7 @@ func (h *RiderHandler) AcceptJob(c *gin.Context) {
 		return
 	}
 
-	jobResp := deliveryJobToResponse(job)
+	jobResp := h.deliveryJobToResponse(job)
 	if errand != nil {
 		jobResp.ErrandDetails = errandToDetailsResponse(errand)
 	}
@@ -236,7 +240,7 @@ func (h *RiderHandler) GetActiveJob(c *gin.Context) {
 	pr := details.PaymentRequest
 
 	resp := DeliveryJobDetailResponse{
-		DeliveryJobResponse: deliveryJobToResponse(job),
+		DeliveryJobResponse: h.deliveryJobToResponse(job),
 		PickupLat:           job.PickupLat,
 		PickupLng:           job.PickupLng,
 		DropoffLat:          job.DropoffLat,
@@ -348,7 +352,7 @@ func (h *RiderHandler) GetJobHistory(c *gin.Context) {
 
 	responses := make([]DeliveryJobResponse, len(jobs))
 	for i, job := range jobs {
-		responses[i] = deliveryJobToResponse(job)
+		responses[i] = h.deliveryJobToResponse(job)
 	}
 
 	util.Success(c, http.StatusOK, gin.H{
@@ -572,7 +576,7 @@ type FeeBreakdownResponse struct {
 	CommissionRate     float64 `json:"commission_rate"`     // 0.15
 }
 
-func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
+func (h *RiderHandler) deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
 	deliveryType := "intrastate"
 	if j.SourceType != nil && *j.SourceType == domain.DeliverySourceErrand {
 		deliveryType = "errand"
@@ -594,12 +598,13 @@ func deliveryJobToResponse(j *domain.DeliveryJob) DeliveryJobResponse {
 		CreatedAt:           j.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if j.DeliveryFee > 0 {
-		breakdown := domain.NewRiderFeeBreakdown(j.DeliveryFee)
+		platformFee := h.feeCalculator.CalculatePlatformDeliveryFee(j.DeliveryFee)
+		riderPayout := h.feeCalculator.CalculateRiderPayout(j.DeliveryFee)
 		resp.FeeBreakdown = &FeeBreakdownResponse{
-			DeliveryFee:        breakdown.DeliveryFee,
-			PlatformCommission: breakdown.PlatformCommission,
-			YourTake:           breakdown.RiderTake,
-			CommissionRate:     breakdown.CommissionRate,
+			DeliveryFee:        j.DeliveryFee,
+			PlatformCommission: platformFee,
+			YourTake:           riderPayout,
+			CommissionRate:     platformFee / j.DeliveryFee,
 		}
 	}
 
@@ -673,7 +678,7 @@ func (h *RiderHandler) GetAvailableJobByID(c *gin.Context) {
 	}
 
 	resp := DeliveryJobDetailResponse{
-		DeliveryJobResponse: deliveryJobToResponse(job),
+		DeliveryJobResponse: h.deliveryJobToResponse(job),
 		PickupLat:           job.PickupLat,
 		PickupLng:           job.PickupLng,
 		DropoffLat:          job.DropoffLat,

@@ -15,11 +15,13 @@ import (
 
 type ErrandHandler struct {
 	errandService service.ErrandService
+	feeCalculator service.FeeCalculatorService
 }
 
-func NewErrandHandler(errandService service.ErrandService) *ErrandHandler {
+func NewErrandHandler(errandService service.ErrandService, feeCalculator service.FeeCalculatorService) *ErrandHandler {
 	return &ErrandHandler{
 		errandService: errandService,
+		feeCalculator: feeCalculator,
 	}
 }
 func (h *ErrandHandler) RegisterRoutes(rg *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware) {
@@ -54,7 +56,14 @@ func (h *ErrandHandler) Create(c *gin.Context) {
 		h.handleError(c, err)
 		return
 	}
-	feeBreakdown := domain.NewRiderFeeBreakdown(errand.DeliveryFee)
+	platformFee := h.feeCalculator.CalculatePlatformDeliveryFee(errand.DeliveryFee)
+	riderPayout := h.feeCalculator.CalculateRiderPayout(errand.DeliveryFee)
+	feeBreakdown := &domain.RiderFeeBreakdown{
+		DeliveryFee:        errand.DeliveryFee,
+		PlatformCommission: platformFee,
+		RiderTake:          riderPayout,
+		CommissionRate:     platformFee / errand.DeliveryFee,
+	}
 
 	util.Success(c, http.StatusCreated, ErrandResponse{
 		Errand:       errand,
@@ -120,7 +129,14 @@ func (h *ErrandHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	feeBreakdown := domain.NewRiderFeeBreakdown(result.Errand.DeliveryFee)
+	platformFee := h.feeCalculator.CalculatePlatformDeliveryFee(result.Errand.DeliveryFee)
+	riderPayout := h.feeCalculator.CalculateRiderPayout(result.Errand.DeliveryFee)
+	feeBreakdown := &domain.RiderFeeBreakdown{
+		DeliveryFee:        result.Errand.DeliveryFee,
+		PlatformCommission: platformFee,
+		RiderTake:          riderPayout,
+		CommissionRate:     platformFee / result.Errand.DeliveryFee,
+	}
 	timeline := BuildErrandTimeline(result.Errand)
 
 	util.Success(c, http.StatusOK, ErrandWithDetailsResponse{
