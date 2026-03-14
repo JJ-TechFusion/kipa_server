@@ -118,7 +118,7 @@ func (s DeliveryJobStatus) CanTransitionTo(next DeliveryJobStatus) bool {
 		DJStatusReturnConfirmed:      {DJStatusReturnRefunded},
 		DJStatusReturnDamageDisputed: {DJStatusReturnRefunded, DJStatusReturnConfirmed}, // Admin decides
 		DJStatusSellerUnavailable: {}, // Terminal - job cancelled, buyer refunded
-		DJStatusBuyerUnavailable:  {DJStatusForcedReturn, DJStatusInTransit}, // Can resume if rebooked
+		DJStatusBuyerUnavailable:  {DJStatusForcedReturn, DJStatusInTransit, DJStatusDelivered}, // Can resume if rebooked, or deliver directly (errand)
 		DJStatusForcedReturn:      {DJStatusForcedReturnDone},
 		DJStatusForcedReturnDone:  {}, // Terminal - waiting for buyer rebook or refund
 	}

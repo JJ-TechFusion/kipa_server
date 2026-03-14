@@ -895,7 +895,7 @@ func (s *DisputeResolutionServiceImpl) sendNotification(_ context.Context, userI
 	}()
 }
 
-func (s *DisputeResolutionServiceImpl) closeSupportChatForDispute(ctx context.Context, disputeID, adminID uuid.UUID) {
+func (s *DisputeResolutionServiceImpl) closeSupportChatForDispute(_ context.Context, disputeID, adminID uuid.UUID) {
 	if s.supportChatService == nil {
 		return
 	}

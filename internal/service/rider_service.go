@@ -648,7 +648,11 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 		return domain.ErrUnauthorized
 	}
 
-	if job.Status != domain.DJStatusPickedUp && job.Status != domain.DJStatusInTransit {
+	// Allow delivery from BuyerUnavailable for errand jobs (receiver became available during wait window)
+	isErrandWithUnavailableReceiver := job.Status == domain.DJStatusBuyerUnavailable &&
+		job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil
+
+	if job.Status != domain.DJStatusPickedUp && job.Status != domain.DJStatusInTransit && !isErrandWithUnavailableReceiver {
 		return domain.ErrInvalidStatusTransition
 	}
 	if job.DropoffCode == nil || *job.DropoffCode != code {
