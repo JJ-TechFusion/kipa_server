@@ -1139,11 +1139,8 @@ func (s *AdminServiceImpl) UpdateCommissionSettings(ctx context.Context, setting
 
 func (s *AdminServiceImpl) GetTimerSettings(ctx context.Context) (*domain.TimerSettings, error) {
 	data, err := s.settingsRepo.Get(ctx, "timer_settings")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get timer settings: %w", err)
-	}
-
-	if data == nil {
+	if err != nil || data == nil {
+		// Return defaults if setting not found
 		return &domain.TimerSettings{
 			DisputeWindowMinutes:   1440, // 24 hours
 			RiderWaitTimeMinutes:   45,
@@ -1190,11 +1187,8 @@ func (s *AdminServiceImpl) UpdateTimerSettings(ctx context.Context, settings *do
 
 func (s *AdminServiceImpl) GetFAQSettings(ctx context.Context) (*domain.FAQSettings, error) {
 	data, err := s.settingsRepo.Get(ctx, "faq_settings")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get FAQ settings: %w", err)
-	}
-
-	if data == nil {
+	if err != nil || data == nil {
+		// Return empty FAQs if setting not found
 		return &domain.FAQSettings{
 			Categories: []domain.FAQCategory{},
 		}, nil
