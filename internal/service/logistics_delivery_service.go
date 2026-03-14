@@ -836,6 +836,7 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 		outcome = domain.DisputeOutcomeSellerWins
 		newStatus = domain.LDStatusReleasedByAdmin
 		s.releaseEscrowToSeller(ctx, delivery, escrow, adminID)
+		s.closeSupportChatForDispute(ctx, *delivery.DisputeID, adminID)
 
 	case "partial_refund":
 		outcome = domain.DisputeOutcomePartialRefund
@@ -844,6 +845,7 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDispute(ctx context.Context, id uu
 			return fmt.Errorf("refund amount required for partial refund")
 		}
 		s.processPartialRefund(ctx, delivery, escrow, *req.RefundAmount)
+		s.closeSupportChatForDispute(ctx, *delivery.DisputeID, adminID)
 
 	case "return_required":
 		outcome = domain.DisputeOutcomePending
@@ -1304,6 +1306,29 @@ func (s *LogisticsDeliveryServiceImpl) sendNotification(_ context.Context, userI
 	go func() {
 		if err := s.notificationService.SendToUser(context.Background(), userID, title, message, nil, domain.NotificationLogisticsConfirmReminder); err != nil {
 			s.logger.Debug("failed to send notification", zap.Error(err))
+		}
+	}()
+}
+
+func (s *LogisticsDeliveryServiceImpl) closeSupportChatForDispute(_ context.Context, disputeID, adminID uuid.UUID) {
+	if s.supportChatService == nil {
+		return
+	}
+	go func() {
+		conv, err := s.supportChatService.GetByDisputeID(context.Background(), disputeID)
+		if err != nil || conv == nil {
+			return
+		}
+		if err := s.supportChatService.ResolveConversation(context.Background(), adminID, conv.ID); err != nil {
+			s.logger.Warn("failed to close support chat for resolved dispute",
+				zap.Error(err),
+				zap.String("dispute_id", disputeID.String()),
+			)
+		} else {
+			s.logger.Info("closed support chat for resolved dispute",
+				zap.String("dispute_id", disputeID.String()),
+				zap.String("conversation_id", conv.ID.String()),
+			)
 		}
 	}()
 }
