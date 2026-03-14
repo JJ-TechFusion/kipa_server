@@ -155,7 +155,7 @@ func (r *DeliveryJobRepo) GetActiveByRiderID(ctx context.Context, riderID uuid.U
 			COALESCE(ST_X(dropoff_location::geometry), 0) as dropoff_lng
 		FROM delivery_jobs
 		WHERE rider_id = $1
-		AND status IN ('accepted', 'en_route_pickup', 'picked_up', 'in_transit')
+		AND status IN ('accepted', 'en_route_pickup', 'picked_up', 'in_transit', 'buyer_unavailable', 'forced_return')
 		ORDER BY created_at DESC
 		LIMIT 1`
 
@@ -493,7 +493,7 @@ func (r *DeliveryJobRepo) HasActiveByRiderUserID(ctx context.Context, userID uui
 			SELECT 1 FROM delivery_jobs dj
 			JOIN rider_profiles rp ON dj.rider_id = rp.id
 			WHERE rp.user_id = $1
-			AND dj.status IN ('pending', 'accepted', 'picked_up', 'in_transit')
+			AND dj.status IN ('accepted', 'en_route_pickup', 'picked_up', 'in_transit', 'buyer_unavailable', 'forced_return')
 		)`
 	err := r.db.GetContext(ctx, &exists, query, userID)
 	return exists, err
