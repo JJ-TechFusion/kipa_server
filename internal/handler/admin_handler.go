@@ -17,6 +17,7 @@ import (
 type AdminHandler struct {
 	adminService             service.AdminService
 	disputeResolutionService service.DisputeResolutionService
+	logisticsService         service.LogisticsDeliveryService
 	deliveryJobRepo          repository.DeliveryJobRepository
 	paymentRequestService    service.PaymentRequestService
 	supportStaffService      service.SupportStaffService
@@ -25,6 +26,7 @@ type AdminHandler struct {
 func NewAdminHandler(
 	adminService service.AdminService,
 	disputeResolutionService service.DisputeResolutionService,
+	logisticsService service.LogisticsDeliveryService,
 	deliveryJobRepo repository.DeliveryJobRepository,
 	paymentRequestService service.PaymentRequestService,
 	supportStaffService service.SupportStaffService,
@@ -32,6 +34,7 @@ func NewAdminHandler(
 	return &AdminHandler{
 		adminService:             adminService,
 		disputeResolutionService: disputeResolutionService,
+		logisticsService:         logisticsService,
 		deliveryJobRepo:          deliveryJobRepo,
 		paymentRequestService:    paymentRequestService,
 		supportStaffService:      supportStaffService,
@@ -976,15 +979,34 @@ func (h *AdminHandler) ListReturnDamageClaims(c *gin.Context) {
 		}
 	}
 
-	claims, total, err := h.disputeResolutionService.ListPendingDamageClaims(c.Request.Context(), limit, offset)
-	if err != nil {
-		h.handleError(c, err)
-		return
+	// Filter by delivery type if specified
+	deliveryTypeFilter := c.Query("delivery_type") // "intra_state", "inter_state", or empty for all
+
+	var responses []ReturnDamageClaimResponse
+	var total int
+
+	// Get intra-state damage claims (DeliveryJob-based)
+	if deliveryTypeFilter == "" || deliveryTypeFilter == "intra_state" {
+		intraClaims, intraTotal, err := h.disputeResolutionService.ListPendingDamageClaims(c.Request.Context(), limit, offset)
+		if err != nil {
+			h.handleError(c, err)
+			return
+		}
+		for _, claim := range intraClaims {
+			responses = append(responses, toReturnDamageClaimResponse(claim))
+		}
+		total += intraTotal
 	}
 
-	responses := make([]ReturnDamageClaimResponse, 0, len(claims))
-	for _, claim := range claims {
-		responses = append(responses, toReturnDamageClaimResponse(claim))
+	// Get inter-state damage claims (LogisticsDelivery-based)
+	if (deliveryTypeFilter == "" || deliveryTypeFilter == "inter_state") && h.logisticsService != nil {
+		interClaims, err := h.logisticsService.ListDamageClaims(c.Request.Context(), limit, offset)
+		if err == nil && interClaims != nil {
+			for _, claim := range interClaims.Deliveries {
+				responses = append(responses, toInterStateReturnDamageClaimResponse(claim))
+			}
+			total += interClaims.Total
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1054,6 +1076,7 @@ type ReturnDamageClaimResponse struct {
 	OriginalJobID     *uuid.UUID `json:"original_job_id,omitempty"`
 	DisputeID         *uuid.UUID `json:"dispute_id,omitempty"`
 	Status            string     `json:"status"`
+	DeliveryType      string     `json:"delivery_type"` // "intra_state" or "inter_state"
 	ReturnCondition   *string    `json:"return_condition,omitempty"`
 	DamageClaimReason *string    `json:"damage_claim_reason,omitempty"`
 	PickupAddress     string     `json:"pickup_address"`
@@ -1070,6 +1093,7 @@ func toReturnDamageClaimResponse(job *domain.DeliveryJob) ReturnDamageClaimRespo
 		OriginalJobID:     job.OriginalJobID,
 		DisputeID:         job.DisputeID,
 		Status:            string(job.Status),
+		DeliveryType:      string(domain.DeliveryTypeIntraState),
 		ReturnCondition:   job.ReturnCondition,
 		DamageClaimReason: job.DamageClaimReason,
 		PickupAddress:     job.PickupAddress,
@@ -1081,6 +1105,27 @@ func toReturnDamageClaimResponse(job *domain.DeliveryJob) ReturnDamageClaimRespo
 	if job.ReturnConfirmedAt != nil {
 		t := job.ReturnConfirmedAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.ReturnConfirmedAt = &t
+	}
+
+	return resp
+}
+
+func toInterStateReturnDamageClaimResponse(delivery dto.LogisticsDeliveryResponse) ReturnDamageClaimResponse {
+	resp := ReturnDamageClaimResponse{
+		ID:                delivery.ID,
+		PaymentRequestID:  delivery.PaymentRequestID,
+		DisputeID:         nil, // Inter-state deliveries don't have DisputeID in the same way
+		Status:            delivery.Status,
+		DeliveryType:      string(domain.DeliveryTypeInterState),
+		DamageClaimReason: delivery.DamageClaimReason,
+		PickupAddress:     delivery.PickupAddress,
+		DropoffAddress:    delivery.DropoffAddress,
+		CreatedAt:         delivery.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+
+	if delivery.ReturnReceivedAt != nil {
+		formatted := delivery.ReturnReceivedAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.ReturnConfirmedAt = &formatted
 	}
 
 	return resp

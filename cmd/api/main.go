@@ -389,7 +389,7 @@ func main() {
 	errandHandler := handler.NewErrandHandler(errandService, feeCalculator)
 	disputeHandler := handler.NewDisputeHandler(disputeService)
 	uploadHandler := handler.NewUploadHandler(uploadService)
-	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, deliveryJobRepo, prService, supportStaffService)
+	adminHandler := handler.NewAdminHandler(adminService, disputeResolutionService, logisticsService, deliveryJobRepo, prService, supportStaffService)
 	configHandler := handler.NewConfigHandler(adminService)
 	notificationHandler := handler.NewNotificationHandler(notificationService, logger)
 	chatHandler := handler.NewChatHandler(chatService, logger)
