@@ -707,7 +707,21 @@ func (s *RiderServiceImpl) ConfirmDelivery(ctx context.Context, userID uuid.UUID
 	}
 	if job.SourceType != nil && *job.SourceType == domain.DeliverySourceErrand && job.ErrandID != nil {
 		if err := s.errandService.OnJobDelivered(ctx, *job.ErrandID); err != nil {
-			s.logger.Error("failed to update errand status to delivered", zap.Error(err))
+			s.logger.Error("failed to update errand status to delivered",
+				zap.Error(err),
+				zap.String("job_id", jobID.String()),
+				zap.String("errand_id", job.ErrandID.String()),
+			)
+			// Retry once with fresh context to handle context cancellation
+			retryCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if retryErr := s.errandService.OnJobDelivered(retryCtx, *job.ErrandID); retryErr != nil {
+				s.logger.Error("retry failed to update errand status to delivered",
+					zap.Error(retryErr),
+					zap.String("job_id", jobID.String()),
+					zap.String("errand_id", job.ErrandID.String()),
+				)
+			}
 		}
 	} else {
 		pr, err := s.prRepo.GetByID(ctx, job.PaymentRequestID)

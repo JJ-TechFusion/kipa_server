@@ -38,6 +38,7 @@ func (h *LogisticsHandler) RegisterRoutes(router *gin.RouterGroup, authMiddlewar
 		logistics.POST("/:id/confirm", h.ConfirmDelivery)
 		logistics.POST("/:id/cancel", h.CancelDelivery)
 		logistics.POST("/:id/return-shipped", h.MarkReturnShipped)
+		logistics.POST("/:id/claim-return-delivery", h.ClaimReturnDelivery)
 		logistics.POST("/:id/dispute", h.OpenDispute)
 		logistics.POST("/:id/evidence", h.UploadEvidence)
 	}
@@ -376,6 +377,33 @@ func (h *LogisticsHandler) MarkReturnShipped(c *gin.Context) {
 	util.Success(c, http.StatusOK, gin.H{"message": "Return shipped - seller has been notified"})
 }
 
+func (h *LogisticsHandler) ClaimReturnDelivery(c *gin.Context) {
+	deliveryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		util.Error(c, http.StatusBadRequest, "INVALID_ID", "Invalid delivery ID")
+		return
+	}
+
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		util.Error(c, http.StatusUnauthorized, domain.CodeUnauthorized, "User not authenticated")
+		return
+	}
+
+	var req dto.ClaimReturnDeliveryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	if err := h.logisticsService.ClaimReturnDelivery(c.Request.Context(), deliveryID, userID, &req); err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, gin.H{"message": "Return delivery claimed - seller has 2 days to confirm receipt"})
+}
+
 func (h *LogisticsHandler) OpenDispute(c *gin.Context) {
 	deliveryID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -690,6 +718,8 @@ func mapLogisticsErrorToResponse(err error) (int, string, string) {
 		return http.StatusBadRequest, "CANNOT_CLAIM", "Cannot claim delivery in current state"
 	case errors.Is(err, domain.ErrCannotClaimDeliveryTooEarly):
 		return http.StatusBadRequest, "CLAIM_TOO_EARLY", "Cannot claim delivery within 24 hours of shipping"
+	case errors.Is(err, domain.ErrCannotClaimReturnDelivery):
+		return http.StatusBadRequest, "CANNOT_CLAIM_RETURN", "Cannot claim return delivery in current state"
 	case errors.Is(err, domain.ErrCannotConfirmDelivery):
 		return http.StatusBadRequest, "CANNOT_CONFIRM", "Cannot confirm delivery in current state"
 	case errors.Is(err, domain.ErrCannotCancelAfterShipment):
@@ -699,7 +729,7 @@ func mapLogisticsErrorToResponse(err error) (int, string, string) {
 	case errors.Is(err, domain.ErrCannotOpenDisputeInState):
 		return http.StatusBadRequest, "CANNOT_DISPUTE", "Cannot open dispute in current state"
 	case errors.Is(err, domain.ErrSellerCannotDisputeYet):
-		return http.StatusBadRequest, "DISPUTE_TOO_EARLY", "Seller can only open dispute after 7 days of buyer non-response"
+		return http.StatusBadRequest, "DISPUTE_TOO_EARLY", "Seller can only open dispute after 2 days of buyer non-response"
 	case errors.Is(err, domain.ErrDisputeAlreadyOpen):
 		return http.StatusConflict, "DISPUTE_EXISTS", "A dispute is already open for this delivery"
 	case errors.Is(err, domain.ErrInvalidStatusTransition):

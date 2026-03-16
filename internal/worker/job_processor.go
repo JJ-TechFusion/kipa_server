@@ -121,7 +121,7 @@ func NewJobProcessor(
 }
 func (p *JobProcessor) Start(ctx context.Context) {
 	p.logger.Info("starting background job processor")
-	p.wg.Add(13) // 5 existing + 3 logistics + 1 rebook + 1 driver auto-confirm + 2 driver monitors + 1 nearby riders
+	p.wg.Add(14) // 5 existing + 3 logistics + 1 rebook + 1 driver auto-confirm + 2 driver monitors + 1 nearby riders + 1 errand cleanup
 
 	go p.runWithRecovery(ctx, "escrow_timeout", p.runEscrowTimeoutJob)
 	go p.runWithRecovery(ctx, "rider_search_timeout", p.runRiderSearchTimeoutJob)
@@ -136,6 +136,7 @@ func (p *JobProcessor) Start(ctx context.Context) {
 	go p.runWithRecovery(ctx, "driver_delivery_monitor", p.runDriverDeliveryMonitorJob)
 	go p.runWithRecovery(ctx, "driver_trip_monitor", p.runDriverTripMonitorJob)
 	go p.runWithRecovery(ctx, "nearby_riders", p.runNearbyRidersJob)
+	go p.runWithRecovery(ctx, "errand_cleanup", p.runErrandCleanupJob)
 
 	p.logger.Info("all background jobs started")
 }

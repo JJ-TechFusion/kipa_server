@@ -17,6 +17,7 @@ const (
 	LDStatusDisputed              LogisticsDeliveryStatus = "disputed"
 	LDStatusReturnRequired        LogisticsDeliveryStatus = "return_required"
 	LDStatusReturnShipped         LogisticsDeliveryStatus = "return_shipped"
+	LDStatusReturnDeliveryClaimed LogisticsDeliveryStatus = "return_delivery_claimed" // Buyer claims return was delivered
 
 	LDStatusReturnDamageDisputed  LogisticsDeliveryStatus = "return_damage_disputed" // Seller claims damage
 	LDStatusPendingRefundApproval LogisticsDeliveryStatus = "pending_refund_approval" // Awaiting admin to approve refund after good return
@@ -87,10 +88,13 @@ type LogisticsDelivery struct {
 	ReturnCarrier         *string  `db:"return_carrier" json:"return_carrier,omitempty"`
 	ReturnCostBuyerShare  *float64 `db:"return_cost_buyer_share" json:"return_cost_buyer_share,omitempty"`
 	ReturnCostSellerShare *float64 `db:"return_cost_seller_share" json:"return_cost_seller_share,omitempty"`
-	ReturnCondition       *string    `db:"return_condition" json:"return_condition,omitempty"`
-	DamageClaimReason     *string    `db:"damage_claim_reason" json:"damage_claim_reason,omitempty"`
-	DamageClaimEvidenceURLs []string `db:"-" json:"damage_claim_evidence_urls,omitempty"` // Loaded from evidence table
-	ReturnReceivedAt      *time.Time `db:"return_received_at" json:"return_received_at,omitempty"`
+	ReturnCondition             *string    `db:"return_condition" json:"return_condition,omitempty"`
+	DamageClaimReason           *string    `db:"damage_claim_reason" json:"damage_claim_reason,omitempty"`
+	DamageClaimEvidenceURLs     []string   `db:"-" json:"damage_claim_evidence_urls,omitempty"` // Loaded from evidence table
+	ReturnReceivedAt            *time.Time `db:"return_received_at" json:"return_received_at,omitempty"`
+	ReturnDeliveryClaimedAt     *time.Time `db:"return_delivery_claimed_at" json:"return_delivery_claimed_at,omitempty"`
+	ReturnConfirmationDeadline  *time.Time `db:"return_confirmation_deadline" json:"return_confirmation_deadline,omitempty"`
+	ReturnAutoEscalationAt      *time.Time `db:"return_auto_escalation_at" json:"return_auto_escalation_at,omitempty"`
 	DisputeID         *uuid.UUID `db:"dispute_id" json:"dispute_id,omitempty"`
 	DisputeOutcome    *string    `db:"dispute_outcome" json:"dispute_outcome,omitempty"` // buyer_wins, seller_wins, partial_refund
 	LastReminderSentAt *time.Time `db:"last_reminder_sent_at" json:"last_reminder_sent_at,omitempty"`
@@ -135,8 +139,12 @@ func (s LogisticsDeliveryStatus) CanTransitionTo(next LogisticsDeliveryStatus) b
 			LDStatusRefunded, // Admin can refund if return not possible
 		},
 	LDStatusReturnShipped: {
+			LDStatusReturnDeliveryClaimed, // Buyer claims return was delivered
+		},
+		LDStatusReturnDeliveryClaimed: {
 			LDStatusReturnConfirmed,      // Seller confirms good condition
 			LDStatusReturnDamageDisputed, // Seller claims damage
+			LDStatusDisputed,             // Auto-escalate if seller unresponsive
 		},
 		LDStatusReturnConfirmed: {
 			LDStatusPendingRefundApproval, // Awaiting admin approval
@@ -192,14 +200,17 @@ func (ld *LogisticsDelivery) CanSellerOpenDispute() bool {
 	if ld.DeliveryClaimedAt == nil {
 		return false
 	}
-	return time.Since(*ld.DeliveryClaimedAt) >= 7*24*time.Hour
+	return time.Since(*ld.DeliveryClaimedAt) >= 2*24*time.Hour
+}
+func (ld *LogisticsDelivery) CanClaimReturnDelivery() bool {
+	return ld.Status == LDStatusReturnShipped
 }
 func (ld *LogisticsDelivery) CanSellerConfirmReturn() bool {
-	return ld.Status == LDStatusReturnShipped
+	return ld.Status == LDStatusReturnDeliveryClaimed
 }
 func (ld *LogisticsDelivery) IsInReturnFlow() bool {
 	switch ld.Status {
-	case LDStatusReturnRequired, LDStatusReturnShipped,
+	case LDStatusReturnRequired, LDStatusReturnShipped, LDStatusReturnDeliveryClaimed,
 		LDStatusReturnDamageDisputed, LDStatusPendingRefundApproval, LDStatusReturnConfirmed:
 		return true
 	}

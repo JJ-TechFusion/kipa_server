@@ -326,6 +326,23 @@ func (r *LogisticsDeliveryRepo) GetReadyForAutoEscalation(ctx context.Context) (
 	return deliveries, nil
 }
 
+func (r *LogisticsDeliveryRepo) GetReadyForReturnAutoEscalation(ctx context.Context) ([]*domain.LogisticsDelivery, error) {
+	var deliveries []*domain.LogisticsDelivery
+	query := `
+		SELECT * FROM logistics_deliveries
+		WHERE status = 'return_delivery_claimed'
+		AND return_auto_escalation_at IS NOT NULL
+		AND return_auto_escalation_at <= $1
+		ORDER BY return_auto_escalation_at ASC`
+
+	err := r.db.SelectContext(ctx, &deliveries, query, time.Now())
+	if err != nil {
+		return nil, err
+	}
+
+	return deliveries, nil
+}
+
 func (r *LogisticsDeliveryRepo) GetPendingAdminApproval(ctx context.Context, limit, offset int) ([]*domain.LogisticsDelivery, int, error) {
 	var deliveries []*domain.LogisticsDelivery
 	var total int

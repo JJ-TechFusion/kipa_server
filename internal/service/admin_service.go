@@ -168,6 +168,7 @@ type AdminServiceImpl struct {
 	notificationLogRepo repository.NotificationLogRepository
 	redisClient         RedisHealthChecker
 	notificationService NotificationService
+	feeCalculator       FeeCalculatorService
 	logger              *zap.Logger
 }
 
@@ -226,6 +227,7 @@ func NewAdminService(
 	escrowRepo repository.EscrowRepository,
 	notificationLogRepo repository.NotificationLogRepository,
 	notificationService NotificationService,
+	feeCalculator FeeCalculatorService,
 	logger *zap.Logger,
 ) AdminService {
 	return &AdminServiceImpl{
@@ -242,6 +244,7 @@ func NewAdminService(
 		escrowRepo:          escrowRepo,
 		notificationLogRepo: notificationLogRepo,
 		notificationService: notificationService,
+		feeCalculator:       feeCalculator,
 		logger:              logger,
 	}
 }
@@ -555,6 +558,11 @@ func (s *AdminServiceImpl) UpdateDeliveryPricing(ctx context.Context, pricing *d
 		return fmt.Errorf("failed to update delivery pricing: %w", err)
 	}
 
+	// Invalidate the fee calculator cache so new pricing takes effect immediately
+	if s.feeCalculator != nil {
+		s.feeCalculator.InvalidateCache()
+	}
+
 	s.logger.Info("delivery pricing updated by admin",
 		zap.String("admin_id", adminID.String()),
 		zap.Float64("base_fee", pricing.BaseFee),
@@ -593,6 +601,11 @@ func (s *AdminServiceImpl) UpdatePlatformFees(ctx context.Context, fees *domain.
 	desc := "Platform commission rates for buyers, sellers, and rider payouts"
 	if err := s.settingsRepo.Set(ctx, "platform_fees", value, &desc, &adminID); err != nil {
 		return fmt.Errorf("failed to update platform fees: %w", err)
+	}
+
+	// Invalidate the fee calculator cache so new fees take effect immediately
+	if s.feeCalculator != nil {
+		s.feeCalculator.InvalidateCache()
 	}
 
 	s.logger.Info("platform fees updated by admin",
@@ -952,12 +965,14 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 	}
 	var refundAmount float64
 	var newStatus domain.EscrowStatus
+	// Service fee (BuyerFee) is retained by platform - max refund is ItemAmount
+	maxRefundable := escrow.ItemAmount
 	if refundType == "full" {
-		refundAmount = escrow.TotalLocked
+		refundAmount = maxRefundable
 		newStatus = domain.EscrowStatusRefunded
 	} else {
-		if amount <= 0 || amount > escrow.TotalLocked {
-			return fmt.Errorf("invalid refund amount: must be between 0 and %.2f", escrow.TotalLocked)
+		if amount <= 0 || amount > maxRefundable {
+			return fmt.Errorf("invalid refund amount: must be between 0 and %.2f", maxRefundable)
 		}
 		refundAmount = amount
 		newStatus = domain.EscrowStatusPartialRefund

@@ -187,6 +187,7 @@ func main() {
 		prRepo,
 		walletService,
 		notificationService,
+		feeCalculator,
 		cfg,
 		logger,
 	)
@@ -292,6 +293,7 @@ func main() {
 		escrowRepo,
 		notificationLogRepo,
 		notificationService,
+		feeCalculator,
 		logger,
 	)
 	disputeResolutionService := service.NewDisputeResolutionService(

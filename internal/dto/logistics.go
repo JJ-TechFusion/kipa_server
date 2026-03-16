@@ -62,6 +62,11 @@ type MarkReturnShippedRequest struct {
 	ReturnTrackingNumber string `json:"return_tracking_number" binding:"required,min=3,max=255"`
 }
 
+type ClaimReturnDeliveryRequest struct {
+	DeliveryProofURL *string `json:"delivery_proof_url" binding:"omitempty,url"`
+	Notes            *string `json:"notes" binding:"omitempty,max=1000"`
+}
+
 type ConfirmReturnReceivedRequest struct {
 	Condition         string   `json:"condition" binding:"required,oneof=good damaged incomplete"`
 	Notes             *string  `json:"notes" binding:"omitempty,max=1000"`
@@ -210,8 +215,9 @@ func GetStatusDisplay(status domain.LogisticsDeliveryStatus) string {
 		domain.LDStatusFundsReleased:         "Funds Released",
 		domain.LDStatusDisputed:              "Disputed",
 		domain.LDStatusReturnRequired:        "Return Required",
-		domain.LDStatusReturnShipped:         "Return Shipped",
-		domain.LDStatusReturnDamageDisputed:  "Return Damage Disputed",
+		domain.LDStatusReturnShipped:          "Return Shipped",
+		domain.LDStatusReturnDeliveryClaimed:  "Return Delivery Claimed",
+		domain.LDStatusReturnDamageDisputed:   "Return Damage Disputed",
 		domain.LDStatusPendingRefundApproval: "Pending Refund Approval",
 		domain.LDStatusReturnConfirmed:       "Return Confirmed",
 		domain.LDStatusRefunded:              "Refunded",
@@ -496,6 +502,23 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 				},
 			})
 		}
+		if event, ok := eventByStatus[domain.LDStatusReturnDeliveryClaimed]; ok {
+			isCompleted := hasReturnConfirmed || delivery.Status == domain.LDStatusReturnDamageDisputed ||
+				delivery.Status == domain.LDStatusRefunded
+			steps = append(steps, TimelineStep{
+				Status:      "return_delivery_claimed",
+				Title:       "Return Delivery Claimed",
+				Description: "Buyer claims return delivered to seller",
+				Timestamp:   &event.CreatedAt,
+				ActorType:   "buyer",
+				IsCompleted: isCompleted,
+				IsCurrent:   delivery.Status == domain.LDStatusReturnDeliveryClaimed,
+				IsDispute:   true,
+				Metadata: map[string]interface{}{
+					"confirmation_deadline": delivery.ReturnConfirmationDeadline,
+				},
+			})
+		}
 		if delivery.Status == domain.LDStatusReturnDamageDisputed {
 			steps = append(steps, TimelineStep{
 				Status:      "return_damage_disputed",
@@ -556,27 +579,4 @@ func buildDisputeTimeline(delivery *domain.LogisticsDelivery, events []*domain.L
 	}
 
 	return steps
-}
-func getStatusIndex(status domain.LogisticsDeliveryStatus) int {
-	order := map[domain.LogisticsDeliveryStatus]int{
-		domain.LDStatusAwaitingShipment:      0,
-		domain.LDStatusShipped:               1,
-		domain.LDStatusDeliveryClaimed:       2,
-		domain.LDStatusConfirmed:             3,
-		domain.LDStatusPendingAdminApproval:  4,
-		domain.LDStatusFundsReleased:         5,
-		domain.LDStatusDisputed:              10,
-		domain.LDStatusReturnRequired:        11,
-		domain.LDStatusReturnShipped:         12,
-		domain.LDStatusReturnDamageDisputed:  14,
-		domain.LDStatusPendingRefundApproval: 15,
-		domain.LDStatusReturnConfirmed:       16,
-		domain.LDStatusRefunded:              20,
-		domain.LDStatusReleasedByAdmin:       21,
-		domain.LDStatusCancelled:             99,
-	}
-	if idx, ok := order[status]; ok {
-		return idx
-	}
-	return -1
 }

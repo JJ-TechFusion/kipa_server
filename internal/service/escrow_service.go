@@ -262,10 +262,12 @@ func (s *EscrowServiceImpl) Refund(ctx context.Context, escrowID uuid.UUID, reas
 		return domain.ErrInvalidStatusTransition
 	}
 	idempotencyKey := fmt.Sprintf("escrow_refund_%s", escrowID.String())
+	// Refund only the item amount - service fee (BuyerFee) is kept by platform
+	refundAmount := escrow.ItemAmount
 	_, err = s.walletService.Credit(
 		ctx,
 		escrow.BuyerID,
-		escrow.TotalLocked,
+		refundAmount,
 		domain.WalletTxRefund,
 		"escrow",
 		escrowID,
@@ -285,7 +287,8 @@ func (s *EscrowServiceImpl) Refund(ctx context.Context, escrowID uuid.UUID, reas
 	s.logger.Info("escrow refunded",
 		zap.String("escrow_id", escrowID.String()),
 		zap.String("reason", reason),
-		zap.Float64("refund_amount", escrow.TotalLocked),
+		zap.Float64("refund_amount", refundAmount),
+		zap.Float64("service_fee_retained", escrow.BuyerFee),
 	)
 
 	return nil

@@ -312,6 +312,8 @@ type ErrandRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.ErrandStatus) error
 	AssignRider(ctx context.Context, errandID, riderID, jobID uuid.UUID) error
 	SetDeliveryJobID(ctx context.Context, errandID, jobID uuid.UUID) error
+	GetStuckErrands(ctx context.Context) ([]*domain.Errand, error)
+	MarkCompleted(ctx context.Context, id uuid.UUID) error
 }
 type ChatMessageRepository interface {
 	Create(ctx context.Context, msg *domain.ChatMessage) error
@@ -335,6 +337,7 @@ type LogisticsDeliveryRepository interface {
 	GetExceededShipDeadlines(ctx context.Context) ([]*domain.LogisticsDelivery, error)
 	GetPendingConfirmationReminders(ctx context.Context, reminderIntervalHours int) ([]*domain.LogisticsDelivery, error)
 	GetReadyForAutoEscalation(ctx context.Context) ([]*domain.LogisticsDelivery, error)
+	GetReadyForReturnAutoEscalation(ctx context.Context) ([]*domain.LogisticsDelivery, error)
 	GetPendingAdminApproval(ctx context.Context, limit, offset int) ([]*domain.LogisticsDelivery, int, error)
 	SetShipped(ctx context.Context, id uuid.UUID, carrier *domain.LogisticsCarrier, carrierOtherName, trackingNumber *string, trackingURL, shipmentReceiptURL *string, estimatedDeliveryAt *time.Time) error
 	SetDeliveryClaimed(ctx context.Context, id uuid.UUID, confirmationDeadline, autoEscalationAt time.Time) error

@@ -354,7 +354,10 @@ func (s *DisputeResolutionServiceImpl) handlePartialRefund(ctx context.Context, 
 	outcome := "partial_refund"
 	pr.DisputeOutcome = &outcome
 	refundAmount := *req.RefundAmount
-	sellerAmount := escrow.TotalLocked - refundAmount
+	// Calculate seller amount from item amount, then deduct seller commission
+	sellerGross := escrow.ItemAmount - refundAmount
+	sellerFee := s.feeCalculator.CalculateSellerFee(sellerGross)
+	sellerAmount := sellerGross - sellerFee
 	idempotencyKey := fmt.Sprintf("dispute_partial_buyer_%s", dispute.ID.String())
 	_, err := s.walletService.Credit(ctx, *pr.BuyerID, refundAmount, domain.WalletTxRefund, "dispute", dispute.ID, req.ResolutionNotes, idempotencyKey)
 	if err != nil {
@@ -398,7 +401,9 @@ func (s *DisputeResolutionServiceImpl) handlePartialRefund(ctx context.Context, 
 
 func (s *DisputeResolutionServiceImpl) processFullRefund(ctx context.Context, dispute *domain.Dispute, escrow *domain.Escrow, pr *domain.PaymentRequest, adminID uuid.UUID, notes string) error {
 	idempotencyKey := fmt.Sprintf("dispute_refund_%s", dispute.ID.String())
-	_, err := s.walletService.Credit(ctx, *pr.BuyerID, escrow.TotalLocked, domain.WalletTxRefund, "dispute", dispute.ID, notes, idempotencyKey)
+	// Refund only item amount - service fee retained by platform
+	refundAmount := escrow.ItemAmount
+	_, err := s.walletService.Credit(ctx, *pr.BuyerID, refundAmount, domain.WalletTxRefund, "dispute", dispute.ID, notes, idempotencyKey)
 	if err != nil {
 		return err
 	}
@@ -416,7 +421,7 @@ func (s *DisputeResolutionServiceImpl) processFullRefund(ctx context.Context, di
 	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
 		return err
 	}
-	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked), domain.NotificationRefundProcessed)
+	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed", fmt.Sprintf("NGN %.2f has been refunded to your wallet.", refundAmount), domain.NotificationRefundProcessed)
 	s.sendNotification(ctx, pr.SellerID, "Dispute Resolved", notes, domain.NotificationDisputeResolved)
 
 	// Close the support chat for this dispute
@@ -712,7 +717,9 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 		return err
 	}
 	idempotencyKey := fmt.Sprintf("return_refund_%s", job.ID.String())
-	_, err = s.walletService.Credit(ctx, *pr.BuyerID, escrow.TotalLocked, domain.WalletTxRefund, "delivery_job", job.ID, "Refund after return confirmed", idempotencyKey)
+	// Refund only item amount - service fee retained by platform
+	refundAmount := escrow.ItemAmount
+	_, err = s.walletService.Credit(ctx, *pr.BuyerID, refundAmount, domain.WalletTxRefund, "delivery_job", job.ID, "Refund after return confirmed", idempotencyKey)
 	if err != nil {
 		return err
 	}
@@ -735,7 +742,7 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 		return err
 	}
 	s.sendNotification(ctx, *pr.BuyerID, "Refund Processed",
-		fmt.Sprintf("NGN %.2f has been refunded to your wallet.", escrow.TotalLocked),
+		fmt.Sprintf("NGN %.2f has been refunded to your wallet.", refundAmount),
 		domain.NotificationRefundProcessed)
 	s.sendNotification(ctx, pr.SellerID, "Return Complete",
 		"The return has been completed. Buyer has been refunded.",
@@ -748,7 +755,7 @@ func (s *DisputeResolutionServiceImpl) processReturnRefund(ctx context.Context, 
 
 	s.logger.Info("return refund processed",
 		zap.String("job_id", job.ID.String()),
-		zap.Float64("amount", escrow.TotalLocked),
+		zap.Float64("amount", refundAmount),
 	)
 
 	return nil
@@ -796,7 +803,10 @@ func (s *DisputeResolutionServiceImpl) ResolveDamageClaim(ctx context.Context, r
 }
 
 func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Context, job *domain.DeliveryJob, pr *domain.PaymentRequest, escrow *domain.Escrow, refundAmount float64, notes string) error {
-	sellerAmount := escrow.TotalLocked - refundAmount
+	// Calculate seller amount from item amount, then deduct seller commission
+	sellerGross := escrow.ItemAmount - refundAmount
+	sellerFee := s.feeCalculator.CalculateSellerFee(sellerGross)
+	sellerAmount := sellerGross - sellerFee
 	idempotencyKey := fmt.Sprintf("return_partial_buyer_%s", job.ID.String())
 	_, err := s.walletService.Credit(ctx, *pr.BuyerID, refundAmount, domain.WalletTxRefund, "delivery_job", job.ID, notes, idempotencyKey)
 	if err != nil {
@@ -845,7 +855,10 @@ func (s *DisputeResolutionServiceImpl) processPartialReturnRefund(ctx context.Co
 
 func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job *domain.DeliveryJob, pr *domain.PaymentRequest, escrow *domain.Escrow, notes string) error {
 	idempotencyKey := fmt.Sprintf("return_damage_seller_%s", job.ID.String())
-	_, err := s.walletService.Credit(ctx, pr.SellerID, escrow.TotalLocked, domain.WalletTxEscrowRelease, "delivery_job", job.ID, notes, idempotencyKey)
+	// Deduct seller commission from item amount
+	sellerFee := s.feeCalculator.CalculateSellerFee(escrow.ItemAmount)
+	sellerPayout := escrow.ItemAmount - sellerFee
+	_, err := s.walletService.Credit(ctx, pr.SellerID, sellerPayout, domain.WalletTxEscrowRelease, "delivery_job", job.ID, notes, idempotencyKey)
 	if err != nil {
 		return err
 	}
@@ -858,7 +871,7 @@ func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job 
 		s.broadcaster.BroadcastJobStatus(job.ID.String(), string(domain.DJStatusReturnConfirmed))
 	}
 	now := time.Now()
-	escrow.SellerPayout = &escrow.TotalLocked
+	escrow.SellerPayout = &sellerPayout
 	escrow.ReleasedAt = &now
 	escrow.Status = domain.EscrowStatusReleased
 	if err := s.escrowRepo.Update(ctx, escrow); err != nil {
@@ -873,7 +886,7 @@ func (s *DisputeResolutionServiceImpl) releaseToSeller(ctx context.Context, job 
 		"Admin determined the return damage was severe. Funds released to seller.",
 		domain.NotificationDisputeResolved)
 	s.sendNotification(ctx, pr.SellerID, "Funds Released",
-		fmt.Sprintf("NGN %.2f has been credited due to confirmed return damage.", escrow.TotalLocked),
+		fmt.Sprintf("NGN %.2f has been credited due to confirmed return damage.", sellerPayout),
 		domain.NotificationDisputeResolved)
 
 	// Close support chat now that damage claim is resolved

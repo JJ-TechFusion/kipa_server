@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	HighValueThreshold        = 1000000.0 // 1 million NGN
-	ConfirmationWindowDays    = 14
-	SellerDisputeWindowDays   = 7
-	MinHoursBeforeClaimingDelivery = 24
+	HighValueThreshold                = 1000000.0 // 1 million NGN
+	ConfirmationWindowDays            = 2
+	SellerDisputeWindowDays           = 2
+	ReturnConfirmationWindowDays      = 2
+	MinHoursBeforeClaimingDelivery    = 24
 )
 
 type LogisticsDeliveryService interface {
@@ -38,6 +39,7 @@ type LogisticsDeliveryService interface {
 	ConfirmDelivery(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.ConfirmDeliveryRequest) error
 	CancelDelivery(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.CancelDeliveryRequest) error
 	MarkReturnShipped(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.MarkReturnShippedRequest) error
+	ClaimReturnDelivery(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.ClaimReturnDeliveryRequest) error
 	OpenDispute(ctx context.Context, id uuid.UUID, openerID uuid.UUID, openerType string, req *dto.OpenDisputeRequest) error
 	ResolveDispute(ctx context.Context, id uuid.UUID, adminID uuid.UUID, req *dto.AdminResolveDisputeRequest) error
 	ApproveRelease(ctx context.Context, id uuid.UUID, adminID uuid.UUID, req *dto.AdminApproveReleaseRequest) error
@@ -53,6 +55,7 @@ type LogisticsDeliveryService interface {
 	ProcessExceededShipDeadlines(ctx context.Context) error
 	ProcessConfirmationReminders(ctx context.Context) error
 	ProcessAutoEscalations(ctx context.Context) error
+	ProcessReturnAutoEscalations(ctx context.Context) error
 }
 
 type CreateLogisticsDeliveryRequest struct {
@@ -82,6 +85,7 @@ type LogisticsDeliveryServiceImpl struct {
 	notificationService NotificationService
 	supportChatService  SupportChatService
 	adminAlertSvc       AdminAlertService
+	feeCalculator       FeeCalculatorService
 	config              *config.Config
 	logger              *zap.Logger
 }
@@ -96,6 +100,7 @@ func NewLogisticsDeliveryService(
 	prRepo repository.PaymentRequestRepository,
 	walletService WalletService,
 	notificationService NotificationService,
+	feeCalculator FeeCalculatorService,
 	cfg *config.Config,
 	logger *zap.Logger,
 ) LogisticsDeliveryService {
@@ -109,6 +114,7 @@ func NewLogisticsDeliveryService(
 		prRepo:              prRepo,
 		walletService:       walletService,
 		notificationService: notificationService,
+		feeCalculator:       feeCalculator,
 		config:              cfg,
 		logger:              logger,
 	}
@@ -423,7 +429,7 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 		return domain.ErrUnauthorized
 	}
 
-	if delivery.Status != domain.LDStatusReturnShipped {
+	if !delivery.CanSellerConfirmReturn() {
 		return domain.ErrInvalidStatusTransition
 	}
 
@@ -431,7 +437,7 @@ func (s *LogisticsDeliveryServiceImpl) ConfirmReturnReceived(ctx context.Context
 	delivery.ReturnReceivedAt = &now
 	delivery.ReturnCondition = &req.Condition
 
-	fromStatus := domain.LDStatusReturnShipped
+	fromStatus := domain.LDStatusReturnDeliveryClaimed
 	var newStatus domain.LogisticsDeliveryStatus
 
 	switch req.Condition {
@@ -621,7 +627,8 @@ func (s *LogisticsDeliveryServiceImpl) CancelDelivery(ctx context.Context, id uu
 	escrow, _ := s.escrowRepo.GetByID(ctx, delivery.EscrowID)
 	if escrow != nil {
 		idempotencyKey := fmt.Sprintf("logistics_cancel_refund_%s", id.String())
-		s.walletService.Credit(ctx, buyerID, escrow.TotalLocked, domain.WalletTxRefund, "logistics_delivery", id, "Order cancelled - seller did not ship on time", idempotencyKey)
+		// Refund only item amount - service fee retained by platform
+		s.walletService.Credit(ctx, buyerID, escrow.ItemAmount, domain.WalletTxRefund, "logistics_delivery", id, "Order cancelled - seller did not ship on time", idempotencyKey)
 		s.escrowRepo.UpdateStatus(ctx, delivery.EscrowID, domain.EscrowStatusRefunded)
 	}
 	if err := s.prRepo.UpdateStatus(ctx, delivery.PaymentRequestID, domain.PRStatusCancelled); err != nil {
@@ -664,6 +671,51 @@ func (s *LogisticsDeliveryServiceImpl) MarkReturnShipped(ctx context.Context, id
 	})
 
 	s.sendNotification(ctx, delivery.SellerID, "Return Shipped", fmt.Sprintf("Buyer has shipped the return via %s. Tracking: %s", req.ReturnCarrier, req.ReturnTrackingNumber))
+
+	return nil
+}
+
+func (s *LogisticsDeliveryServiceImpl) ClaimReturnDelivery(ctx context.Context, id uuid.UUID, buyerID uuid.UUID, req *dto.ClaimReturnDeliveryRequest) error {
+	delivery, err := s.deliveryRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if delivery.BuyerID != buyerID {
+		return domain.ErrUnauthorized
+	}
+
+	if !delivery.CanClaimReturnDelivery() {
+		return domain.ErrCannotClaimReturnDelivery
+	}
+
+	now := time.Now()
+	confirmationDeadline := now.Add(ReturnConfirmationWindowDays * 24 * time.Hour)
+	autoEscalationAt := now.Add(ReturnConfirmationWindowDays * 24 * time.Hour)
+
+	delivery.Status = domain.LDStatusReturnDeliveryClaimed
+	delivery.ReturnDeliveryClaimedAt = &now
+	delivery.ReturnConfirmationDeadline = &confirmationDeadline
+	delivery.ReturnAutoEscalationAt = &autoEscalationAt
+
+	if err := s.deliveryRepo.Update(ctx, delivery); err != nil {
+		return err
+	}
+
+	if req.DeliveryProofURL != nil {
+		s.uploadEvidenceInternal(ctx, id, buyerID, "buyer", "return_delivery_photo", *req.DeliveryProofURL, req.Notes)
+	}
+
+	fromStatus := domain.LDStatusReturnShipped
+	s.recordEvent(ctx, id, &fromStatus, domain.LDStatusReturnDeliveryClaimed, &buyerID, "buyer", "Buyer claims return was delivered", nil)
+
+	s.sendNotification(ctx, delivery.SellerID, "Please Confirm Return Receipt",
+		fmt.Sprintf("The buyer claims the return has been delivered. Please confirm receipt within %d days or open a dispute if there are issues.", ReturnConfirmationWindowDays))
+
+	s.logger.Info("return delivery claimed by buyer",
+		zap.String("delivery_id", id.String()),
+		zap.Time("confirmation_deadline", confirmationDeadline),
+	)
 
 	return nil
 }
@@ -977,7 +1029,7 @@ func (s *LogisticsDeliveryServiceImpl) ResolveDamageClaim(ctx context.Context, i
 		s.sendNotification(ctx, delivery.BuyerID, "Partial Refund Processed",
 			fmt.Sprintf("Admin processed a partial refund of NGN %.2f due to item damage.", *req.RefundAmount))
 		s.sendNotification(ctx, delivery.SellerID, "Damage Claim Resolved",
-			fmt.Sprintf("Admin processed a partial refund. You received NGN %.2f for the damage.", escrow.TotalLocked-*req.RefundAmount))
+			fmt.Sprintf("Admin processed a partial refund. You received NGN %.2f for the damage.", escrow.ItemAmount-*req.RefundAmount))
 
 	case "release_to_seller":
 		newStatus = domain.LDStatusReleasedByAdmin
@@ -1224,7 +1276,7 @@ func (s *LogisticsDeliveryServiceImpl) ProcessAutoEscalations(ctx context.Contex
 	}
 
 	for _, d := range deliveries {
-		dispute := domain.NewDispute(d.EscrowID, d.SellerID, "Auto-escalated: buyer unresponsive for 14 days", nil)
+		dispute := domain.NewDispute(d.EscrowID, d.SellerID, "Auto-escalated: buyer unresponsive for 2 days", nil)
 		if err := s.disputeRepo.Create(ctx, dispute); err != nil {
 			s.logger.Error("failed to create auto-escalation dispute", zap.Error(err), zap.String("delivery_id", d.ID.String()))
 			continue
@@ -1263,13 +1315,72 @@ func (s *LogisticsDeliveryServiceImpl) ProcessAutoEscalations(ctx context.Contex
 					itemName = pr.ItemName
 				}
 
-				s.adminAlertSvc.AlertAutoEscalatedToDispute(context.Background(), delivery.ID, buyerName, sellerName, itemName, "buyer unresponsive for 14 days")
+				s.adminAlertSvc.AlertAutoEscalatedToDispute(context.Background(), delivery.ID, buyerName, sellerName, itemName, "buyer unresponsive for 2 days")
 			}(d)
 		}
 	}
 
 	if len(deliveries) > 0 {
 		s.logger.Info("auto-escalated deliveries", zap.Int("count", len(deliveries)))
+	}
+
+	return nil
+}
+
+func (s *LogisticsDeliveryServiceImpl) ProcessReturnAutoEscalations(ctx context.Context) error {
+	deliveries, err := s.deliveryRepo.GetReadyForReturnAutoEscalation(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, d := range deliveries {
+		dispute := domain.NewDispute(d.EscrowID, d.BuyerID, "Auto-escalated: seller unresponsive for 2 days after return delivery claimed", nil)
+		if err := s.disputeRepo.Create(ctx, dispute); err != nil {
+			s.logger.Error("failed to create return auto-escalation dispute", zap.Error(err), zap.String("delivery_id", d.ID.String()))
+			continue
+		}
+
+		if err := s.deliveryRepo.SetDispute(ctx, d.ID, dispute.ID); err != nil {
+			s.logger.Error("failed to set dispute on delivery", zap.Error(err))
+			continue
+		}
+
+		s.escrowRepo.UpdateStatus(ctx, d.EscrowID, domain.EscrowStatusDisputed)
+
+		fromStatus := d.Status
+		d.Status = domain.LDStatusDisputed
+		s.deliveryRepo.Update(ctx, d)
+		s.recordEvent(ctx, d.ID, &fromStatus, domain.LDStatusDisputed, nil, "system", "Auto-escalated to admin: seller unresponsive after return delivery claimed", nil)
+
+		s.sendNotification(ctx, d.SellerID, "Return Escalated", "The return has been escalated to admin for review due to no response.")
+		s.sendNotification(ctx, d.BuyerID, "Return Escalated", "Your return has been escalated to admin for review.")
+
+		if s.adminAlertSvc != nil {
+			go func(delivery *domain.LogisticsDelivery) {
+				buyer, _ := s.userRepo.GetByID(context.Background(), delivery.BuyerID)
+				seller, _ := s.userRepo.GetByID(context.Background(), delivery.SellerID)
+				pr, _ := s.prRepo.GetByID(context.Background(), delivery.PaymentRequestID)
+
+				buyerName := ""
+				sellerName := ""
+				itemName := "Unknown Item"
+				if buyer != nil {
+					buyerName = buyer.FullName()
+				}
+				if seller != nil {
+					sellerName = seller.FullName()
+				}
+				if pr != nil {
+					itemName = pr.ItemName
+				}
+
+				s.adminAlertSvc.AlertAutoEscalatedToDispute(context.Background(), delivery.ID, buyerName, sellerName, itemName, "seller unresponsive for 2 days after return delivery claimed")
+			}(d)
+		}
+	}
+
+	if len(deliveries) > 0 {
+		s.logger.Info("auto-escalated return deliveries", zap.Int("count", len(deliveries)))
 	}
 
 	return nil
@@ -1345,7 +1456,9 @@ func (s *LogisticsDeliveryServiceImpl) releaseEscrow(ctx context.Context, delive
 
 func (s *LogisticsDeliveryServiceImpl) releaseEscrowToSeller(ctx context.Context, delivery *domain.LogisticsDelivery, escrow *domain.Escrow, releaserID uuid.UUID) {
 	idempotencyKey := fmt.Sprintf("logistics_release_%s", delivery.ID.String())
-	sellerPayout := escrow.ItemAmount // For logistics delivery, no rider fee
+	// Deduct seller commission from item amount
+	sellerFee := s.feeCalculator.CalculateSellerFee(escrow.ItemAmount)
+	sellerPayout := escrow.ItemAmount - sellerFee
 	_, err := s.walletService.Credit(ctx, delivery.SellerID, sellerPayout, domain.WalletTxEscrowRelease, "logistics_delivery", delivery.ID, "Payment released for delivered order", idempotencyKey)
 	if err != nil {
 		s.logger.Error("failed to credit seller", zap.Error(err))
@@ -1376,7 +1489,8 @@ func (s *LogisticsDeliveryServiceImpl) releaseEscrowToSeller(ctx context.Context
 }
 
 func (s *LogisticsDeliveryServiceImpl) processReturnRefund(ctx context.Context, delivery *domain.LogisticsDelivery, escrow *domain.Escrow) {
-	refundAmount := escrow.TotalLocked
+	// Refund only item amount - service fee retained by platform
+	refundAmount := escrow.ItemAmount
 
 	idempotencyKey := fmt.Sprintf("return_refund_%s", delivery.ID.String())
 	s.walletService.Credit(ctx, delivery.BuyerID, refundAmount, domain.WalletTxRefund, "logistics_delivery", delivery.ID, "Refund after return confirmed", idempotencyKey)
@@ -1398,7 +1512,10 @@ func (s *LogisticsDeliveryServiceImpl) processReturnRefund(ctx context.Context, 
 }
 
 func (s *LogisticsDeliveryServiceImpl) processPartialRefund(ctx context.Context, delivery *domain.LogisticsDelivery, escrow *domain.Escrow, refundAmount float64) {
-	sellerAmount := escrow.TotalLocked - refundAmount
+	// Calculate seller amount from item amount, then deduct seller commission
+	sellerGross := escrow.ItemAmount - refundAmount
+	sellerFee := s.feeCalculator.CalculateSellerFee(sellerGross)
+	sellerAmount := sellerGross - sellerFee
 	idempotencyKey := fmt.Sprintf("partial_refund_buyer_%s", delivery.ID.String())
 	s.walletService.Credit(ctx, delivery.BuyerID, refundAmount, domain.WalletTxRefund, "logistics_delivery", delivery.ID, "Partial refund from dispute resolution", idempotencyKey)
 	if sellerAmount > 0 {

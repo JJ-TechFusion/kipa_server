@@ -229,3 +229,47 @@ func (r *ErrandRepo) SetDeliveryJobID(ctx context.Context, errandID, jobID uuid.
 	_, err := r.db.ExecContext(ctx, query, errandID, jobID)
 	return err
 }
+
+// GetStuckErrands finds errands that are still active but their delivery job is already delivered
+func (r *ErrandRepo) GetStuckErrands(ctx context.Context) ([]*domain.Errand, error) {
+	var errands []*domain.Errand
+	query := `
+		SELECT e.* FROM errands e
+		JOIN delivery_jobs dj ON e.delivery_job_id = dj.id
+		WHERE e.status IN ('searching', 'accepted', 'picked_up', 'in_transit')
+		AND dj.status = 'delivered'
+		ORDER BY e.updated_at ASC
+		LIMIT 100`
+
+	err := r.db.SelectContext(ctx, &errands, query)
+	if err != nil {
+		return nil, err
+	}
+
+	return errands, nil
+}
+
+// MarkCompleted marks an errand as completed
+func (r *ErrandRepo) MarkCompleted(ctx context.Context, id uuid.UUID) error {
+	query := `
+		UPDATE errands
+		SET status = 'completed',
+			delivered_at = COALESCE(delivered_at, NOW()),
+			completed_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1`
+	result, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return domain.ErrErrandNotFound
+	}
+
+	return nil
+}

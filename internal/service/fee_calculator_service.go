@@ -36,6 +36,8 @@ type FeeCalculatorService interface {
 	CalculatePlatformDeliveryFee(deliveryFee float64) float64
 
 	GetZoneByLocation(ctx context.Context, lat, lng float64) (*domain.DeliveryZone, error)
+
+	InvalidateCache()
 }
 
 type DeliveryFeeEstimate struct {
@@ -208,6 +210,14 @@ func (s *FeeCalculatorServiceImpl) calculateDistanceKM(lat1, lng1, lat2, lng2 fl
 func (s *FeeCalculatorServiceImpl) CalculatePlatformDeliveryFee(deliveryFee float64) float64 {
 	rate := 1.0 - s.getRiderPayoutRate()
 	return math.Round(deliveryFee*rate*100) / 100
+}
+
+func (s *FeeCalculatorServiceImpl) InvalidateCache() {
+	s.cacheMutex.Lock()
+	defer s.cacheMutex.Unlock()
+	s.feesCache = nil
+	s.pricingCache = nil
+	s.cacheExpiry = time.Time{}
 }
 func (s *FeeCalculatorServiceImpl) getBuyerFeeRate() float64 {
 	fees := s.getPlatformFees()
