@@ -1,0 +1,2 @@
+-- Note: PostgreSQL does not support removing enum values directly.
+-- The 'rejected' value will remain in the enum type.
