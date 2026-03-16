@@ -5,3 +5,4 @@ ALTER TABLE logistics_deliveries
 DROP COLUMN IF EXISTS return_delivery_claimed_at,
 DROP COLUMN IF EXISTS return_confirmation_deadline,
 DROP COLUMN IF EXISTS return_auto_escalation_at;
+

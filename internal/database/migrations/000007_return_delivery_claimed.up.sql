@@ -1,3 +1,6 @@
+-- Add new enum value for return_delivery_claimed status
+ALTER TYPE logistics_delivery_status ADD VALUE IF NOT EXISTS 'return_delivery_claimed';
+
 -- Add return delivery claimed fields to logistics_deliveries
 ALTER TABLE logistics_deliveries
 ADD COLUMN IF NOT EXISTS return_delivery_claimed_at TIMESTAMPTZ,
