@@ -1,8 +1,3 @@
--- Remove return delivery claimed fields from logistics_deliveries
-DROP INDEX IF EXISTS idx_logistics_deliveries_return_auto_escalation;
-
-ALTER TABLE logistics_deliveries
-DROP COLUMN IF EXISTS return_delivery_claimed_at,
-DROP COLUMN IF EXISTS return_confirmation_deadline,
-DROP COLUMN IF EXISTS return_auto_escalation_at;
-
+-- Note: PostgreSQL does not support removing enum values directly.
+-- The 'return_delivery_claimed' value will remain in the enum type.
+-- This is safe as unused enum values don't affect functionality.
