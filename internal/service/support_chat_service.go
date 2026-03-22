@@ -344,14 +344,35 @@ func (s *SupportChatServiceImpl) GetConversationDetails(ctx context.Context, con
 
 	unreadCount, _ := s.messageRepo.GetUnreadCount(ctx, conversationID, true)
 
+	// Fetch the specific dispute linked to this conversation (if any)
+	var disputeDetails *dto.SupportDisputeDetails
+	if conversation.DisputeID != nil {
+		disputeDetails, err = s.getDisputeDetails(ctx, *conversation.DisputeID)
+		if err != nil {
+			s.logger.Warn("failed to get dispute details", zap.Error(err))
+		}
+	}
+
+	// Get other active disputes for this user (excluding the one linked to this conversation)
 	activeDisputes, err := s.getActiveDisputesForUser(ctx, conversation.UserID)
 	if err != nil {
 		s.logger.Warn("failed to get active disputes", zap.Error(err))
 		activeDisputes = []*dto.SupportDisputeDetails{}
 	}
 
+	// Filter out the dispute that's already linked to this conversation
+	if conversation.DisputeID != nil {
+		filtered := make([]*dto.SupportDisputeDetails, 0, len(activeDisputes))
+		for _, d := range activeDisputes {
+			if d.Dispute.ID != *conversation.DisputeID {
+				filtered = append(filtered, d)
+			}
+		}
+		activeDisputes = filtered
+	}
+
 	return &dto.SupportContextResponse{
-		Conversation:   dto.ToSupportConversationResponse(conversation, userName, userPhone, unreadCount),
+		Conversation:   dto.ToSupportConversationResponseWithDispute(conversation, userName, userPhone, unreadCount, disputeDetails),
 		ActiveDisputes: activeDisputes,
 	}, nil
 }
