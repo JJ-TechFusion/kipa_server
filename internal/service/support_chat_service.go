@@ -111,8 +111,7 @@ func (s *SupportChatServiceImpl) GetOrCreateConversation(ctx context.Context, us
 	unreadCount, _ := s.messageRepo.GetUnreadCount(ctx, conversation.ID, false)
 
 	return &dto.SupportContextResponse{
-		Conversation:   dto.ToSupportConversationResponse(conversation, userName, userPhone, unreadCount),
-		ActiveDisputes: nil,
+		Conversation: dto.ToSupportConversationResponse(conversation, userName, userPhone, unreadCount),
 	}, nil
 }
 
@@ -296,7 +295,6 @@ func (s *SupportChatServiceImpl) MarkAsRead(ctx context.Context, userID uuid.UUI
 	return s.messageRepo.MarkRead(ctx, conversation.ID, false)
 }
 
-
 func (s *SupportChatServiceImpl) ListConversations(ctx context.Context, status *domain.SupportConversationStatus, limit, offset int) ([]*dto.SupportConversationResponse, int, error) {
 	conversations, total, err := s.conversationRepo.List(ctx, status, limit, offset)
 	if err != nil {
@@ -353,27 +351,8 @@ func (s *SupportChatServiceImpl) GetConversationDetails(ctx context.Context, con
 		}
 	}
 
-	// Get other active disputes for this user (excluding the one linked to this conversation)
-	activeDisputes, err := s.getActiveDisputesForUser(ctx, conversation.UserID)
-	if err != nil {
-		s.logger.Warn("failed to get active disputes", zap.Error(err))
-		activeDisputes = []*dto.SupportDisputeDetails{}
-	}
-
-	// Filter out the dispute that's already linked to this conversation
-	if conversation.DisputeID != nil {
-		filtered := make([]*dto.SupportDisputeDetails, 0, len(activeDisputes))
-		for _, d := range activeDisputes {
-			if d.Dispute.ID != *conversation.DisputeID {
-				filtered = append(filtered, d)
-			}
-		}
-		activeDisputes = filtered
-	}
-
 	return &dto.SupportContextResponse{
-		Conversation:   dto.ToSupportConversationResponseWithDispute(conversation, userName, userPhone, unreadCount, disputeDetails),
-		ActiveDisputes: activeDisputes,
+		Conversation: dto.ToSupportConversationResponseWithDispute(conversation, userName, userPhone, unreadCount, disputeDetails),
 	}, nil
 }
 
@@ -720,8 +699,7 @@ func (s *SupportChatServiceImpl) GetUserConversation(ctx context.Context, userID
 	}
 
 	return &dto.SupportContextResponse{
-		Conversation:   convResponse,
-		ActiveDisputes: nil,
+		Conversation: convResponse,
 	}, nil
 }
 

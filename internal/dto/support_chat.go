@@ -29,21 +29,20 @@ type SupportMessageResponse struct {
 }
 
 type SupportConversationResponse struct {
-	ID            uuid.UUID                `json:"id"`
-	UserID        uuid.UUID                `json:"user_id"`
-	UserName      string                   `json:"user_name"`
-	UserPhone     string                   `json:"user_phone"`
-	DisputeID     *uuid.UUID               `json:"dispute_id,omitempty"`
-	Dispute       *SupportDisputeDetails   `json:"dispute,omitempty"`
-	Status        string                   `json:"status"`
-	LastMessageAt *time.Time               `json:"last_message_at,omitempty"`
-	UnreadCount   int                      `json:"unread_count"`
-	CreatedAt     time.Time                `json:"created_at"`
+	ID            uuid.UUID              `json:"id"`
+	UserID        uuid.UUID              `json:"user_id"`
+	UserName      string                 `json:"user_name"`
+	UserPhone     string                 `json:"user_phone"`
+	DisputeID     *uuid.UUID             `json:"dispute_id,omitempty"`
+	Dispute       *SupportDisputeDetails `json:"dispute,omitempty"`
+	Status        string                 `json:"status"`
+	LastMessageAt *time.Time             `json:"last_message_at,omitempty"`
+	UnreadCount   int                    `json:"unread_count"`
+	CreatedAt     time.Time              `json:"created_at"`
 }
 
 type SupportContextResponse struct {
-	Conversation   *SupportConversationResponse  `json:"conversation"`
-	ActiveDisputes []*SupportDisputeDetails      `json:"active_disputes"`
+	Conversation *SupportConversationResponse `json:"conversation"`
 }
 
 type SupportDisputeDetails struct {
