@@ -26,6 +26,7 @@ type UserRepository interface {
 	GetStatistics(ctx context.Context) (*UserStatistics, error)
 	SoftDelete(ctx context.Context, userID uuid.UUID, reason string) error
 	GetAllActiveUserIDs(ctx context.Context) ([]uuid.UUID, error)
+	GetActiveUserIDsByRole(ctx context.Context, role string) ([]uuid.UUID, error)
 }
 
 type UserStatistics struct {

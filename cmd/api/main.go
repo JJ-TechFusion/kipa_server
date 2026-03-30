@@ -112,6 +112,7 @@ func main() {
 	}
 	authService := service.NewAuthService(
 		userRepo,
+		supportStaffRepo,
 		otpRepo,
 		idempotencyRepo,
 		sessionRepo,

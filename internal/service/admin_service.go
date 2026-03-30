@@ -392,7 +392,7 @@ func (s *AdminServiceImpl) VerifyDriver(ctx context.Context, driverID uuid.UUID,
 
 	driver.IsVerified = true
 	driver.Status = domain.DriverStatusIdle // Set to idle so they can start working
-	
+
 	if err := s.driverRepo.Update(ctx, driver); err != nil {
 		return fmt.Errorf("failed to verify driver: %w", err)
 	}
@@ -411,7 +411,7 @@ func (s *AdminServiceImpl) SuspendDriver(ctx context.Context, driverID uuid.UUID
 	if err != nil {
 		return fmt.Errorf("failed to get driver: %w", err)
 	}
-	
+
 	if err := s.userRepo.Suspend(ctx, driver.UserID, reason); err != nil {
 		return fmt.Errorf("failed to suspend driver's user account: %w", err)
 	}
@@ -445,7 +445,7 @@ func (s *AdminServiceImpl) UnsuspendDriver(ctx context.Context, driverID uuid.UU
 }
 
 func (s *AdminServiceImpl) GetPendingDrivers(ctx context.Context, limit, offset int) ([]*domain.DriverProfile, error) {
-	
+
 	return s.driverRepo.GetPending(ctx, limit, offset)
 }
 
@@ -1018,7 +1018,6 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 		return fmt.Errorf("failed to update escrow status: %w", err)
 	}
 
-	
 	if dispute.Status != domain.DisputeStatusResolved {
 		dispute.Status = domain.DisputeStatusResolved
 		outcome := domain.DisputeOutcomeBuyerWins
@@ -1055,14 +1054,25 @@ func (s *AdminServiceImpl) ProcessRefund(ctx context.Context, disputeID uuid.UUI
 }
 
 func (s *AdminServiceImpl) SendBroadcast(ctx context.Context, title, body, topic string, adminID uuid.UUID) error {
-	if s.notificationLogRepo == nil {
-		return fmt.Errorf("notification log repository not configured")
+	if s.notificationService == nil && s.notificationLogRepo == nil {
+		return fmt.Errorf("notification service not configured")
 	}
 
-	// Get all active user IDs
-	userIDs, err := s.userRepo.GetAllActiveUserIDs(ctx)
+	var (
+		userIDs []uuid.UUID
+		err     error
+	)
+
+	switch topic {
+	case "", "all_users":
+		userIDs, err = s.userRepo.GetAllActiveUserIDs(ctx)
+	case "buyers", "sellers", "riders":
+		userIDs, err = s.userRepo.GetActiveUserIDsByRole(ctx, topic)
+	default:
+		return fmt.Errorf("invalid broadcast topic: %s", topic)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to get active users: %w", err)
+		return fmt.Errorf("failed to get broadcast recipients: %w", err)
 	}
 
 	if len(userIDs) == 0 {
@@ -1070,29 +1080,33 @@ func (s *AdminServiceImpl) SendBroadcast(ctx context.Context, title, body, topic
 		return nil
 	}
 
-	// Create notification logs for all users
-	logs := make([]*domain.NotificationLog, 0, len(userIDs))
-	for _, userID := range userIDs {
-		uid := userID // Create a copy to avoid pointer issues
-		logs = append(logs, &domain.NotificationLog{
-			UserID:           &uid,
-			Title:            title,
-			Body:             body,
-			NotificationType: domain.NotificationBroadcast,
-			Delivered:        true,
-		})
-	}
+	if s.notificationService != nil {
+		if err := s.notificationService.SendToUsers(ctx, userIDs, title, body, nil, domain.NotificationBroadcast); err != nil {
+			return fmt.Errorf("failed to send broadcast notifications: %w", err)
+		}
+	} else {
+		logs := make([]*domain.NotificationLog, 0, len(userIDs))
+		for _, userID := range userIDs {
+			uid := userID
+			logs = append(logs, &domain.NotificationLog{
+				UserID:           &uid,
+				Title:            title,
+				Body:             body,
+				NotificationType: domain.NotificationBroadcast,
+				Delivered:        true,
+			})
+		}
 
-	// Bulk insert notifications
-	if err := s.notificationLogRepo.CreateBulk(ctx, logs); err != nil {
-		return fmt.Errorf("failed to create broadcast notifications: %w", err)
+		if err := s.notificationLogRepo.CreateBulk(ctx, logs); err != nil {
+			return fmt.Errorf("failed to create broadcast notifications: %w", err)
+		}
 	}
 
 	s.logAdminAction(ctx, adminID, domain.AuditActionBroadcastNotification, domain.AuditTargetPlatform, nil, map[string]any{
-		"action":      "broadcast_notification",
-		"title":       title,
-		"topic":       topic,
-		"user_count":  len(userIDs),
+		"action":     "broadcast_notification",
+		"title":      title,
+		"topic":      topic,
+		"user_count": len(userIDs),
 	})
 
 	s.logger.Info("admin sent broadcast notification",

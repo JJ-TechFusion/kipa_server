@@ -26,6 +26,39 @@ func NewSupportChatHandler(supportChatService service.SupportChatService, logger
 	}
 }
 
+func (h *SupportChatHandler) GetSupportAccess(c *gin.Context) {
+	if isAdmin, exists := c.Get("is_admin"); exists && isAdmin.(bool) {
+		c.JSON(http.StatusOK, gin.H{
+			"is_admin":          true,
+			"is_support_staff":  false,
+			"is_active":         true,
+			"can_reply_chats":   true,
+			"can_view_disputes": true,
+			"can_resolve_chats": true,
+			"can_message_users": true,
+		})
+		return
+	}
+
+	staff, ok := middleware.GetSupportStaff(c)
+	if !ok {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "forbidden",
+			"message": "support access required",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"is_admin":          false,
+		"is_support_staff":  true,
+		"is_active":         staff.IsActive,
+		"can_reply_chats":   staff.CanReplyChats,
+		"can_view_disputes": staff.CanViewDisputes,
+		"can_resolve_chats": staff.CanResolveChats,
+		"can_message_users": staff.CanMessageUsers,
+	})
+}
 
 func (h *SupportChatHandler) GetOrCreateConversation(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
@@ -488,6 +521,8 @@ func (h *SupportChatHandler) RegisterRoutesWithSupport(r *gin.RouterGroup, authM
 	adminSupport.Use(authMiddleware.RequireAuth())
 	adminSupport.Use(supportMiddleware.RequireSupport())
 	{
+		adminSupport.GET("/access", h.GetSupportAccess)
+
 		// List/view conversations - all support staff can access
 		adminSupport.GET("/conversations", h.ListConversations)
 		adminSupport.GET("/conversations/:id/messages", h.AdminGetHistory)

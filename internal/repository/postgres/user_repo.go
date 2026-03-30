@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"kipa/internal/domain"
@@ -195,6 +196,28 @@ func (r *UserRepo) GetAllActiveUserIDs(ctx context.Context) ([]uuid.UUID, error)
 	if err != nil {
 		return nil, err
 	}
+	return userIDs, nil
+}
+
+func (r *UserRepo) GetActiveUserIDsByRole(ctx context.Context, role string) ([]uuid.UUID, error) {
+	var userIDs []uuid.UUID
+
+	columnByRole := map[string]string{
+		"buyers":  "is_buyer",
+		"sellers": "is_seller",
+		"riders":  "is_rider",
+	}
+
+	column, ok := columnByRole[role]
+	if !ok {
+		return nil, fmt.Errorf("invalid role filter: %s", role)
+	}
+
+	query := fmt.Sprintf(`SELECT id FROM users WHERE is_suspended = false AND %s = true`, column)
+	if err := r.db.SelectContext(ctx, &userIDs, query); err != nil {
+		return nil, err
+	}
+
 	return userIDs, nil
 }
 

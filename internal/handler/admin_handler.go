@@ -940,7 +940,7 @@ func (h *AdminHandler) GetWalletTransactions(c *gin.Context) {
 type BroadcastNotificationRequest struct {
 	Title string `json:"title" binding:"required"`
 	Body  string `json:"body" binding:"required"`
-	Topic string `json:"topic"` // e.g. "all_users", "all_riders", "all_sellers"
+	Topic string `json:"topic" binding:"omitempty,oneof=all_users buyers sellers riders"`
 }
 
 func (h *AdminHandler) BroadcastNotification(c *gin.Context) {

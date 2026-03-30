@@ -21,23 +21,25 @@ import (
 )
 
 type AuthServiceImpl struct {
-	userRepo        repository.UserRepository
-	otpRepo         repository.OTPRepository
-	idempotencyRepo repository.IdempotencyRepository
-	sessionRepo     repository.SessionRepository
-	escrowRepo      repository.EscrowRepository
-	deliveryJobRepo repository.DeliveryJobRepository
-	walletRepo      repository.WalletRepository
-	verifyProvider  integration.VerifyProvider
-	jwtManager      util.JWTManager
-	hasher          util.Hasher
-	otpGenerator    util.OTPGenerator
-	config          *config.Config
-	logger          *zap.Logger
+	userRepo         repository.UserRepository
+	supportStaffRepo repository.SupportStaffRepository
+	otpRepo          repository.OTPRepository
+	idempotencyRepo  repository.IdempotencyRepository
+	sessionRepo      repository.SessionRepository
+	escrowRepo       repository.EscrowRepository
+	deliveryJobRepo  repository.DeliveryJobRepository
+	walletRepo       repository.WalletRepository
+	verifyProvider   integration.VerifyProvider
+	jwtManager       util.JWTManager
+	hasher           util.Hasher
+	otpGenerator     util.OTPGenerator
+	config           *config.Config
+	logger           *zap.Logger
 }
 
 func NewAuthService(
 	userRepo repository.UserRepository,
+	supportStaffRepo repository.SupportStaffRepository,
 	otpRepo repository.OTPRepository,
 	idempotencyRepo repository.IdempotencyRepository,
 	sessionRepo repository.SessionRepository,
@@ -52,19 +54,20 @@ func NewAuthService(
 	logger *zap.Logger,
 ) AuthService {
 	return &AuthServiceImpl{
-		userRepo:        userRepo,
-		otpRepo:         otpRepo,
-		idempotencyRepo: idempotencyRepo,
-		sessionRepo:     sessionRepo,
-		escrowRepo:      escrowRepo,
-		deliveryJobRepo: deliveryJobRepo,
-		walletRepo:      walletRepo,
-		verifyProvider:  verifyProvider,
-		jwtManager:      jwtManager,
-		hasher:          hasher,
-		otpGenerator:    otpGenerator,
-		config:          cfg,
-		logger:          logger,
+		userRepo:         userRepo,
+		supportStaffRepo: supportStaffRepo,
+		otpRepo:          otpRepo,
+		idempotencyRepo:  idempotencyRepo,
+		sessionRepo:      sessionRepo,
+		escrowRepo:       escrowRepo,
+		deliveryJobRepo:  deliveryJobRepo,
+		walletRepo:       walletRepo,
+		verifyProvider:   verifyProvider,
+		jwtManager:       jwtManager,
+		hasher:           hasher,
+		otpGenerator:     otpGenerator,
+		config:           cfg,
+		logger:           logger,
 	}
 }
 
@@ -332,10 +335,65 @@ func (s *AuthServiceImpl) VerifyAdminOTP(ctx context.Context, req *dto.AdminVeri
 		return nil, domain.ErrUserSuspended
 	}
 
+	return s.completePrivilegedOTPLogin(ctx, req, user, isNewUser, ipAddress, userAgent, "admin")
+}
+
+func (s *AuthServiceImpl) VerifyPortalOTP(ctx context.Context, req *dto.AdminVerifyOTPRequest, ipAddress, userAgent string) (*dto.VerifyOTPResponse, error) {
+	if s.config.Server.AdminSignupSecret == "" {
+		return nil, domain.ErrAdminSignupNotAllowed
+	}
+
+	if req.AdminSecret != s.config.Server.AdminSignupSecret {
+		return nil, domain.ErrInvalidAdminSecret
+	}
+
+	req.PhoneNumber = util.NormalizePhoneNumber(req.PhoneNumber)
+
+	exists, err := s.idempotencyRepo.Exists(ctx, req.IdempotencyKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check idempotency: %w", err)
+	}
+	if exists {
+		s.logger.Warn("duplicate portal OTP verification request",
+			zap.String("idempotency_key", req.IdempotencyKey),
+		)
+		return nil, domain.ErrIdempotencyKeyExists
+	}
+
+	result, err := s.verifyProvider.CheckVerification(ctx, req.PhoneNumber, req.OTPCode)
+	if err != nil {
+		s.logger.Error("portal verification check failed",
+			zap.String("phone", req.PhoneNumber),
+			zap.Error(err),
+		)
+		return nil, domain.ErrInvalidOTP
+	}
+
+	if !result.Success {
+		s.logger.Warn("invalid portal OTP attempt",
+			zap.String("phone", req.PhoneNumber),
+			zap.String("status", result.Status),
+		)
+		return nil, domain.ErrInvalidOTP
+	}
+
+	user, isNewUser, err := s.getPortalUser(ctx, req.PhoneNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	if user.IsSuspended {
+		return nil, domain.ErrUserSuspended
+	}
+
+	return s.completePrivilegedOTPLogin(ctx, req, user, isNewUser, ipAddress, userAgent, "portal")
+}
+
+func (s *AuthServiceImpl) completePrivilegedOTPLogin(ctx context.Context, req *dto.AdminVerifyOTPRequest, user *domain.User, isNewUser bool, ipAddress, userAgent, operation string) (*dto.VerifyOTPResponse, error) {
 	// Store idempotency key
 	idempotencyKey := &domain.IdempotencyKey{
 		Key:         req.IdempotencyKey,
-		Operation:   "verify_admin_otp",
+		Operation:   "verify_" + operation + "_otp",
 		RequestHash: generateRequestHash(req.PhoneNumber, req.VerificationID, req.OTPCode),
 	}
 	if err := s.idempotencyRepo.Create(ctx, idempotencyKey); err != nil {
@@ -435,6 +493,34 @@ func (s *AuthServiceImpl) getOrCreateAdminUser(ctx context.Context, phoneNumber 
 	}
 
 	return newUser, true, nil
+}
+
+func (s *AuthServiceImpl) getPortalUser(ctx context.Context, phoneNumber string) (*domain.User, bool, error) {
+	user, err := s.userRepo.GetByPhoneNumber(ctx, phoneNumber)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return nil, false, domain.ErrUnauthorized
+		}
+		return nil, false, err
+	}
+
+	if user.CanAccessAdmin() {
+		return user, false, nil
+	}
+
+	staff, err := s.supportStaffRepo.GetByUserID(ctx, user.ID)
+	if err != nil {
+		if errors.Is(err, domain.ErrSupportStaffNotFound) {
+			return nil, false, domain.ErrUnauthorized
+		}
+		return nil, false, err
+	}
+
+	if !staff.IsActive {
+		return nil, false, domain.ErrUnauthorized
+	}
+
+	return user, false, nil
 }
 
 func (s *AuthServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.RefreshTokenResponse, error) {

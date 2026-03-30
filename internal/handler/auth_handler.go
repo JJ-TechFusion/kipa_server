@@ -29,6 +29,7 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup, authMiddleware *mi
 		auth.POST("/otp/resend", h.ResendOTP)
 		auth.POST("/otp/verify", h.VerifyOTP)
 		auth.POST("/admin/otp/verify", h.VerifyAdminOTP)
+		auth.POST("/portal/otp/verify", h.VerifyPortalOTP)
 		auth.POST("/token/refresh", h.RefreshToken)
 		auth.POST("/logout", authMiddleware.RequireAuth(), h.Logout)
 		auth.GET("/me", authMiddleware.RequireAuth(), h.Me)
@@ -94,6 +95,22 @@ func (h *AuthHandler) VerifyAdminOTP(c *gin.Context) {
 	}
 
 	response, err := h.authService.VerifyAdminOTP(c.Request.Context(), &req, getClientIP(c), getUserAgent(c))
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+
+	util.Success(c, http.StatusOK, response)
+}
+
+func (h *AuthHandler) VerifyPortalOTP(c *gin.Context) {
+	var req dto.AdminVerifyOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.ValidationError(c, err)
+		return
+	}
+
+	response, err := h.authService.VerifyPortalOTP(c.Request.Context(), &req, getClientIP(c), getUserAgent(c))
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -208,6 +225,8 @@ func mapErrorToResponse(err error) (int, string, string) {
 		return http.StatusNotFound, domain.CodeUserNotFound, "User not found"
 	case errors.Is(err, domain.ErrUserSuspended):
 		return http.StatusForbidden, domain.CodeUserSuspended, "Account is suspended"
+	case errors.Is(err, domain.ErrUnauthorized):
+		return http.StatusForbidden, "FORBIDDEN", "Portal access required"
 	case errors.Is(err, domain.ErrIdempotencyKeyExists):
 		return http.StatusConflict, "DUPLICATE_REQUEST", "This request has already been processed"
 	case errors.Is(err, domain.ErrSMSDeliveryFailed):
