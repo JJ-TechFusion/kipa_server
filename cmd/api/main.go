@@ -88,6 +88,7 @@ func main() {
 	driverDeliveryRepo := postgres.NewDriverDeliveryRepo(pgClient.DB)
 	driverDeliveryEventRepo := postgres.NewDriverDeliveryEventRepo(pgClient.DB)
 	driverOfferRepo := postgres.NewDriverOfferRepo(pgClient.DB)
+	supportStaffRepo := postgres.NewSupportStaffRepo(pgClient.DB)
 	deviceTokenRepo := postgres.NewDeviceTokenRepo(pgClient.DB)
 	notificationLogRepo := postgres.NewNotificationLogRepo(pgClient.DB)
 	chatRepo := postgres.NewChatMessageRepo(pgClient.DB)
@@ -321,7 +322,6 @@ func main() {
 	)
 	supportConversationRepo := postgres.NewSupportConversationRepo(pgClient.DB)
 	supportMessageRepo := postgres.NewSupportMessageRepo(pgClient.DB)
-	supportStaffRepo := postgres.NewSupportStaffRepo(pgClient.DB)
 	telegramClient := telegram.NewClient(&telegram.Config{
 		BotToken: cfg.Telegram.BotToken,
 		ChatID:   cfg.Telegram.ChatID,
